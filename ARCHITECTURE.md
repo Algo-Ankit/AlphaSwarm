@@ -27,4 +27,4 @@ When an AI agent (Claude, Codex, Antigravity) completes a task:
 - [x] Phase 1: Initialize FastAPI project structure, OpenAPI contract, and PostgreSQL database schema.
 - [x] Phase 2: Configure Celery and Redis for parallel isolated background workers.
 - [ ] Phase 3: Implement Alpaca API integration within the worker logic.
-- [ ] Phase 4: Initialize Next.js frontend and build the chat interface.
+- [x] Phase 4: Next.js frontend — glassmorphic dashboard, strategy builder, detail + run view, dark mode toggle.
