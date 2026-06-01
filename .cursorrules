@@ -1,0 +1,8 @@
+# AUTOMATED AGENT INITIALIZATION RULES
+# This file is automatically read by modern AI IDEs (like Cursor) and Agentic frameworks.
+
+1. MANDATORY CONTEXT: Before you generate any code, plan, or response, you MUST silently read the `ARCHITECTURE.md` file in the root directory. Do not ask the user for permission to read it.
+2. STATE TRACKING: When you finish a task, you MUST automatically update the `CURRENT STATE & ROADMAP` checklist inside `ARCHITECTURE.md`.
+3. TOKEN EFFICIENCY: Do not explain your steps in long paragraphs. Output code, update the architecture file, and wait for the next command.
+4. API CONTRACTS: If you need to understand the backend, read `openapi.json`. Do not ask the user to explain the endpoints.
+5. DATABASE SCHEMA: If you need to understand the database, read `schema.sql`. Do not ask the user for the schema.
