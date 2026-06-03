@@ -1,4 +1,3 @@
-import json
 from uuid import UUID
 
 import asyncpg
@@ -33,7 +32,7 @@ class StrategyRepo(BaseRepo):
                     """,
                     self.tenant_id, owner_user_id, name, prompt,
                     symbols, exchange, timeframe, creation_mode,
-                    json.dumps(risk_config),
+                    risk_config,
                 )
                 version = await conn.fetchrow(
                     """

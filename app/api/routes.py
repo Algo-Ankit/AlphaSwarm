@@ -24,7 +24,10 @@ router = APIRouter(prefix="/v1", tags=["strategies"])
 
 
 def _record_to_response(record: asyncpg.Record) -> StrategyResponse:
+    import json as _json
     risk_raw = record["risk_config"]
+    if isinstance(risk_raw, str):
+        risk_raw = _json.loads(risk_raw)
     risk = StrategyRiskConfig.model_validate(risk_raw if isinstance(risk_raw, dict) else {})
     return StrategyResponse(
         id=str(record["id"]),
