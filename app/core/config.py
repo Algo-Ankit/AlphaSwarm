@@ -47,9 +47,10 @@ class Settings(BaseSettings):
     news_api_key: str = ""
     alpha_vantage_key: str = ""
 
-    # JWT (RS256) - stored as base64-encoded PEM
+    # JWT — RS256 for production (base64-encoded PEM), HS256 fallback for dev
     jwt_private_key_base64: str = ""
     jwt_public_key_base64: str = ""
+    jwt_secret_key: str = "dev-secret-key-change-in-production"  # HS256 dev fallback
     jwt_access_token_expire_minutes: int = 15
     jwt_refresh_token_expire_days: int = 30
 

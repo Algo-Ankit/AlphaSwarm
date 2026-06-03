@@ -937,15 +937,16 @@ When paid tiers launch, founding members get 3 months free on the Trader plan.
   - [x] `app/worker/beat_tasks.py` — stub tasks (implemented in Phase 3/4)
   - [x] Deployment architecture documented (Hetzner + Cloudflare + Vercel)
   - [x] Monetization model documented (BYOB + Founding Member pricing)
-- [ ] **Phase 2 — DB Layer + Auth (START HERE)**
-  - [ ] `alembic/` — migration setup, initial migration from schema.sql
-  - [ ] `app/db/connection.py` — asyncpg pool, wired into lifespan
-  - [ ] `app/db/base_repo.py` — base repository with tenant_id filter enforcement
-  - [ ] `app/db/repositories/` — strategies, runs, orders, positions, users
-  - [ ] `app/services/strategy_store.py` — replace in-memory store with DB repo
-  - [ ] `app/api/auth.py` — register, login, refresh, logout endpoints
-  - [ ] Auth middleware — JWT validation on all protected routes
-  - [ ] `tenants.plan` supports: founding_member | trader | pro | quant
+- [x] **Phase 2 — DB Layer + Auth**
+  - [x] `alembic/` — migration setup + initial migration from schema.sql
+  - [x] `app/db/connection.py` — asyncpg pool wired into lifespan
+  - [x] `app/db/base_repo.py` — base repository with tenant_id filter enforcement
+  - [x] `app/db/repositories/` — users, strategies, runs
+  - [x] `app/api/routes.py` — strategy routes migrated from in-memory to DB repos
+  - [x] `app/api/auth.py` — register, login, refresh, logout endpoints (RS256/HS256)
+  - [x] `app/api/deps.py` — JWT dependency injection (CurrentUser)
+  - [x] `app/services/auth.py` — JWT sign/verify + bcrypt + refresh token service
+  - [x] `tenants.plan` supports: founding_member | trader | pro | quant
 - [ ] Phase 3 — Market Data & Intelligence
   - [ ] `app/domain/market_data.py` — canonical Bar model (done)
   - [ ] `app/domain/market_hours.py` — exchange schedules (done)

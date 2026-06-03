@@ -12,7 +12,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE TABLE tenants (
     id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name         TEXT NOT NULL,
-    plan         TEXT NOT NULL DEFAULT 'starter', -- starter | pro | enterprise
+    plan         TEXT NOT NULL DEFAULT 'founding_member', -- founding_member | trader | pro | quant
     max_bots     INT  NOT NULL DEFAULT 5,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
