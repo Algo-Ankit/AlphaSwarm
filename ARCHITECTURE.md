@@ -966,11 +966,13 @@ When paid tiers launch, founding members get 3 months free on the Trader plan.
     - [x] `app/core/rate_limit.py` — JWT-aware slowapi key function; wired into main.py
     - [x] `app/ws/manager.py` — WebSocketManager + Redis pub/sub bridge (bars/portfolio/run channels)
     - [x] `app/api/ws.py` — /v1/ws/bars/{symbol}, /v1/ws/portfolio, /v1/ws/run/{run_id} with JWT auth + tenant ownership check + zombie connection cleanup
-  - [ ] Phase 3C — Intelligence Layer
-  - [ ] `app/services/forecaster.py` — Prophet + ARIMA ensemble, cached
-  - [ ] `app/services/news_intel.py` — NewsAPI + Alpha Vantage + Claude Haiku sentiment
-  - [ ] REST endpoints: /v1/market/forecast/{symbol}, /v1/market/news/{symbol}
-  - [ ] Celery Beat tasks: snapshot_portfolio, refresh_active_symbols_news, refresh_stale_forecasts
+  - [x] **Phase 3C — Intelligence Layer** ✓ 2026-06-04
+    - [x] `app/db/repositories/intelligence.py` — ForecastRepo + NewsRepo (not tenant-scoped)
+    - [x] `app/services/forecaster.py` — Prophet + ARIMA ensemble; asyncio.to_thread for CPU work; 1hr cache
+    - [x] `app/services/news_intel.py` — NewsAPI (primary) + Alpha Vantage (secondary) + Claude Haiku batch sentiment
+    - [x] `GET /v1/market/forecast/{symbol}` — ?horizon=5&exchange=NASDAQ; 60/min rate limited
+    - [x] `GET /v1/market/news/{symbol}` — ?days=7&limit=20; 60/min rate limited
+    - [x] Beat tasks implemented: `refresh_active_symbols_news` (hourly :00), `refresh_stale_forecasts` (hourly :30)
 - [ ] Phase 4 — Execution Engine
   - [ ] `app/domain/base_strategy.py` — BaseStrategy + StrategyContext (multi-symbol support)
   - [ ] `app/domain/risk.py` — expand with market hours check + position limits
