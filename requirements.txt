@@ -27,6 +27,7 @@ redis>=5.2.0                  # Redis client
 # Config & Validation
 # ──────────────────────────────────────────
 pydantic>=2.10.0
+pydantic[email]>=2.10.0          # EmailStr in auth models requires email-validator
 pydantic-settings>=2.6.0
 
 # ──────────────────────────────────────────
