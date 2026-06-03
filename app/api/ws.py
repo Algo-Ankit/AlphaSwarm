@@ -56,7 +56,10 @@ async def ws_bars(
                     await websocket.send_json({"type": "bar", **bars[-1].to_dict()})
             except Exception as exc:
                 logger.warning("push_latest failed for %s %s — closing connection: %s", symbol, timeframe, exc)
-                await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+                try:
+                    await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+                except Exception:
+                    pass
                 break
             await asyncio.sleep(_BAR_PUSH_INTERVAL)
 
@@ -69,14 +72,24 @@ async def ws_bars(
                     websocket.receive_text(), timeout=_HEARTBEAT_TIMEOUT
                 )
                 if msg == "ping":
-                    await websocket.send_json({"type": "pong"})
+                    try:
+                        await websocket.send_json({"type": "pong"})
+                    except Exception:
+                        break
             except asyncio.TimeoutError:
-                await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
+                try:
+                    await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
+                except Exception:
+                    pass
                 break
     except WebSocketDisconnect:
         pass
     finally:
         push_task.cancel()
+        try:
+            await push_task
+        except asyncio.CancelledError:
+            pass
         await ws_manager.disconnect(websocket, channel)
 
 
@@ -91,7 +104,13 @@ async def ws_portfolio(
         return
 
     tenant_id = payload.get("tenant_id", "")
-    channel = f"portfolio:{tenant_id}"
+    try:
+        tenant_uuid = _uuid.UUID(tenant_id)
+    except ValueError:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    channel = f"portfolio:{tenant_uuid}"
     await ws_manager.connect(websocket, channel)
 
     try:
@@ -151,9 +170,15 @@ async def ws_run(
                     websocket.receive_text(), timeout=_HEARTBEAT_TIMEOUT
                 )
                 if msg == "ping":
-                    await websocket.send_json({"type": "pong"})
+                    try:
+                        await websocket.send_json({"type": "pong"})
+                    except Exception:
+                        break
             except asyncio.TimeoutError:
-                await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
+                try:
+                    await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
+                except Exception:
+                    pass
                 break
     except WebSocketDisconnect:
         pass

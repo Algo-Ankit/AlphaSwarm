@@ -947,24 +947,25 @@ When paid tiers launch, founding members get 3 months free on the Trader plan.
   - [x] `app/api/deps.py` — JWT dependency injection (CurrentUser)
   - [x] `app/services/auth.py` — JWT sign/verify + bcrypt + refresh token service
   - [x] `tenants.plan` supports: founding_member | trader | pro | quant
-- [ ] Phase 3 — Market Data & Intelligence
-  - [x] **Phase 3A — Broker Integration (BYOB)**
-    - [x] `app/services/broker_crypto.py` — Fernet AES-256 encrypt/decrypt for API keys
+- [x] Phase 3 — Market Data & Intelligence (3A + 3B QA complete, 3C pending)
+  - [x] **Phase 3A — Broker Integration (BYOB)** ✓ QA verified 2026-06-03
+    - [x] `app/services/broker_crypto.py` — Fernet AES-256 + PBKDF2HMAC key derivation (390k iterations); no hardcoded fallback; lru_cache
     - [x] `app/db/repositories/brokers.py` — BrokerRepo (tenant-scoped upsert/list/delete)
-    - [x] `app/api/brokers.py` — POST /v1/brokers, GET /v1/brokers, DELETE /v1/brokers/{id}, PATCH /v1/brokers/{id}/test
+    - [x] `app/api/brokers.py` — POST /v1/brokers, GET /v1/brokers, DELETE /v1/brokers/{id}, PATCH /v1/brokers/{id}/test; URL validation; Alpaca account status check
     - [x] Alpaca connection validated via live API ping before storing credentials
-    - [x] `frontend/src/app/settings/brokers/page.tsx` — broker management UI (connect, list, test, remove)
+    - [x] `frontend/src/app/settings/brokers/page.tsx` — broker management UI (connect, list, test, remove); delete error banner; live-trading confirmation
     - [x] Sidebar Settings link active → /settings/brokers
   - [x] `app/domain/market_data.py` — canonical Bar model + Exchange/Timeframe enums
   - [x] `app/domain/market_hours.py` — exchange schedules, is_market_open, get_session_status
-  - [x] **Phase 3B — Market Data Service**
-    - [x] `app/db/repositories/market_data.py` — MarketDataRepo (bulk upsert, get_bars, latest_bar_time)
-    - [x] `app/services/market_data.py` — Alpaca Data API (US/Crypto) + yfinance (Indian/global), normalizes to Bar, DB cache with staleness check
-    - [x] `app/services/indicators.py` — pandas-ta: rsi, macd, bb, ema, sma, vwap, atr, stoch, roc — parameterized spec notation
-    - [x] `app/services/symbol_search.py` — static symbol DB (NASDAQ/NYSE/NSE/BSE/Crypto), prefix+name search
-    - [x] `app/api/market.py` — GET /v1/market/bars/{symbol}, /v1/market/indicators/{symbol}, /v1/market/search
+  - [x] **Phase 3B — Market Data Service** ✓ QA verified 2026-06-03
+    - [x] `app/db/repositories/market_data.py` — MarketDataRepo (bulk upsert, get_bars, latest_bar_time); Decimal precision; UTC-aware timestamps
+    - [x] `app/services/market_data.py` — Alpaca (primary) + yfinance fallback; 4h aggregation from 1h; stale cache fallback; full-history upsert (limit applied after cache write, not before)
+    - [x] `app/services/indicators.py` — pandas-ta: rsi, macd, bb, ema, sma, vwap, atr, stoch, roc; regex-based spec parser (multi-arg indicators correct)
+    - [x] `app/services/symbol_search.py` — static symbol DB (NASDAQ/NYSE/NSE/BSE/Crypto), prefix+name search; 15 BSE + 20 NSE symbols
+    - [x] `app/api/market.py` — GET /v1/market/bars/{symbol}, /v1/market/indicators/{symbol}, /v1/market/search; 60/min rate limiting per JWT user
+    - [x] `app/core/rate_limit.py` — JWT-aware slowapi key function; wired into main.py
     - [x] `app/ws/manager.py` — WebSocketManager + Redis pub/sub bridge (bars/portfolio/run channels)
-    - [x] `app/api/ws.py` — /v1/ws/bars/{symbol}, /v1/ws/portfolio, /v1/ws/run/{run_id} with JWT auth + heartbeat
+    - [x] `app/api/ws.py` — /v1/ws/bars/{symbol}, /v1/ws/portfolio, /v1/ws/run/{run_id} with JWT auth + tenant ownership check + zombie connection cleanup
   - [ ] Phase 3C — Intelligence Layer
   - [ ] `app/services/forecaster.py` — Prophet + ARIMA ensemble, cached
   - [ ] `app/services/news_intel.py` — NewsAPI + Alpha Vantage + Claude Haiku sentiment
@@ -995,7 +996,7 @@ When paid tiers launch, founding members get 3 months free on the Trader plan.
   - [ ] Notification panel (real-time + history)
   - [ ] Market hours status badge throughout
 - [ ] Phase 7 — Production Hardening
-  - [ ] slowapi rate limiting on all endpoints
+  - [x] slowapi rate limiting on all market endpoints (60/min per JWT user) — done in Phase 3B
   - [ ] Sentry error + performance monitoring
   - [ ] Live trading gate (Alpaca live key validation before enabling)
   - [ ] Email notification delivery (SendGrid)

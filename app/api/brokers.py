@@ -26,7 +26,7 @@ def _validate_url(url: str, broker: str) -> None:
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             raise ValueError()
-    except Exception:
+    except ValueError:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Invalid base_url for {broker}: must be a valid http/https URL",
@@ -78,18 +78,22 @@ async def _test_alpaca(api_key: str, api_secret: str, base_url: str) -> TestConn
         return TestConnectionResponse(ok=False, message=f"Alpaca returned HTTP {resp.status_code}")
     except httpx.TimeoutException:
         return TestConnectionResponse(ok=False, message="Connection timed out — check the base URL")
-    except Exception as exc:
-        return TestConnectionResponse(ok=False, message=f"Connection error: {str(exc)[:120]}")
+    except httpx.RequestError as exc:
+        return TestConnectionResponse(ok=False, message=f"Network error connecting to Alpaca: {exc}")
+    except Exception:
+        logger.exception("Unexpected error in Alpaca connection test")
+        return TestConnectionResponse(ok=False, message="Internal server error during connection test")
 
 
-def _row_to_response(row: asyncpg.Record, key_plain: str) -> BrokerConnectionResponse:
+def _row_to_response(row: asyncpg.Record, key_plain: str | None) -> BrokerConnectionResponse:
+    key_preview = f"••••{key_plain[-4:]}" if key_plain and len(key_plain) >= 4 else "••••[INVALID]"
     return BrokerConnectionResponse(
         id=str(row["id"]),
         broker=row["broker"],
         base_url=row["base_url"],
         is_paper=row["is_paper"],
         is_active=row["is_active"],
-        key_preview=f"••••{key_plain[-4:]}",
+        key_preview=key_preview,
         created_at=row["created_at"].isoformat(),
         updated_at=row["updated_at"].isoformat(),
     )
@@ -139,7 +143,7 @@ async def list_brokers(
                 "BROKER_KEY_ENCRYPTION_SECRET may have changed",
                 row["id"], current_user.tenant_id,
             )
-            key_plain = "????"
+            key_plain = None
         results.append(_row_to_response(row, key_plain))
     return results
 

@@ -121,6 +121,9 @@ async def _fetch_alpaca(
 
     def _sync() -> list[Bar]:
         tf = _alpaca_timeframe(timeframe)
+        # Always fetch at least 500 bars so cache is useful for indicator computation;
+        # get_bars applies the caller's limit after upserting.
+        fetch_limit = max(limit, 500)
         if _is_crypto(exchange):
             from alpaca.data.historical import CryptoHistoricalDataClient
             from alpaca.data.requests import CryptoBarsRequest
@@ -130,7 +133,7 @@ async def _fetch_alpaca(
                 timeframe=tf,
                 start=start,
                 end=end,
-                limit=limit,
+                limit=fetch_limit,
             )
             resp = client.get_crypto_bars(req)
         else:
@@ -143,7 +146,7 @@ async def _fetch_alpaca(
                 timeframe=tf,
                 start=start,
                 end=end,
-                limit=limit,
+                limit=fetch_limit,
                 adjustment=Adjustment.ALL,
             )
             resp = client.get_stock_bars(req)
@@ -217,7 +220,7 @@ async def _fetch_yfinance(
         if is_4h_agg:
             bars = _aggregate_to_4h(bars, symbol, exchange)
 
-        return bars[-limit:]
+        return bars
 
     try:
         return await asyncio.to_thread(_sync)

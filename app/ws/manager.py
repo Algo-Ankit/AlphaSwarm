@@ -64,8 +64,8 @@ class WebSocketManager:
                 try:
                     data = json.loads(message["data"])
                     await self.broadcast(channel, data)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.error("Error processing Redis pub/sub message on channel %s: %s", channel, exc)
         finally:
             await pubsub.punsubscribe(channel_pattern)
 

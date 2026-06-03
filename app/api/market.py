@@ -100,7 +100,7 @@ async def get_indicators(
             detail=f"No market data found for {symbol} ({exchange})",
         )
 
-    values = ind_svc.compute_indicators(bars, indicators)
+    values = await ind_svc.compute_indicators(bars, indicators)
     return {
         "symbol":     symbol.upper(),
         "exchange":   exchange.upper(),

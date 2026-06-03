@@ -55,12 +55,22 @@ def _last(series) -> float | None:
     return float(v) if pd.notna(v) else None
 
 
-def compute_indicators(bars: list[Bar], specs: list[str] | str) -> dict[str, float | None]:
+import asyncio
+
+async def compute_indicators(bars: list[Bar], specs: list[str] | str) -> dict[str, float | None]:
     """
     Compute all requested indicators on the provided bars.
     `specs` may be a list of strings or a single comma-separated string.
     Returns values for the most recent (last) bar only.
+    Runs the synchronous CPU-bound pandas logic in a thread pool.
     """
+    if not bars:
+        return {}
+        
+    return await asyncio.to_thread(_compute_indicators_sync, bars, specs)
+
+def _compute_indicators_sync(bars: list[Bar], specs: list[str] | str) -> dict[str, float | None]:
+    """Synchronous core logic executed in a worker thread."""
     if not bars:
         return {}
     if isinstance(specs, str):
