@@ -121,7 +121,8 @@
 
   .dark .glass-sidebar {
     transform: translateZ(0);
-    background: rgba(9, 11, 23, 0.97);
+    /* Slightly translucent so the violet pill's glow bleeds through naturally */
+    background: rgba(9, 11, 23, 0.94);
     border-right: 1px solid rgba(255, 255, 255, 0.05);
   }
 

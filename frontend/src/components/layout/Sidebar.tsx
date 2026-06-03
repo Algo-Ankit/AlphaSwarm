@@ -1,11 +1,16 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Zap, Activity, Settings, TrendingUp, ChevronRight } from 'lucide-react'
+import { useEffect, useRef, useState, useCallback } from 'react'
+import { motion } from 'framer-motion'
+import {
+  LayoutDashboard, Zap, Activity, Settings, TrendingUp, ChevronRight,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const NAV_SECTIONS = [
   {
+    id: 'trading',
     label: 'Trading',
     items: [
       { href: '/',               icon: LayoutDashboard, label: 'Dashboard'  },
@@ -14,6 +19,7 @@ const NAV_SECTIONS = [
     ],
   },
   {
+    id: 'account',
     label: 'Account',
     items: [
       { href: '/settings/brokers', icon: Settings, label: 'Settings' },
@@ -21,18 +27,21 @@ const NAV_SECTIONS = [
   },
 ]
 
-function NavItem({ href, icon: Icon, label, soon }: {
-  href: string; icon: typeof Zap; label: string; soon?: boolean
+/* ── Item ────────────────────────────────────────────────────────────────── */
+function NavItem({
+  href, icon: Icon, label, soon, active,
+}: {
+  href: string; icon: typeof Zap; label: string; soon?: boolean; active?: boolean
 }) {
-  const path = usePathname()
-  const active = path === href || (href !== '/' && path.startsWith(href.replace('/new', '')))
-
   if (soon) {
     return (
-      <div className="flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-400 dark:text-zinc-600 cursor-not-allowed select-none">
+      <div className="relative flex items-center gap-3 px-4 py-2.5 text-sm
+        text-zinc-400 dark:text-zinc-600 cursor-not-allowed select-none rounded-xl">
         <Icon className="w-[17px] h-[17px] flex-shrink-0" />
-        <span className="flex-1">{label}</span>
-        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full border border-zinc-200 dark:border-zinc-800 text-zinc-400 dark:text-zinc-600 tracking-wider uppercase">
+        <span className="flex-1 leading-none">{label}</span>
+        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full border
+          border-zinc-200 dark:border-zinc-800 text-zinc-400 dark:text-zinc-600
+          tracking-wider uppercase">
           Soon
         </span>
       </div>
@@ -42,90 +51,179 @@ function NavItem({ href, icon: Icon, label, soon }: {
   return (
     <Link
       href={href}
+      data-active={active ? 'true' : undefined}
       className={cn(
-        'group flex items-center gap-3 px-4 py-2.5 text-sm transition-all duration-150 select-none relative',
+        'relative z-10 flex items-center gap-3 px-4 py-2.5 text-sm rounded-xl',
+        'transition-colors duration-150 select-none',
         active
-          ? [
-              'rounded-xl font-semibold',
-              'bg-violet-50 text-violet-700',
-              'dark:bg-violet-500/12 dark:text-violet-300',
-              // Glow ring visible in dark
-              'dark:shadow-[inset_0_0_0_1px_rgba(139,92,246,0.20)]',
-            ]
-          : [
-              'rounded-xl',
-              'text-zinc-600 dark:text-zinc-400',
-              'hover:bg-zinc-100 dark:hover:bg-white/[0.05]',
-              'hover:text-zinc-900 dark:hover:text-zinc-100',
-            ],
+          ? 'text-white font-semibold'
+          : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100',
       )}
     >
-      {/* Active left bar */}
-      {active && (
-        <span
-          aria-hidden
-          className={cn(
-            'absolute left-0 top-[6px] bottom-[6px] w-[3px] rounded-r-full',
-            'bg-violet-600 dark:bg-violet-400',
-            'shadow-[2px_0_10px_rgba(124,58,237,0.55)] dark:shadow-[2px_0_12px_rgba(139,92,246,0.7)]',
-          )}
-        />
-      )}
-
-      <Icon className={cn('w-[17px] h-[17px] flex-shrink-0 transition-transform duration-150', active ? 'scale-110' : 'group-hover:scale-105')} />
+      <Icon className={cn(
+        'w-[17px] h-[17px] flex-shrink-0 transition-transform duration-200',
+        active ? 'scale-110' : '',
+      )} />
       <span className="flex-1 leading-none">{label}</span>
-      {active && <ChevronRight className="w-3.5 h-3.5 opacity-40 flex-shrink-0" />}
+      {active && <ChevronRight className="w-3.5 h-3.5 opacity-60 flex-shrink-0" />}
     </Link>
   )
 }
 
+/* ── Pill ────────────────────────────────────────────────────────────────── */
+function LiquidPill({ top, height }: { top: number; height: number }) {
+  return (
+    <motion.div
+      aria-hidden
+      layout
+      animate={{ top, height }}
+      transition={{ type: 'spring', stiffness: 420, damping: 36, mass: 0.8 }}
+      style={{
+        position: 'absolute',
+        insetInline: 0,
+        borderRadius: 12,
+        pointerEvents: 'none',
+        zIndex: 0,
+        overflow: 'hidden',
+        /* Base — light mode: solid violet button feel */
+        background: 'linear-gradient(135deg, #6D28D9 0%, #7C3AED 100%)',
+        boxShadow: [
+          '0 4px 20px rgba(109,40,217,0.40)',
+          '0 0 0 1px rgba(109,40,217,0.35)',
+          'inset 0 1px 0 rgba(255,255,255,0.22)',
+        ].join(', '),
+      }}
+    >
+      {/* Shimmer top highlight */}
+      <div style={{
+        position: 'absolute',
+        top: 0, left: '12%', right: '12%', height: 1,
+        background: 'linear-gradient(90deg,transparent,rgba(255,255,255,0.6),transparent)',
+      }} />
+      {/* Subtle inner glow */}
+      <div style={{
+        position: 'absolute', inset: 0,
+        background: 'linear-gradient(180deg,rgba(255,255,255,0.09) 0%,transparent 55%)',
+      }} />
+      {/* Left accent bar — glowing white edge */}
+      <div style={{
+        position: 'absolute',
+        left: 0, top: '18%', bottom: '18%', width: 3,
+        borderRadius: '0 3px 3px 0',
+        background: 'rgba(255,255,255,0.95)',
+        boxShadow: '3px 0 14px rgba(255,255,255,0.7)',
+      }} />
+    </motion.div>
+  )
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
 export function Sidebar() {
+  const pathname = usePathname()
+
+  /* One container ref per section — pill is local to each group */
+  const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const [pills, setPills] = useState<Record<string, { top: number; height: number } | null>>({})
+
+  const measure = useCallback(() => {
+    const next: Record<string, { top: number; height: number } | null> = {}
+    for (const section of NAV_SECTIONS) {
+      const container = sectionRefs.current[section.id]
+      if (!container) { next[section.id] = null; continue }
+      const active = container.querySelector<HTMLElement>('[data-active="true"]')
+      if (!active) { next[section.id] = null; continue }
+      const cr = container.getBoundingClientRect()
+      const ar = active.getBoundingClientRect()
+      next[section.id] = {
+        top:    ar.top - cr.top,
+        height: ar.height,
+      }
+    }
+    setPills(next)
+  }, [])
+
+  useEffect(() => {
+    /* rAF lets the DOM settle after navigation before measuring */
+    const id = requestAnimationFrame(measure)
+    return () => cancelAnimationFrame(id)
+  }, [pathname, measure])
+
+  function isActive(href: string) {
+    if (href === '/') return pathname === '/'
+    return pathname.startsWith(href.replace('/new', ''))
+  }
+
   return (
     <aside className="fixed inset-y-0 left-0 w-[240px] flex flex-col glass-sidebar z-30">
 
-      {/* ── Logo ──────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 px-5 h-[62px] border-b border-black/[0.07] dark:border-white/[0.05]">
+      {/* ── Logo ─────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3 px-5 h-[62px]
+        border-b border-black/[0.07] dark:border-white/[0.05]">
         <div className="flex items-center justify-center w-8 h-8 rounded-lg flex-shrink-0
           bg-gradient-to-br from-violet-500 to-violet-700
-          shadow-[0_2px_14px_rgba(124,58,237,0.45)]">
+          shadow-[0_2px_14px_rgba(124,58,237,0.5)]">
           <TrendingUp className="w-4 h-4 text-white" />
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-bold text-zinc-900 dark:text-zinc-50 leading-none tracking-tight">AlphaSwarm</p>
+          <p className="text-sm font-bold text-zinc-900 dark:text-zinc-50 leading-none tracking-tight">
+            AlphaSwarm
+          </p>
           <div className="flex items-center gap-1.5 mt-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.7)]" />
-            <p className="text-[10px] font-medium text-zinc-400 dark:text-zinc-500 leading-none">Paper Mode</p>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500
+              shadow-[0_0_5px_rgba(16,185,129,0.8)]" />
+            <p className="text-[10px] font-medium text-zinc-400 dark:text-zinc-500 leading-none">
+              Paper Mode
+            </p>
           </div>
         </div>
       </div>
 
-      {/* ── Nav sections ─────────────────────────────────────────────── */}
-      <nav className="flex-1 py-3 overflow-y-auto" style={{ overflowX: 'visible' }}>
-        <div className="space-y-4 px-2">
-          {NAV_SECTIONS.map((section) => (
-            <div key={section.label}>
-              <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-600 uppercase tracking-[0.12em] px-4 pb-1">
-                {section.label}
-              </p>
-              <div className="space-y-0.5">
-                {section.items.map((item) => <NavItem key={item.href} {...item} />)}
+      {/* ── Navigation ───────────────────────────────────────────── */}
+      <nav className="flex-1 py-4 overflow-y-auto" style={{ scrollbarWidth: 'none' as const }}>
+        <div className="px-3 space-y-5">
+          {NAV_SECTIONS.map((section) => {
+            const pill = pills[section.id]
+            const hasPill = pill !== null && pill !== undefined
+
+            return (
+              <div key={section.id}>
+                <p className="text-[10px] font-bold uppercase tracking-[0.12em] px-4 pb-2
+                  text-zinc-400 dark:text-zinc-600">
+                  {section.label}
+                </p>
+
+                {/* Items + floating pill */}
+                <div
+                  className="relative"
+                  ref={(el) => { sectionRefs.current[section.id] = el }}
+                >
+                  {hasPill && <LiquidPill top={pill.top} height={pill.height} />}
+
+                  <div className="space-y-0.5">
+                    {section.items.map((item) => (
+                      <NavItem
+                        key={item.href}
+                        {...item}
+                        active={!item.soon && isActive(item.href)}
+                      />
+                    ))}
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </nav>
 
-      {/* ── User footer ──────────────────────────────────────────────── */}
+      {/* ── User footer ──────────────────────────────────────────── */}
       <div className="px-3 pb-3 pt-2 border-t border-black/[0.07] dark:border-white/[0.05]">
-        <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl
-          hover:bg-zinc-100 dark:hover:bg-white/[0.05]
-          transition-colors cursor-pointer group">
-          <div className="w-8 h-8 rounded-full flex-shrink-0
+        <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer group
+          hover:bg-zinc-100 dark:hover:bg-white/[0.05] transition-colors">
+          <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center
             bg-gradient-to-br from-violet-400 to-violet-600
-            flex items-center justify-center
             text-[11px] font-bold text-white
             shadow-[0_2px_10px_rgba(124,58,237,0.35)]
-            group-hover:shadow-[0_2px_14px_rgba(124,58,237,0.5)]
+            group-hover:shadow-[0_2px_16px_rgba(124,58,237,0.55)]
             transition-shadow">
             A
           </div>
