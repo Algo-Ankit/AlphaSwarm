@@ -117,6 +117,11 @@ async def _fetch_alpaca(
     api_key = _settings.alpaca_api_key
     secret_key = _settings.alpaca_secret_key
     if not api_key or not secret_key:
+        logger.warning(
+            "Alpaca API keys not configured — falling back to yfinance for %s %s %s. "
+            "Set ALPACA_API_KEY and ALPACA_SECRET_KEY for real-time US market data.",
+            symbol, exchange, timeframe,
+        )
         return []
 
     def _sync() -> list[Bar]:

@@ -63,8 +63,8 @@ class MarketState:
     exchange: str
     is_open: bool
     session_status: str        # pre_market | open | after_hours | closed
-    today_executed_notional: float = 0.0
-    total_open_position_value: float = 0.0
+    today_executed_notional: Decimal = field(default_factory=lambda: Decimal("0"))
+    total_open_position_value: Decimal = field(default_factory=lambda: Decimal("0"))
 
 
 # yfinance symbol suffixes for Indian markets

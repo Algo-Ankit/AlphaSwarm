@@ -3,10 +3,12 @@ Centralized risk verification. Called before EVERY broker API call.
 This function is the safety wall. It must never be bypassed.
 Adding a new check: add it here, not in strategy code.
 """
+from decimal import Decimal
+
 from app.core.config import Settings, get_settings
 from app.domain.market_data import MarketState
 from app.domain.market_hours import is_market_open
-from app.domain.models import OrderIntent, RiskCheckResult, StrategyRiskConfig
+from app.domain.models import OrderIntent, OrderSide, RiskCheckResult, StrategyRiskConfig
 
 
 def verify_order_intent(
@@ -49,14 +51,14 @@ def verify_order_intent(
         )
 
     # ── Check 3: Symbol allowed by strategy ──────────────────────────────────
-    if strategy_risk.allowed_symbols:
-        allowed = {s.upper() for s in strategy_risk.allowed_symbols}
-        if symbol not in allowed:
-            return RiskCheckResult(
-                approved=False,
-                reason=f"{symbol} is not in this strategy's allowed symbols list.",
-                order_notional=notional,
-            )
+    # Empty allowed_symbols means no symbols are permitted (not "all symbols").
+    allowed = {s.upper() for s in strategy_risk.allowed_symbols}
+    if symbol not in allowed:
+        return RiskCheckResult(
+            approved=False,
+            reason=f"{symbol} is not in this strategy's allowed symbols list.",
+            order_notional=notional,
+        )
 
     # ── Check 4: Order notional ≤ strategy limit ─────────────────────────────
     if notional > strategy_risk.max_order_notional:
@@ -67,7 +69,9 @@ def verify_order_intent(
         )
 
     # ── Check 5: Today's executed notional ≤ daily limit ─────────────────────
-    if market_state is not None:
+    # Sell orders are risk-reducing — exempted from daily notional cap so positions
+    # can always be closed even after the daily buy limit is reached.
+    if market_state is not None and order.side == OrderSide.buy:
         projected_daily = market_state.today_executed_notional + notional
         if projected_daily > strategy_risk.max_daily_notional:
             return RiskCheckResult(
@@ -80,10 +84,11 @@ def verify_order_intent(
             )
 
     # ── Check 6: Platform-level order notional cap ────────────────────────────
-    if notional > settings.default_max_order_notional:
+    platform_cap = Decimal(str(settings.default_max_order_notional))
+    if notional > platform_cap:
         return RiskCheckResult(
             approved=False,
-            reason=f"Order notional ${notional:.2f} exceeds platform-level cap ${settings.default_max_order_notional:.2f}.",
+            reason=f"Order notional ${notional:.2f} exceeds platform-level cap ${platform_cap:.2f}.",
             order_notional=notional,
         )
 

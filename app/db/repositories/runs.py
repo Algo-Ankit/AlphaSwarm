@@ -14,15 +14,25 @@ class RunRepo(BaseRepo):
         version_id: UUID | None,
         dry_run: bool,
     ) -> asyncpg.Record:
-        return await self.fetchrow(
+        # Defense-in-depth: INSERT only if strategy_id belongs to this tenant,
+        # preventing IDOR even if the API layer check is bypassed.
+        row = await self.fetchrow(
             """
             INSERT INTO strategy_runs
                 (tenant_id, strategy_id, version_id, dry_run, status)
-            VALUES ($1, $2, $3, $4, 'queued')
+            SELECT $1, $2, $3, $4, 'queued'
+            WHERE EXISTS (
+                SELECT 1 FROM strategies WHERE id = $2 AND tenant_id = $1
+            )
             RETURNING *
             """,
             self.tenant_id, strategy_id, version_id, dry_run,
         )
+        if row is None:
+            raise ValueError(
+                f"Strategy {strategy_id} not found or does not belong to tenant {self.tenant_id}"
+            )
+        return row
 
     async def mark_dispatched(self, run_id: UUID, celery_task_id: str) -> None:
         await self.execute(

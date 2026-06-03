@@ -1,8 +1,14 @@
 from datetime import datetime, timezone
+from decimal import Decimal
 from enum import Enum
+from typing import Annotated
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PlainSerializer
+
+# Decimal that serializes to float in JSON/dict-mode so DB JSON columns and
+# API responses receive numeric values, not strings.
+JsonDecimal = Annotated[Decimal, PlainSerializer(float, when_used="json")]
 
 
 def utc_now() -> datetime:
@@ -35,8 +41,8 @@ class OrderType(str, Enum):
 
 
 class StrategyRiskConfig(BaseModel):
-    max_order_notional: float = Field(default=1_000.0, gt=0)
-    max_daily_notional: float = Field(default=5_000.0, gt=0)
+    max_order_notional: JsonDecimal = Field(default=Decimal("1000"), gt=0)
+    max_daily_notional: JsonDecimal = Field(default=Decimal("5000"), gt=0)
     allowed_symbols: list[str] = Field(default_factory=lambda: ["SPY"])
     paper_trading_only: bool = True
 
@@ -97,21 +103,21 @@ class OrderIntent(BaseModel):
     symbol: str
     exchange: str = "NASDAQ"
     side: OrderSide
-    quantity: float = Field(gt=0)
+    quantity: JsonDecimal = Field(gt=0)
     order_type: OrderType = OrderType.market
-    estimated_price: float = Field(gt=0)
-    limit_price: float | None = None
+    estimated_price: JsonDecimal = Field(gt=0)
+    limit_price: JsonDecimal | None = None
     is_paper: bool = True  # Must be explicitly False to attempt live order
 
     @property
-    def estimated_notional(self) -> float:
+    def estimated_notional(self) -> Decimal:
         return self.quantity * self.estimated_price
 
 
 class RiskCheckResult(BaseModel):
     approved: bool
     reason: str
-    order_notional: float
+    order_notional: JsonDecimal
 
 
 class TaskStatusResponse(BaseModel):
