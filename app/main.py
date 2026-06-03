@@ -13,7 +13,6 @@ from app.db.connection import close_pool, create_pool, get_pool
 
 settings = get_settings()
 
-
 def _build_cors_origins() -> list[str]:
     if settings.is_production:
         raw = getattr(settings, "cors_origins", "")
@@ -23,6 +22,9 @@ def _build_cors_origins() -> list[str]:
         "http://127.0.0.1:3000",
         "http://localhost:3001",
     ]
+
+
+
 
 
 @asynccontextmanager

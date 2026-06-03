@@ -127,12 +127,12 @@ async def refresh_token(
     raw_refresh = create_refresh_token()
 
     # If this token was already rotated (rotated_to_hash is set) we are inside the
-    # grace window — return the already-issued replacement rather than creating a
-    # third token. This handles two browser tabs sending the same refresh token
-    # within the 45-second grace period.
+    # 45-second grace window — a second concurrent tab sent the same token that Tab A
+    # already rotated. Issue a brand-new R3 token with a full TTL so this tab does
+    # not end up holding the expiring R1 token (which dies when the grace period ends).
     if record["rotated_to_hash"]:
-        # Token is in grace period from a prior rotation — just issue a new access token.
-        # The replacement refresh token was already issued to the first request.
+        raw_refresh_for_tab = create_refresh_token()
+        await token_repo.create(record["user_id"], raw_refresh_for_tab, get_refresh_token_expiry())
         access_token = create_access_token(
             user_id=str(record["user_id"]),
             tenant_id=str(record["tenant_id"]),
@@ -141,7 +141,7 @@ async def refresh_token(
         )
         return TokenResponse(
             access_token=access_token,
-            refresh_token=body.refresh_token,  # same refresh token, still in grace window
+            refresh_token=raw_refresh_for_tab,  # full-TTL token, not the expiring R1
             user_id=str(record["user_id"]),
             tenant_id=str(record["tenant_id"]),
             email=record["email"],
