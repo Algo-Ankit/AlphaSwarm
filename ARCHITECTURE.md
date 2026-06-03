@@ -763,18 +763,124 @@ SENTRY_DSN            Sentry project DSN (optional in dev)
 
 ---
 
-## 21. Docker Compose Infrastructure
+## 21. Deployment Architecture
 
-`docker-compose.yml` is in the repo root. Runs:
-- `postgres:16` on port 5432
-- `redis:7-alpine` on port 6379
-- `adminer` on port 8080 (DB browser for dev)
+### Target Infrastructure: Hetzner Cloud + Cloudflare + Vercel
 
-Start local infra: `docker compose up -d`
-Run migrations: `alembic upgrade head`
-Start API: `uvicorn app.main:app --reload`
-Start worker: `celery -A app.core.celery_app worker -Q trading_tasks -c 4`
-Start beat: `celery -A app.core.celery_app beat`
+| Service | Provider | Cost | Why |
+|---|---|---|---|
+| API + Workers + DB + Redis | Hetzner CX32 (4 vCPU, 8GB RAM) | ~EUR 15/month | Best price/performance. Full control. Low latency. |
+| DDoS protection + SSL + CDN | Cloudflare (free tier) | Free | Terminates SSL before it hits the server. Hides origin IP. |
+| Frontend | Vercel | Free | Native Next.js deployment. Zero config. |
+| Managed DB (when needed) | Supabase or Hetzner Managed PG | $25+/month | Migrate to managed DB after 100+ active users. |
+
+### Network Topology
+
+```
+Browser
+  |
+  | HTTPS
+  v
+Cloudflare (SSL termination, DDoS, CDN)
+  |
+  | HTTP (internal, Cloudflare handles TLS)
+  v
+Hetzner Server: 80/443
+  |
+  v
+Nginx (load balancer + reverse proxy)
+  |-- /v1/ws/*  ──► WebSocket upgrade ──► API containers
+  |-- /v1/auth/ ──► rate: 10/min ─────► API containers
+  |-- /v1/market/ ► rate: 60/min ─────► API containers
+  |-- /*         ──► rate: 300/min ────► API containers
+  |
+  [API container 1] [API container 2] [API container 3]
+  (each: uvicorn, 1 worker, 1 process)
+         |
+  [Celery workers: --scale worker=2, --concurrency=4]
+  [Celery Beat: exactly 1 instance]
+         |
+  [PostgreSQL :5432 (localhost only)]
+  [Redis :6379 (localhost only)]
+```
+
+### Local Development
+```powershell
+docker compose up -d                                         # postgres + redis + adminer
+uvicorn app.main:app --reload                                # API on :8000
+celery -A app.core.celery_app.celery_app worker -Q trading_tasks -c 2 --loglevel=info
+celery -A app.core.celery_app.celery_app beat --loglevel=info
+```
+
+### Production Deployment
+```bash
+# On Hetzner server:
+git pull origin main
+docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml up -d --scale api=3 --scale worker=2
+docker compose -f docker-compose.prod.yml exec api alembic upgrade head
+```
+
+### Scaling Path
+- **0-100 users**: Single Hetzner CX32, 2-3 API containers, 1 worker container
+- **100-1000 users**: Add second Hetzner box for Celery workers only
+- **1000+ users**: Migrate to Docker Swarm or managed Kubernetes (Hetzner k8s)
+
+---
+
+## 22. Monetization & Broker Connection Model
+
+### BYOB (Bring Your Own Broker) — the money model
+AlphaSwarm never touches trader funds. All money lives in the trader's own regulated
+broker account. AlphaSwarm sends orders via the broker's API using keys the trader provides.
+This means: no money transmission license, no custody liability, no banking infrastructure.
+
+### Money flows
+```
+Trading funds:
+  Trader deposits money into their OWN Zerodha/Alpaca account (via broker's own app)
+  Trader connects broker to AlphaSwarm via API keys (stored encrypted in broker_connections)
+  AlphaSwarm sends orders → Broker executes → Money stays in trader's broker account
+
+AlphaSwarm subscription:
+  Trader pays AlphaSwarm via Stripe (international) or Razorpay (India)
+  This is payment for SOFTWARE — completely separate from trading funds
+```
+
+### Broker connection UX
+No manual API key pasting for brokers that support OAuth. The experience is:
+  - India: "Connect Upstox" button → OAuth flow → one click, done
+  - US: "Connect Alpaca" → 3-step guided wizard with screenshots (Alpaca has no OAuth)
+  - India (future): Zerodha OAuth (requires paid developer account — add post-PMF)
+  - NOT supported at launch: Angel One (no OAuth, poor API UX)
+
+### Broker roadmap
+| Broker | Status | Connection |
+|---|---|---|
+| Alpaca | Launch | Guided wizard (3 steps) |
+| Upstox | Launch | OAuth button |
+| Zerodha | Post-launch | OAuth (after dev fee ROI) |
+| Fyers | Post-launch | OAuth |
+| Others | TBD | Evaluate per user request |
+
+### Pricing model — Founding Member launch
+All features free for the first 500 users (Founding Members).
+Visible counter on the landing page creates urgency without fake deadlines.
+When paid tiers launch, founding members get 3 months free on the Trader plan.
+
+| Tier | Bots | Markets | Features | Price |
+|---|---|---|---|---|
+| Founding Member | 5 | Paper + Live | Full | Free (500 spots) |
+| Trader (coming soon) | 5 | Paper + Live | Full AI builder | INR 999/mo or $15/mo |
+| Pro (coming soon) | 20 | All global | Full + code editor | INR 2999/mo or $49/mo |
+| Quant (coming soon) | Unlimited | All | Everything + API | INR 7999/mo or $99/mo |
+
+`tenants.plan` valid values: `founding_member` | `trader` | `pro` | `quant`
+
+### Subscription billing (Phase 7)
+- International: Stripe (credit card, PayPal)
+- India: Razorpay (UPI, NetBanking, cards)
+- These are SaaS subscription payments ONLY — zero connection to trading funds
 
 ---
 
@@ -822,19 +928,27 @@ Start beat: `celery -A app.core.celery_app beat`
 - [x] Phase 0: System design v2.0 — this document. All gaps resolved.
 - [x] Phase 1a: FastAPI skeleton, Pydantic models, Celery structure skeleton
 - [x] Phase 1b: In-memory strategy store, basic risk function stub, schema.sql (partial)
-- [ ] **Phase 2 — Infrastructure Foundation (START HERE)**
-  - [ ] `docker-compose.yml` — postgres:16, redis:7, adminer
-  - [ ] `.env.example` — all required variables documented
-  - [ ] `schema.sql` — complete: add positions, portfolio_snapshots, strategy_versions, notifications, broker_connections, refresh_tokens, backtest_results tables
+- [x] **Phase 1c — Deployment infrastructure + backend optimization**
+  - [x] `Dockerfile` — multi-stage build, non-root user, uvloop
+  - [x] `docker-compose.prod.yml` — nginx LB + API scale + worker + beat + postgres + redis
+  - [x] `nginx/nginx.conf` — least_conn LB, rate limiting, WebSocket upgrade, gzip
+  - [x] `app/main.py` — lifespan events, ORJSONResponse, GZip middleware, split health checks
+  - [x] `app/core/celery_app.py` — acks_late, prefetch=1, max-tasks-per-child, beat_schedule
+  - [x] `app/worker/beat_tasks.py` — stub tasks (implemented in Phase 3/4)
+  - [x] Deployment architecture documented (Hetzner + Cloudflare + Vercel)
+  - [x] Monetization model documented (BYOB + Founding Member pricing)
+- [ ] **Phase 2 — DB Layer + Auth (START HERE)**
   - [ ] `alembic/` — migration setup, initial migration from schema.sql
-  - [ ] `app/core/config.py` — pydantic-settings reading all env vars
-  - [ ] `app/db/` — asyncpg connection pool, base repository class
-  - [ ] `app/services/strategy_store.py` — replace in-memory with real PostgreSQL
-  - [ ] `app/api/auth.py` — JWT login, register, refresh endpoints
+  - [ ] `app/db/connection.py` — asyncpg pool, wired into lifespan
+  - [ ] `app/db/base_repo.py` — base repository with tenant_id filter enforcement
+  - [ ] `app/db/repositories/` — strategies, runs, orders, positions, users
+  - [ ] `app/services/strategy_store.py` — replace in-memory store with DB repo
+  - [ ] `app/api/auth.py` — register, login, refresh, logout endpoints
   - [ ] Auth middleware — JWT validation on all protected routes
+  - [ ] `tenants.plan` supports: founding_member | trader | pro | quant
 - [ ] Phase 3 — Market Data & Intelligence
-  - [ ] `app/domain/market_data.py` — canonical Bar model
-  - [ ] `app/domain/market_hours.py` — exchange schedules, is_market_open(), session_status()
+  - [ ] `app/domain/market_data.py` — canonical Bar model (done)
+  - [ ] `app/domain/market_hours.py` — exchange schedules (done)
   - [ ] `app/services/market_data.py` — Alpaca Data + yfinance, normalizes to Bar
   - [ ] `app/services/indicators.py` — pandas-ta, parameterized, canonical output dict
   - [ ] `app/services/forecaster.py` — Prophet + ARIMA ensemble, cached
