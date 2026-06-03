@@ -93,10 +93,13 @@ class StrategyRunRecord(BaseModel):
 class OrderIntent(BaseModel):
     strategy_id: str
     symbol: str
+    exchange: str = "NASDAQ"
     side: OrderSide
     quantity: float = Field(gt=0)
     order_type: OrderType = OrderType.market
     estimated_price: float = Field(gt=0)
+    limit_price: float | None = None
+    is_paper: bool = True  # Must be explicitly False to attempt live order
 
     @property
     def estimated_notional(self) -> float:

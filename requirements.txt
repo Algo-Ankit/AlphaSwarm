@@ -1,6 +1,90 @@
-fastapi==0.110.0
-uvicorn==0.29.0
-celery==5.3.6
-redis==5.0.3
-pydantic==2.6.4
-pydantic-settings==2.2.1
+# AlphaSwarm — Python Dependencies
+# Install: pip install -r requirements.txt
+# Python 3.11+ required
+
+# ──────────────────────────────────────────
+# Web Framework & Server
+# ──────────────────────────────────────────
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.9      # form data / file uploads
+websockets>=13.0              # WebSocket support
+
+# ──────────────────────────────────────────
+# Database
+# ──────────────────────────────────────────
+asyncpg>=0.30.0               # async PostgreSQL driver
+sqlalchemy[asyncio]>=2.0.36  # async ORM
+alembic>=1.14.0               # schema migrations
+
+# ──────────────────────────────────────────
+# Task Queue
+# ──────────────────────────────────────────
+celery[redis]>=5.4.0          # task broker + beat scheduler
+redis>=5.2.0                  # Redis client
+
+# ──────────────────────────────────────────
+# Config & Validation
+# ──────────────────────────────────────────
+pydantic>=2.10.0
+pydantic-settings>=2.6.0
+
+# ──────────────────────────────────────────
+# Authentication & Security
+# ──────────────────────────────────────────
+python-jose[cryptography]>=3.3.0   # JWT (RS256)
+passlib[bcrypt]>=1.7.4             # password hashing
+cryptography>=43.0.0               # Fernet encryption for broker keys
+
+# ──────────────────────────────────────────
+# AI & Agent Framework
+# ──────────────────────────────────────────
+# Microsoft AutoGen — NOT LangChain
+pyautogen>=0.3.0
+anthropic>=0.40.0                  # Claude API (also used by AutoGen)
+
+# ──────────────────────────────────────────
+# Market Data
+# ──────────────────────────────────────────
+alpaca-py>=0.34.0                  # Alpaca broker + data API
+yfinance>=0.2.48                   # Yahoo Finance (Indian/global EOD data)
+httpx>=0.28.0                      # async HTTP client for all external calls
+
+# ──────────────────────────────────────────
+# Technical Analysis
+# ──────────────────────────────────────────
+pandas-ta>=0.3.14b                 # RSI, MACD, Bollinger Bands, EMA, VWAP, ATR, Stoch
+pandas>=2.2.0
+numpy>=1.26.0
+
+# ──────────────────────────────────────────
+# Forecasting
+# ──────────────────────────────────────────
+prophet>=1.1.6                     # Facebook Prophet (time series)
+statsmodels>=0.14.0                # ARIMA
+scikit-learn>=1.5.0                # shared dep for both
+
+# ──────────────────────────────────────────
+# News & Intelligence
+# ──────────────────────────────────────────
+newsapi-python>=0.2.7              # NewsAPI.org client
+
+# ──────────────────────────────────────────
+# Developer Code Sandbox
+# ──────────────────────────────────────────
+RestrictedPython>=7.3              # safe execution of user-submitted strategy code
+pyflakes>=3.2.0                    # Python linting for code editor feedback
+
+# ──────────────────────────────────────────
+# Rate Limiting & Monitoring
+# ──────────────────────────────────────────
+slowapi>=0.1.9                     # rate limiting for FastAPI
+sentry-sdk[fastapi]>=2.19.0       # error + performance monitoring
+
+# ──────────────────────────────────────────
+# Utilities
+# ──────────────────────────────────────────
+python-dateutil>=2.9.0
+pytz>=2024.1
+tenacity>=9.0.0                    # retry logic with exponential backoff
+orjson>=3.10.0                     # fast JSON serialization
