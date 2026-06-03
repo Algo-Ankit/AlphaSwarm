@@ -129,17 +129,15 @@ def _run_prophet(
 
 
 def _run_arima(series: pd.Series, horizon: int) -> list[float]:
-    """ARIMA(5,1,0) point forecast. Falls back to last value on failure."""
-    try:
-        from statsmodels.tsa.arima.model import ARIMA
+    """
+    ARIMA(5,1,0) point forecast.
+    Raises on convergence failure — caller decides whether to degrade gracefully.
+    """
+    from statsmodels.tsa.arima.model import ARIMA
 
-        model = ARIMA(series, order=(5, 1, 0))
-        fit = model.fit()
-        return [round(float(v), 4) for v in fit.forecast(steps=horizon)]
-    except Exception as exc:
-        logger.warning("ARIMA forecast failed: %s — using last-known value", exc)
-        last = float(series.iloc[-1])
-        return [round(last, 4)] * horizon
+    model = ARIMA(series, order=(5, 1, 0))
+    fit = model.fit()
+    return [round(float(v), 4) for v in fit.forecast(steps=horizon)]
 
 
 def _compute_ensemble_sync(
@@ -159,7 +157,16 @@ def _compute_ensemble_sync(
         )
 
     prophet_points, mae, mape = _run_prophet(df, horizon)
-    arima_preds = _run_arima(df["y"], horizon)
+
+    try:
+        arima_preds = _run_arima(df["y"], horizon)
+    except Exception as exc:
+        # ARIMA failed (non-stationary series, convergence issue, etc.)
+        # Use Prophet-only rather than averaging with a fake flat line.
+        logger.warning(
+            "ARIMA convergence failed (%s) — degrading to Prophet-only forecast", exc
+        )
+        return prophet_points, "prophet", mae, mape
 
     # Ensemble: average Prophet + ARIMA yhats; shift CI bands by same delta
     ensemble: list[dict] = []
@@ -176,7 +183,7 @@ def _compute_ensemble_sync(
             }
         )
 
-    return ensemble, mae, mape
+    return ensemble, "ensemble", mae, mape
 
 
 async def get_forecast(
@@ -216,7 +223,7 @@ async def get_forecast(
 
     close_prices = [(b.timestamp, float(b.close)) for b in bars]
 
-    forecast_json, mae, mape = await asyncio.to_thread(
+    forecast_json, model, mae, mape = await asyncio.to_thread(
         _compute_ensemble_sync, close_prices, horizon_days
     )
 
@@ -224,7 +231,7 @@ async def get_forecast(
         symbol=sym,
         exchange=exch,
         horizon_days=horizon_days,
-        model="ensemble",
+        model=model,
         mae=Decimal(str(round(mae, 4))) if mae is not None else None,
         mape=Decimal(str(round(mape, 4))) if mape is not None else None,
         forecast_json=forecast_json,
@@ -237,7 +244,7 @@ async def get_forecast(
         exchange=exch,
         generated_at=now.isoformat(),
         horizon_days=horizon_days,
-        model="ensemble",
+        model=model,
         mae=mae,
         mape=mape,
         forecast=points,

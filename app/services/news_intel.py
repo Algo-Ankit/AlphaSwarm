@@ -24,6 +24,10 @@ _NEWSAPI_BASE = "https://newsapi.org/v2"
 _AV_BASE = "https://www.alphavantage.co/query"
 
 
+class IntelligenceServiceError(Exception):
+    """Raised when a news or sentiment API call fails in a non-recoverable way."""
+
+
 @dataclass
 class NewsItem:
     symbol: str
@@ -49,8 +53,7 @@ class NewsItem:
 
 
 async def _fetch_newsapi(symbol: str, days: int, limit: int) -> list[dict]:
-    if not _settings.news_api_key:
-        return []
+    """Raises IntelligenceServiceError on HTTP or network failure."""
     from_date = (
         datetime.now(timezone.utc) - timedelta(days=days)
     ).strftime("%Y-%m-%d")
@@ -80,15 +83,18 @@ async def _fetch_newsapi(symbol: str, days: int, limit: int) -> list[dict]:
             for a in articles
             if a.get("title") and "[Removed]" not in (a.get("title") or "")
         ]
-    except Exception as exc:
-        logger.warning("NewsAPI fetch failed for %s: %s", symbol, exc)
-        return []
+    except httpx.HTTPStatusError as exc:
+        raise IntelligenceServiceError(
+            f"NewsAPI returned {exc.response.status_code} for {symbol}"
+        ) from exc
+    except httpx.RequestError as exc:
+        raise IntelligenceServiceError(
+            f"NewsAPI network error for {symbol}: {exc}"
+        ) from exc
 
 
 async def _fetch_alpha_vantage(symbol: str) -> list[dict]:
-    if not _settings.alpha_vantage_key:
-        return []
-    # Strip exchange suffix for AV (RELIANCE.NS → RELIANCE)
+    """Raises IntelligenceServiceError on HTTP or network failure."""
     av_ticker = symbol.split(".")[0] if "." in symbol else symbol
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -116,62 +122,80 @@ async def _fetch_alpha_vantage(symbol: str) -> list[dict]:
             for it in data["feed"]
             if it.get("title")
         ]
-    except Exception as exc:
-        logger.warning("Alpha Vantage fetch failed for %s: %s", symbol, exc)
-        return []
+    except httpx.HTTPStatusError as exc:
+        raise IntelligenceServiceError(
+            f"Alpha Vantage returned {exc.response.status_code} for {symbol}"
+        ) from exc
+    except httpx.RequestError as exc:
+        raise IntelligenceServiceError(
+            f"Alpha Vantage network error for {symbol}: {exc}"
+        ) from exc
 
 
 async def _classify_batch(symbol: str, articles: list[dict]) -> list[dict]:
     """
     Send all headlines in a single Claude Haiku call.
-    Returns articles with sentiment + category fields added.
-    Falls back to neutral/other if API call fails.
+    Raises RuntimeError if ANTHROPIC_API_KEY is not configured.
+    Raises IntelligenceServiceError if the API call fails or returns malformed output.
     """
-    if not _settings.anthropic_api_key or not articles:
-        return [{**a, "sentiment": "neutral", "category": "other"} for a in articles]
+    if not _settings.anthropic_api_key:
+        raise RuntimeError(
+            "ANTHROPIC_API_KEY is not configured — cannot classify news sentiment"
+        )
+    if not articles:
+        return []
 
+    import anthropic
+
+    client = anthropic.AsyncAnthropic(api_key=_settings.anthropic_api_key)
+    headline_list = "\n".join(
+        f"{i + 1}. {a['headline']}" for i, a in enumerate(articles)
+    )
+    prompt = (
+        f"Classify each news headline about the stock ticker {symbol}.\n\n"
+        f"Headlines:\n{headline_list}\n\n"
+        "For each headline, return:\n"
+        '- sentiment: "positive", "negative", or "neutral"\n'
+        '- category: "earnings", "regulatory", "political", "product", "macro", or "other"\n\n'
+        "Respond ONLY with a JSON array, one element per headline, in the same order:\n"
+        '[{"sentiment": "...", "category": "..."}, ...]'
+    )
     try:
-        import anthropic
-
-        client = anthropic.AsyncAnthropic(api_key=_settings.anthropic_api_key)
-        headline_list = "\n".join(
-            f"{i + 1}. {a['headline']}" for i, a in enumerate(articles)
-        )
-        prompt = (
-            f"Classify each news headline about the stock ticker {symbol}.\n\n"
-            f"Headlines:\n{headline_list}\n\n"
-            "For each headline, return:\n"
-            '- sentiment: "positive", "negative", or "neutral"\n'
-            '- category: "earnings", "regulatory", "political", "product", "macro", or "other"\n\n'
-            "Respond ONLY with a JSON array, one element per headline, in the same order:\n"
-            '[{"sentiment": "...", "category": "..."}, ...]'
-        )
         msg = await client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=512,
             messages=[{"role": "user", "content": prompt}],
         )
-        text = msg.content[0].text.strip()
-        start = text.find("[")
-        end = text.rfind("]") + 1
-        if start == -1 or end <= 0:
-            raise ValueError("No JSON array found in Haiku response")
-        classifications = json.loads(text[start:end])
+    except anthropic.APIError as exc:
+        raise IntelligenceServiceError(
+            f"Claude Haiku sentiment classification failed: {exc}"
+        ) from exc
 
-        result = []
-        for i, article in enumerate(articles):
-            cls = classifications[i] if i < len(classifications) else {}
-            result.append(
-                {
-                    **article,
-                    "sentiment": cls.get("sentiment", "neutral"),
-                    "category": cls.get("category", "other"),
-                }
-            )
-        return result
-    except Exception as exc:
-        logger.warning("Sentiment classification failed: %s", exc)
-        return [{**a, "sentiment": "neutral", "category": "other"} for a in articles]
+    text = msg.content[0].text.strip()
+    start = text.find("[")
+    end = text.rfind("]") + 1
+    if start == -1 or end <= 0:
+        raise IntelligenceServiceError(
+            f"Haiku returned malformed JSON (no array found): {text[:200]}"
+        )
+    try:
+        classifications = json.loads(text[start:end])
+    except json.JSONDecodeError as exc:
+        raise IntelligenceServiceError(
+            f"Haiku response is not valid JSON: {exc}"
+        ) from exc
+
+    result = []
+    for i, article in enumerate(articles):
+        cls = classifications[i] if i < len(classifications) else {}
+        result.append(
+            {
+                **article,
+                "sentiment": cls.get("sentiment", "neutral"),
+                "category": cls.get("category", "other"),
+            }
+        )
+    return result
 
 
 def _parse_published_at(raw: str) -> datetime:
@@ -221,9 +245,39 @@ async def get_news(
                 for r in rows
             ]
 
-    # Fetch from both sources
-    newsapi_articles = await _fetch_newsapi(sym, days=days, limit=limit)
-    av_articles = await _fetch_alpha_vantage(sym)
+    # Guard: at least one news source must be configured
+    if not _settings.news_api_key and not _settings.alpha_vantage_key:
+        raise RuntimeError(
+            "No news API keys configured — set NEWS_API_KEY or ALPHA_VANTAGE_KEY"
+        )
+
+    # Fetch from each configured source independently;
+    # collect errors so we can raise if ALL sources fail.
+    newsapi_articles: list[dict] = []
+    av_articles: list[dict] = []
+    source_errors: list[str] = []
+
+    if _settings.news_api_key:
+        try:
+            newsapi_articles = await _fetch_newsapi(sym, days=days, limit=limit)
+        except IntelligenceServiceError as exc:
+            logger.warning("NewsAPI failed for %s: %s", sym, exc)
+            source_errors.append(f"NewsAPI: {exc}")
+
+    if _settings.alpha_vantage_key:
+        try:
+            av_articles = await _fetch_alpha_vantage(sym)
+        except IntelligenceServiceError as exc:
+            logger.warning("Alpha Vantage failed for %s: %s", sym, exc)
+            source_errors.append(f"Alpha Vantage: {exc}")
+
+    if not newsapi_articles and not av_articles:
+        if source_errors:
+            raise IntelligenceServiceError(
+                f"All news sources failed for {sym}: {'; '.join(source_errors)}"
+            )
+        # Both sources returned empty — no news available (not an error)
+        return []
 
     # Deduplicate by headline (lowercase)
     seen: set[str] = set()

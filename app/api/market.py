@@ -10,6 +10,7 @@ from app.services import indicators as ind_svc
 from app.services import market_data as md_svc
 from app.services import news_intel as news_svc
 from app.services import symbol_search
+from app.services.news_intel import IntelligenceServiceError
 
 router = APIRouter(prefix="/v1/market", tags=["market"])
 
@@ -134,6 +135,13 @@ async def get_forecast(
         return result.to_dict()
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Forecast computation failed: {exc}",
+        )
 
 
 @router.get("/news/{symbol}")
@@ -148,14 +156,19 @@ async def get_news(
     pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> list[dict]:
     _validate_exchange(exchange)
-    items = await news_svc.get_news(
-        symbol=symbol.upper(),
-        exchange=exchange.upper(),
-        days=days,
-        limit=limit,
-        pool=pool,
-    )
-    return [item.to_dict() for item in items]
+    try:
+        items = await news_svc.get_news(
+            symbol=symbol.upper(),
+            exchange=exchange.upper(),
+            days=days,
+            limit=limit,
+            pool=pool,
+        )
+        return [item.to_dict() for item in items]
+    except IntelligenceServiceError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
 
 
 @router.get("/search")
