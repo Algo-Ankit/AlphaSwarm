@@ -156,6 +156,12 @@ async def refresh_token(
     )
     await token_repo.create(record["user_id"], raw_refresh, get_refresh_token_expiry())
 
+    access_token = create_access_token(
+        user_id=str(record["user_id"]),
+        tenant_id=str(record["tenant_id"]),
+        email=record["email"],
+        role=record["role"],
+    )
     return TokenResponse(
         access_token=access_token,
         refresh_token=raw_refresh,

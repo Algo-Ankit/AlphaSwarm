@@ -14,6 +14,17 @@ from app.db.connection import close_pool, create_pool, get_pool
 settings = get_settings()
 
 
+def _build_cors_origins() -> list[str]:
+    if settings.is_production:
+        raw = getattr(settings, "cors_origins", "")
+        return [o.strip() for o in raw.split(",") if o.strip()] if raw else []
+    return [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+    ]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ── Startup ───────────────────────────────────────────────
@@ -92,14 +103,3 @@ async def health_ready():
         content={"status": "ready" if all_ok else "degraded", "checks": checks},
         status_code=200 if all_ok else 503,
     )
-
-
-def _build_cors_origins() -> list[str]:
-    if settings.is_production:
-        raw = getattr(settings, "cors_origins", "")
-        return [o.strip() for o in raw.split(",") if o.strip()] if raw else []
-    return [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:3001",
-    ]

@@ -45,3 +45,13 @@ export interface TaskStatusResponse {
   celery_status: string
   result: Record<string, unknown> | null
 }
+
+export interface TokenResponse {
+  access_token: string
+  refresh_token: string
+  token_type: string
+  user_id: string
+  tenant_id: string
+  email: string
+  role: string
+}

@@ -108,10 +108,21 @@ def upgrade() -> None:
     """)
     op.execute("CREATE INDEX IF NOT EXISTS idx_strategy_versions_strategy ON strategy_versions(strategy_id, version_number DESC)")
 
+    # Wrap in DO block so the migration is idempotent on DBs pre-seeded from schema.sql
     op.execute("""
-        ALTER TABLE strategies
-            ADD CONSTRAINT IF NOT EXISTS fk_current_version
-            FOREIGN KEY (current_version_id) REFERENCES strategy_versions(id) ON DELETE SET NULL
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.table_constraints
+                WHERE constraint_name = 'fk_current_version'
+                  AND table_name = 'strategies'
+            ) THEN
+                ALTER TABLE strategies
+                    ADD CONSTRAINT fk_current_version
+                    FOREIGN KEY (current_version_id)
+                    REFERENCES strategy_versions(id) ON DELETE SET NULL;
+            END IF;
+        END $$
     """)
 
     op.execute("""
