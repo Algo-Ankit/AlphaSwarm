@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.api.deps import CurrentUser, get_current_user, get_db_pool
+from app.core.rate_limit import limiter
 from app.services import indicators as ind_svc
 from app.services import market_data as md_svc
 from app.services import symbol_search
@@ -42,7 +43,9 @@ def _validate_exchange(ex: str) -> None:
 
 
 @router.get("/bars/{symbol}")
+@limiter.limit("60/minute")
 async def get_bars(
+    request: Request,
     symbol: str,
     timeframe: str = Query("1d"),
     exchange: str = Query("NASDAQ"),
@@ -70,7 +73,9 @@ async def get_bars(
 
 
 @router.get("/indicators/{symbol}")
+@limiter.limit("60/minute")
 async def get_indicators(
+    request: Request,
     symbol: str,
     timeframe: str = Query("1d"),
     exchange: str = Query("NASDAQ"),
@@ -107,7 +112,9 @@ async def get_indicators(
 
 
 @router.get("/search")
+@limiter.limit("60/minute")
 async def search_symbols(
+    request: Request,
     q: str = Query(..., min_length=1, max_length=50),
     limit: int = Query(10, ge=1, le=30),
     current_user: CurrentUser = Depends(get_current_user),

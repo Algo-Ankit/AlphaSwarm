@@ -68,9 +68,9 @@ class MarketState:
 
 
 # yfinance symbol suffixes for Indian markets
-EXCHANGE_YFINANCE_SUFFIX = {
-    Exchange.NSE: ".NS",
-    Exchange.BSE: ".BO",
+EXCHANGE_YFINANCE_SUFFIX: dict[str, str] = {
+    "NSE": ".NS",
+    "BSE": ".BO",
 }
 
 def to_yfinance_symbol(symbol: str, exchange: str) -> str:

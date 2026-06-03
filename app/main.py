@@ -7,12 +7,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
 from app.api.auth import router as auth_router
 from app.api.brokers import router as broker_router
 from app.api.market import router as market_router
 from app.api.routes import router as strategy_router
 from app.api.ws import router as ws_router
 from app.core.config import get_settings
+from app.core.rate_limit import limiter
 from app.db.connection import close_pool, create_pool, get_pool
 
 settings = get_settings()
@@ -77,6 +81,9 @@ app = FastAPI(
     docs_url="/docs" if not settings.is_production else None,
     redoc_url="/redoc" if not settings.is_production else None,
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ── Middleware ────────────────────────────────────────────────
 app.add_middleware(GZipMiddleware, minimum_size=1024)

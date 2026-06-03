@@ -40,14 +40,13 @@ const BROKER_META: Record<string, { name: string; logo: string; color: string }>
 function ConnectionCard({
   conn,
   onDelete,
-  onTest,
 }: {
   conn: BrokerConnection
   onDelete: (id: string) => void
-  onTest: (id: string) => void
 }) {
   const [testing, setTesting] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null)
 
   const meta = BROKER_META[conn.broker] ?? { name: conn.broker, logo: conn.broker[0].toUpperCase(), color: 'from-zinc-400 to-zinc-600' }
@@ -67,10 +66,12 @@ function ConnectionCard({
 
   async function handleDelete() {
     setDeleting(true)
+    setDeleteError(null)
     try {
       await api.deleteBroker(conn.id)
       onDelete(conn.id)
     } catch {
+      setDeleteError('Remove failed — please try again.')
       setDeleting(false)
     }
   }
@@ -122,6 +123,14 @@ function ConnectionCard({
           </button>
         </div>
       </div>
+
+      {/* Delete error */}
+      {deleteError && (
+        <div className="flex items-center gap-2.5 px-6 py-3 border-t border-rose-100 dark:border-rose-500/20 bg-rose-50/60 dark:bg-rose-500/10 text-sm font-medium text-rose-600 dark:text-rose-400">
+          <XCircle className="w-4 h-4 flex-shrink-0" />
+          {deleteError}
+        </div>
+      )}
 
       {/* Test result */}
       {testResult && (
@@ -209,7 +218,12 @@ function AddAlpacaForm({ onAdded }: { onAdded: (conn: BrokerConnection) => void 
                 <button
                   key={String(paper)}
                   type="button"
-                  onClick={() => setIsPaper(paper)}
+                  onClick={() => {
+                    if (!paper && isPaper && !window.confirm(
+                      'Enable LIVE trading? This will use real capital from your broker account. Ensure your risk limits are configured correctly before deploying any strategy.'
+                    )) return
+                    setIsPaper(paper)
+                  }}
                   className={cn(
                     'flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-all duration-150',
                     isPaper === paper
@@ -343,7 +357,6 @@ export default function BrokerSettingsPage() {
                   key={conn.id}
                   conn={conn}
                   onDelete={handleDeleted}
-                  onTest={() => {}}
                 />
               ))}
             </div>

@@ -10,6 +10,7 @@ Channels implemented:
 """
 import asyncio
 import logging
+import uuid as _uuid
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 
@@ -53,7 +54,9 @@ async def ws_bars(
                 bars = await get_bars(symbol, exchange, timeframe, limit=1, pool=pool)
                 if bars:
                     await websocket.send_json({"type": "bar", **bars[-1].to_dict()})
-            except Exception:
+            except Exception as exc:
+                logger.warning("push_latest failed for %s %s — closing connection: %s", symbol, timeframe, exc)
+                await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
                 break
             await asyncio.sleep(_BAR_PUSH_INTERVAL)
 
@@ -116,6 +119,25 @@ async def ws_run(
 ) -> None:
     payload = _auth(token)
     if not payload:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    # Verify this run belongs to the authenticated user's tenant
+    tenant_id = payload.get("tenant_id", "")
+    try:
+        run_uuid = _uuid.UUID(run_id)
+        tenant_uuid = _uuid.UUID(tenant_id)
+    except ValueError:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        exists = await conn.fetchval(
+            "SELECT id FROM strategy_runs WHERE id = $1 AND tenant_id = $2",
+            run_uuid, tenant_uuid,
+        )
+    if not exists:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 

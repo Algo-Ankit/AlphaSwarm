@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 import asyncpg
 
@@ -47,13 +47,16 @@ class MarketDataRepo:
         self, symbol: str, exchange: str, timeframe: str
     ) -> datetime | None:
         async with self._pool.acquire() as conn:
-            return await conn.fetchval(
+            val = await conn.fetchval(
                 """
                 SELECT MAX(bar_time) FROM market_data_cache
                 WHERE symbol = $1 AND exchange = $2 AND timeframe = $3
                 """,
                 symbol.upper(), exchange.upper(), timeframe,
             )
+        if val is not None and val.tzinfo is None:
+            val = val.replace(tzinfo=timezone.utc)
+        return val
 
     async def bulk_upsert(self, bars: list[Bar]) -> None:
         if not bars:
@@ -61,7 +64,7 @@ class MarketDataRepo:
         rows = [
             (
                 b.symbol.upper(), b.exchange.upper(), b.timeframe, b.timestamp,
-                float(b.open), float(b.high), float(b.low), float(b.close), b.volume,
+                b.open, b.high, b.low, b.close, b.volume,
             )
             for b in bars
         ]

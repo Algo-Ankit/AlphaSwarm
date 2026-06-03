@@ -5,6 +5,8 @@ yfinance for Indian (NSE/BSE) and global EOD data.
 All output is normalized to app.domain.market_data.Bar. Nothing raw leaks out.
 """
 import asyncio
+import logging
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -14,9 +16,9 @@ from app.core.config import get_settings
 from app.db.repositories.market_data import MarketDataRepo
 from app.domain.market_data import Bar, to_yfinance_symbol
 
+logger = logging.getLogger(__name__)
 _settings = get_settings()
 
-# How old the most-recent cached bar can be before we re-fetch from source
 _STALE_AFTER: dict[str, timedelta] = {
     "1m":  timedelta(minutes=2),
     "5m":  timedelta(minutes=6),
@@ -27,13 +29,12 @@ _STALE_AFTER: dict[str, timedelta] = {
     "1w":  timedelta(days=8),
 }
 
-# yfinance (interval, period_fallback) — period is used when start is not supplied
+# yfinance (interval, period_fallback) — 4h has no native yfinance support; we aggregate from 1h
 _YF_PARAMS: dict[str, tuple[str, str]] = {
     "1m":  ("1m",  "5d"),
     "5m":  ("5m",  "60d"),
     "15m": ("15m", "60d"),
     "1h":  ("1h",  "730d"),
-    "4h":  ("1h",  "730d"),   # yfinance has no native 4h; 1h bars used
     "1d":  ("1d",  "max"),
     "1w":  ("1wk", "max"),
 }
@@ -78,6 +79,31 @@ def _is_us(exchange: str) -> bool:
 
 def _is_crypto(exchange: str) -> bool:
     return exchange.upper() == "CRYPTO"
+
+
+def _aggregate_to_4h(bars_1h: list[Bar], symbol: str, exchange: str) -> list[Bar]:
+    """Aggregate 1-hour Bar objects into proper 4-hour OHLCV bars."""
+    groups: dict[datetime, list[Bar]] = OrderedDict()
+    for bar in sorted(bars_1h, key=lambda b: b.timestamp):
+        ts = bar.timestamp
+        hour_4 = (ts.hour // 4) * 4
+        group_key = ts.replace(hour=hour_4, minute=0, second=0, microsecond=0)
+        groups.setdefault(group_key, []).append(bar)
+
+    result: list[Bar] = []
+    for group_ts, group in groups.items():
+        result.append(Bar(
+            symbol=symbol.upper(),
+            exchange=exchange.upper(),
+            timeframe="4h",
+            timestamp=group_ts,
+            open=group[0].open,
+            high=max(b.high for b in group),
+            low=min(b.low for b in group),
+            close=group[-1].close,
+            volume=sum(b.volume for b in group),
+        ))
+    return result
 
 
 async def _fetch_alpaca(
@@ -140,7 +166,8 @@ async def _fetch_alpaca(
 
     try:
         return await asyncio.to_thread(_sync)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Alpaca fetch failed for %s %s %s: %s", symbol, exchange, timeframe, exc)
         return []
 
 
@@ -152,8 +179,10 @@ async def _fetch_yfinance(
     start: datetime | None,
     end: datetime | None,
 ) -> list[Bar]:
+    is_4h_agg = (timeframe == "4h")
+    fetch_tf = "1h" if is_4h_agg else timeframe
     yf_symbol = to_yfinance_symbol(symbol, exchange)
-    yf_interval, yf_period = _YF_PARAMS.get(timeframe, ("1d", "max"))
+    yf_interval, yf_period = _YF_PARAMS.get(fetch_tf, ("1d", "max"))
 
     def _sync() -> list[Bar]:
         import pandas as pd
@@ -176,7 +205,7 @@ async def _fetch_yfinance(
             bars.append(Bar(
                 symbol=symbol.upper(),
                 exchange=exchange.upper(),
-                timeframe=timeframe,
+                timeframe=fetch_tf,
                 timestamp=ts.to_pydatetime(),
                 open=Decimal(str(row["open"])),
                 high=Decimal(str(row["high"])),
@@ -184,11 +213,16 @@ async def _fetch_yfinance(
                 close=Decimal(str(row["close"])),
                 volume=int(row.get("volume", 0) or 0),
             ))
+
+        if is_4h_agg:
+            bars = _aggregate_to_4h(bars, symbol, exchange)
+
         return bars[-limit:]
 
     try:
         return await asyncio.to_thread(_sync)
-    except Exception:
+    except Exception as exc:
+        logger.warning("yfinance fetch failed for %s %s %s: %s", symbol, exchange, timeframe, exc)
         return []
 
 
@@ -204,8 +238,10 @@ async def get_bars(
     """
     Returns bars sorted oldest-first.
     Checks DB cache first; fetches from Alpaca or yfinance on miss/stale.
+    Falls back to stale cache if external APIs are unavailable.
     """
     repo = MarketDataRepo(pool) if pool else None
+    cached_bars: list[Bar] = []
 
     # Cache check
     if repo:
@@ -215,6 +251,10 @@ async def get_bars(
             rows = await repo.get_bars(symbol, exchange, timeframe, start=start, end=end, limit=limit)
             if rows:
                 return [_record_to_bar(r, symbol, exchange, timeframe) for r in rows]
+        elif latest:
+            # Cache exists but is stale — load as fallback in case external APIs fail
+            rows = await repo.get_bars(symbol, exchange, timeframe, start=start, end=end, limit=limit)
+            cached_bars = [_record_to_bar(r, symbol, exchange, timeframe) for r in rows]
 
     # Fetch from source
     if _is_us(exchange) or _is_crypto(exchange):
@@ -224,10 +264,18 @@ async def get_bars(
     else:
         bars = await _fetch_yfinance(symbol, exchange, timeframe, limit, start, end)
 
-    if repo and bars:
+    if not bars:
+        if cached_bars:
+            logger.warning(
+                "External APIs unavailable for %s %s %s — returning %d stale cached bars",
+                symbol, exchange, timeframe, len(cached_bars),
+            )
+        return cached_bars
+
+    if repo:
         await repo.bulk_upsert(bars)
 
-    # Apply date filters and limit on live data
+    # Apply date filters and limit on freshly fetched data
     if start:
         start_utc = _utc(start)
         bars = [b for b in bars if b.timestamp >= start_utc]

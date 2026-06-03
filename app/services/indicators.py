@@ -3,6 +3,7 @@ Parameterized technical indicator computation via pandas-ta.
 Spec format: "rsi(14),macd(12,26,9),bb(20,2),ema(20),ema(50),ema(200),vwap,atr(14)"
 Returns a flat dict of {key: float|None} for the most recent bar.
 """
+import logging
 import re
 
 import pandas as pd
@@ -10,16 +11,20 @@ import pandas_ta as ta
 
 from app.domain.market_data import Bar
 
+logger = logging.getLogger(__name__)
+
 
 def parse_specs(raw: str) -> list[tuple[str, list[float]]]:
-    """Split "rsi(14),macd(12,26,9)" into [('rsi',[14.0]), ('macd',[12.0,26.0,9.0])]."""
+    """Split "rsi(14),macd(12,26,9)" into [('rsi',[14.0]), ('macd',[12.0,26.0,9.0])].
+
+    Uses findall so commas inside parentheses (e.g. macd args) are not treated as
+    spec separators — naive split(",") breaks multi-argument indicators.
+    """
     result = []
-    for part in raw.split(","):
-        part = part.strip().lower()
-        if not part:
-            continue
+    for part in re.findall(r'\w+(?:\([^)]*\))?', raw.lower()):
         m = re.match(r'^(\w+)(?:\(([^)]*)\))?$', part)
         if not m:
+            logger.debug("Ignoring invalid indicator spec: %r", part)
             continue
         name = m.group(1)
         raw_args = m.group(2) or ""
@@ -71,8 +76,8 @@ def compute_indicators(bars: list[Bar], specs: list[str] | str) -> dict[str, flo
     for name, args in parsed:
         try:
             _compute(df, name, args, out)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Indicator computation failed for %r(%s): %s", name, args, exc)
 
     return out
 

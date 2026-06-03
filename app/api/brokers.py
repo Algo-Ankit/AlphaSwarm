@@ -1,3 +1,5 @@
+import logging
+from urllib.parse import urlparse
 from uuid import UUID
 
 import asyncpg
@@ -9,10 +11,26 @@ from app.api.deps import CurrentUser, get_current_user, get_db_pool
 from app.db.repositories.brokers import BrokerRepo
 from app.services.broker_crypto import decrypt_key, encrypt_key
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/brokers", tags=["brokers"])
 
 _ALPACA_PAPER_URL = "https://paper-api.alpaca.markets"
 _ALPACA_LIVE_URL = "https://api.alpaca.markets"
+
+
+def _validate_url(url: str, broker: str) -> None:
+    """Raise HTTPException if url is not a valid http/https URL."""
+    if not url:
+        return
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError()
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid base_url for {broker}: must be a valid http/https URL",
+        )
 
 
 class BrokerConnectRequest(BaseModel):
@@ -51,6 +69,9 @@ async def _test_alpaca(api_key: str, api_secret: str, base_url: str) -> TestConn
         if resp.status_code == 200:
             data = resp.json()
             acct_id = data.get("account_number") or data.get("id")
+            acct_status = data.get("status")
+            if acct_status and acct_status != "ACTIVE":
+                return TestConnectionResponse(ok=False, message=f"Alpaca account is not active (status: {acct_status})")
             return TestConnectionResponse(ok=True, message="Connected successfully", account_id=acct_id)
         if resp.status_code in (401, 403):
             return TestConnectionResponse(ok=False, message="Invalid API key or secret")
@@ -87,6 +108,8 @@ async def connect_broker(
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=test.message)
     else:
         base_url = body.base_url or ""
+        if base_url:
+            _validate_url(base_url, body.broker)
 
     repo = BrokerRepo(pool, current_user.tenant_id)
     row = await repo.upsert(
@@ -111,6 +134,11 @@ async def list_brokers(
         try:
             key_plain = decrypt_key(row["key_encrypted"])
         except ValueError:
+            logger.error(
+                "Broker key decryption failed for connection %s (tenant %s) — "
+                "BROKER_KEY_ENCRYPTION_SECRET may have changed",
+                row["id"], current_user.tenant_id,
+            )
             key_plain = "????"
         results.append(_row_to_response(row, key_plain))
     return results
