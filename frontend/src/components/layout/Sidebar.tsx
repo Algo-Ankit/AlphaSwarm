@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 
 const nav = [
   { href: '/',            icon: LayoutDashboard, label: 'Dashboard' },
-  { href: '/strategies',  icon: Zap,             label: 'Strategies' },
+  { href: '/strategies/new',  icon: Zap,             label: 'Strategies' },
   { href: '/runs',        icon: Activity,         label: 'Runs',     soon: true },
 ]
 

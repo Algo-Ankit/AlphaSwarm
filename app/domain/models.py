@@ -47,6 +47,8 @@ class StrategyCreateRequest(BaseModel):
     symbols: list[str] = Field(default_factory=lambda: ["SPY"])
     timeframe: str = Field(default="1Min", max_length=20)
     risk: StrategyRiskConfig = Field(default_factory=StrategyRiskConfig)
+    creation_mode: str = Field(default="nl", pattern="^(nl|quant)$")
+    code_source: str | None = Field(default=None, max_length=50_000)
 
 
 class StrategyResponse(BaseModel):

@@ -56,16 +56,26 @@ async def create_strategy(
     pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> StrategyResponse:
     repo = StrategyRepo(pool, current_user.tenant_id)
+    if request.creation_mode == "quant":
+        if not request.code_source or len(request.code_source.strip()) < 20:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                detail="code_source is required for quant strategies")
+        generated_logic = request.code_source
+        prompt_text = f"[quant] {request.name}"
+    else:
+        generated_logic = compile_strategy_prompt(request)
+        prompt_text = request.prompt
+
     record = await repo.create(
         owner_user_id=current_user.user_id,
         name=request.name,
-        prompt=request.prompt,
+        prompt=prompt_text,
         symbols=[s.upper() for s in request.symbols],
         exchange="NASDAQ",
         timeframe=request.timeframe,
-        creation_mode="nl",
+        creation_mode=request.creation_mode,
         risk_config=request.risk.model_dump(mode="json"),
-        generated_logic=compile_strategy_prompt(request),
+        generated_logic=generated_logic,
     )
     return _record_to_response(record)
 

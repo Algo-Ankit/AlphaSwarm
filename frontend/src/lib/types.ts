@@ -29,6 +29,8 @@ export interface StrategyCreateRequest {
   symbols: string[]
   timeframe: string
   risk?: Partial<StrategyRiskConfig>
+  creation_mode?: 'nl' | 'quant'
+  code_source?: string
 }
 
 export interface StrategyRunResponse {
