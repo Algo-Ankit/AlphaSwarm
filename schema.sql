@@ -31,11 +31,13 @@ CREATE TABLE users (
 CREATE INDEX idx_users_tenant ON users(tenant_id);
 
 CREATE TABLE refresh_tokens (
-    id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token_hash TEXT NOT NULL UNIQUE, -- SHA-256 of the actual token
-    expires_at TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id                 UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id            UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash         TEXT NOT NULL UNIQUE,        -- SHA-256 of the actual token
+    expires_at         TIMESTAMPTZ NOT NULL,
+    grace_period_until TIMESTAMPTZ,                 -- old token stays valid until this (concurrent-request race window)
+    rotated_to_hash    TEXT,                        -- hash of the replacement token (for audit)
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_refresh_tokens_user ON refresh_tokens(user_id);
 

@@ -91,15 +91,48 @@ class RefreshTokenRepo:
         )
 
     async def get_by_raw_token(self, raw_token: str) -> asyncpg.Record | None:
+        """
+        Returns a valid token record — either a live token or one still inside
+        its grace period window (set during rotation to handle concurrent requests).
+        """
         token_hash = self.hash_token(raw_token)
         return await self._pool.fetchrow(
             """
             SELECT rt.*, u.tenant_id, u.email, u.role
             FROM refresh_tokens rt
             JOIN users u ON u.id = rt.user_id
-            WHERE rt.token_hash = $1 AND rt.expires_at > now()
+            WHERE rt.token_hash = $1
+              AND rt.expires_at > now()
+              AND (rt.grace_period_until IS NULL OR rt.grace_period_until > now())
             """,
             token_hash,
+        )
+
+    async def rotate(
+        self,
+        old_raw_token: str,
+        new_raw_token: str,
+        grace_period_until: datetime,
+    ) -> None:
+        """
+        Rotation with grace period: instead of deleting the old token immediately,
+        mark it as rotated and keep it valid for `grace_period_until`.
+
+        This prevents a race condition where two browser tabs send the same refresh
+        token concurrently — the second request arrives within the grace window and
+        resolves to the new token via `rotated_to_hash`, rather than being flagged
+        as a theft attempt and logging the user out.
+        """
+        old_hash = self.hash_token(old_raw_token)
+        new_hash = self.hash_token(new_raw_token)
+        await self._pool.execute(
+            """
+            UPDATE refresh_tokens
+            SET grace_period_until = $1,
+                rotated_to_hash    = $2
+            WHERE token_hash = $3
+            """,
+            grace_period_until, new_hash, old_hash,
         )
 
     async def delete_by_raw_token(self, raw_token: str) -> None:

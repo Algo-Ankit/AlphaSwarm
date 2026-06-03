@@ -33,8 +33,8 @@ pydantic-settings>=2.6.0
 # ──────────────────────────────────────────
 # Authentication & Security
 # ──────────────────────────────────────────
-python-jose[cryptography]>=3.3.0   # JWT (RS256)
-passlib[bcrypt]>=1.7.4             # password hashing
+PyJWT[crypto]>=2.9.0               # JWT (RS256/HS256) — actively maintained, CVE-free
+bcrypt>=4.2.0                      # password hashing — raw bcrypt, no passlib wrapper
 cryptography>=43.0.0               # Fernet encryption for broker keys
 
 # ──────────────────────────────────────────

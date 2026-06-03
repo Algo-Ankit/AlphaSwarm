@@ -7,6 +7,7 @@ from app.db.repositories.users import AuthUserRepo, RefreshTokenRepo, TenantRepo
 from app.services.auth import (
     create_access_token,
     create_refresh_token,
+    get_grace_period_expiry,
     get_refresh_token_expiry,
     hash_password,
     verify_password,
@@ -123,15 +124,36 @@ async def refresh_token(
     if not record:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
 
-    await token_repo.delete_by_raw_token(body.refresh_token)
-
-    access_token = create_access_token(
-        user_id=str(record["user_id"]),
-        tenant_id=str(record["tenant_id"]),
-        email=record["email"],
-        role=record["role"],
-    )
     raw_refresh = create_refresh_token()
+
+    # If this token was already rotated (rotated_to_hash is set) we are inside the
+    # grace window — return the already-issued replacement rather than creating a
+    # third token. This handles two browser tabs sending the same refresh token
+    # within the 45-second grace period.
+    if record["rotated_to_hash"]:
+        # Token is in grace period from a prior rotation — just issue a new access token.
+        # The replacement refresh token was already issued to the first request.
+        access_token = create_access_token(
+            user_id=str(record["user_id"]),
+            tenant_id=str(record["tenant_id"]),
+            email=record["email"],
+            role=record["role"],
+        )
+        return TokenResponse(
+            access_token=access_token,
+            refresh_token=body.refresh_token,  # same refresh token, still in grace window
+            user_id=str(record["user_id"]),
+            tenant_id=str(record["tenant_id"]),
+            email=record["email"],
+            role=record["role"],
+        )
+
+    # Normal rotation path: mark old token with grace period, issue new token
+    await token_repo.rotate(
+        old_raw_token=body.refresh_token,
+        new_raw_token=raw_refresh,
+        grace_period_until=get_grace_period_expiry(),
+    )
     await token_repo.create(record["user_id"], raw_refresh, get_refresh_token_expiry())
 
     return TokenResponse(

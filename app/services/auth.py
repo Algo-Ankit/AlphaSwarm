@@ -1,30 +1,42 @@
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt
+import jwt
+from jwt.exceptions import InvalidTokenError
 
 from app.core.config import get_settings
 
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
+# --------------------------------------------------------------------------- #
+# Password hashing — raw bcrypt, no passlib wrapper                           #
+# passlib is unmaintained and throws deprecation crashes on modern bcrypt      #
+# --------------------------------------------------------------------------- #
 
 def hash_password(plain: str) -> str:
-    return _pwd_context.hash(plain)
+    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return _pwd_context.verify(plain, hashed)
+    try:
+        return bcrypt.checkpw(plain.encode(), hashed.encode())
+    except Exception:
+        return False
 
 
-def _sign_key() -> tuple[str, str]:
+# --------------------------------------------------------------------------- #
+# JWT — PyJWT, not python-jose                                                 #
+# python-jose is abandoned and has CVE-2022-29217 (algorithm confusion)       #
+# PyJWT is actively maintained and correctly refuses alg=none attacks          #
+# --------------------------------------------------------------------------- #
+
+def _sign_key() -> tuple[str | bytes, str]:
     settings = get_settings()
     if settings.jwt_private_key:
         return settings.jwt_private_key, "RS256"
     return settings.jwt_secret_key, "HS256"
 
 
-def _verify_key() -> tuple[str, str]:
+def _verify_key() -> tuple[str | bytes, str]:
     settings = get_settings()
     if settings.jwt_public_key:
         return settings.jwt_public_key, "RS256"
@@ -50,13 +62,19 @@ def create_access_token(user_id: str, tenant_id: str, email: str, role: str) -> 
 def decode_access_token(token: str) -> dict | None:
     key, algorithm = _verify_key()
     try:
+        # algorithms= kwarg forces PyJWT to reject algorithm confusion —
+        # it will not accept a token signed with any algorithm not in this list
         payload = jwt.decode(token, key, algorithms=[algorithm])
         if payload.get("type") != "access":
             return None
         return payload
-    except JWTError:
+    except InvalidTokenError:
         return None
 
+
+# --------------------------------------------------------------------------- #
+# Refresh tokens                                                               #
+# --------------------------------------------------------------------------- #
 
 def create_refresh_token() -> str:
     return secrets.token_urlsafe(32)
@@ -65,3 +83,13 @@ def create_refresh_token() -> str:
 def get_refresh_token_expiry() -> datetime:
     settings = get_settings()
     return datetime.now(timezone.utc) + timedelta(days=settings.jwt_refresh_token_expire_days)
+
+
+def get_grace_period_expiry() -> datetime:
+    """
+    Used for refresh token rotation race condition.
+    When a token is rotated, the old token stays valid in Redis for this window
+    so concurrent requests (e.g. two browser tabs refreshing simultaneously)
+    don't trigger a false-positive token theft alarm.
+    """
+    return datetime.now(timezone.utc) + timedelta(seconds=45)
