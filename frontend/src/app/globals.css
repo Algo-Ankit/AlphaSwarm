@@ -2,113 +2,162 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   DESIGN SYSTEM
+   Dark:  Deep space — #06080F background, layered glass surfaces, violet+pink orbs
+   Light: Editorial blue-white — #EBF0FA background, crisp white cards, hard shadows
+   ───────────────────────────────────────────────────────────────────────────── */
+
 @layer base {
-  :root { 
-    color-scheme: light; 
-    --bg-color: #f8fafc;
-  }
-  .dark { 
-    color-scheme: dark; 
-    --bg-color: #030712;
+  :root {
+    color-scheme: light;
+    --bg:          #EBF0FA;
+    --surface:     rgba(255, 255, 255, 0.90);
+    --border:      rgba(0, 0, 0, 0.08);
+    --shadow-card: 0 2px 8px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.05);
+    --shadow-hover: 0 8px 28px rgba(0,0,0,0.10), 0 0 0 1px rgba(109,40,217,0.20);
+    --accent:      #6D28D9;
+    --accent-soft: rgba(109, 40, 217, 0.09);
   }
 
-  html { scroll-behavior: smooth; }
+  .dark {
+    color-scheme: dark;
+    --bg:          #06080F;
+    --surface:     rgba(13, 17, 34, 0.75);
+    --border:      rgba(255, 255, 255, 0.06);
+    --shadow-card: 0 8px 32px rgba(0,0,0,0.50), 0 0 0 1px rgba(255,255,255,0.05);
+    --shadow-hover: 0 20px 60px rgba(0,0,0,0.70), 0 0 0 1px rgba(139,92,246,0.30), 0 0 40px rgba(139,92,246,0.08);
+    --accent:      #8B5CF6;
+    --accent-soft: rgba(139, 92, 246, 0.13);
+  }
+
+  html {
+    /* NO scroll-behavior: smooth — causes scroll jitter and input lag */
+    height: 100%;
+  }
 
   body {
     @apply antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
-    background: var(--bg-color);
-    color: #f8fafc;
+    background-color: var(--bg);
+    min-height: 100%;
+    /* NO color here — layout.tsx body class handles text color */
   }
 
-  /* Deep, vibrant animated ambient background */
-  body::before, body::after {
+  /* ── Static ambient gradient ─────────────────────────────────────────────
+     NO filter: blur(), NO animation. Pure GPU-compositable radial gradients.
+     This eliminates the scroll-lag source from the original design.
+     ─────────────────────────────────────────────────────────────────────── */
+  body::before {
     content: '';
     position: fixed;
-    border-radius: 50%;
-    pointer-events: none;
+    inset: 0;
     z-index: 0;
-    filter: blur(120px);
-    opacity: 0.6;
-    animation: drift 20s infinite alternate ease-in-out;
-  }
-  
-  body::before {
-    top: -10%;
-    left: -10%;
-    width: 60vw;
-    height: 60vh;
-    background: radial-gradient(circle, rgba(139,92,246,0.15) 0%, transparent 70%);
-  }
-
-  body::after {
-    bottom: -10%;
-    right: -10%;
-    width: 50vw;
-    height: 50vh;
-    background: radial-gradient(circle, rgba(56,189,248,0.1) 0%, transparent 70%);
-    animation-delay: -10s;
+    pointer-events: none;
+    /* Light: faint violet top-left wash */
+    background:
+      radial-gradient(ellipse 80% 60% at -10% -10%, rgba(109,40,217,0.07) 0%, transparent 65%),
+      radial-gradient(ellipse 60% 50% at 110% 110%, rgba(56,189,248,0.05) 0%, transparent 65%);
   }
 
   .dark body::before {
-    background: radial-gradient(circle, rgba(139,92,246,0.2) 0%, transparent 70%);
+    /* Dark: saturated violet top-left, electric pink bottom-right */
+    background:
+      radial-gradient(ellipse 80% 60% at -10% -10%, rgba(124,58,237,0.22) 0%, transparent 65%),
+      radial-gradient(ellipse 60% 50% at 110% 110%, rgba(236,72,153,0.15) 0%, transparent 65%);
   }
-  .dark body::after {
-    background: radial-gradient(circle, rgba(236,72,153,0.15) 0%, transparent 70%);
-  }
-}
-
-@keyframes drift {
-  0% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(5%, 5%) scale(1.05); }
-  100% { transform: translate(-2%, 8%) scale(0.95); }
 }
 
 @layer components {
+
+  /* ── Glass card ─────────────────────────────────────────────────────────── */
   .glass-card {
-    @apply rounded-3xl relative overflow-hidden transition-all duration-300;
-    background: rgba(255, 255, 255, 0.4);
-    backdrop-filter: blur(24px) saturate(190%);
-    -webkit-backdrop-filter: blur(24px) saturate(190%);
-    border: 1px solid rgba(255, 255, 255, 0.8);
-    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.03), inset 0 0 0 1px rgba(255,255,255,0.5);
+    @apply rounded-2xl relative overflow-hidden;
+    background: rgba(255, 255, 255, 0.88);
+    border: 1px solid rgba(0, 0, 0, 0.07);
+    box-shadow: var(--shadow-card);
+    transition: box-shadow 180ms ease, transform 180ms ease, border-color 180ms ease;
   }
 
   .dark .glass-card {
-    background: rgba(15, 23, 42, 0.4);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255,255,255,0.05);
+    background: rgba(14, 19, 40, 0.72);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: var(--shadow-card);
+  }
+
+  /* Top-edge highlight — the signature shimmer of real glass */
+  .dark .glass-card::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 20%;
+    right: 20%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.14), transparent);
+    pointer-events: none;
   }
 
   .glass-card:hover {
-    box-shadow: 0 10px 40px rgba(139, 92, 246, 0.1), inset 0 0 0 1px rgba(255,255,255,0.8);
     transform: translateY(-2px);
-  }
-  .dark .glass-card:hover {
-    box-shadow: 0 10px 40px rgba(139, 92, 246, 0.15), inset 0 0 0 1px rgba(255,255,255,0.15);
+    box-shadow: var(--shadow-hover);
+    border-color: rgba(109,40,217,0.18);
   }
 
+  .dark .glass-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-hover);
+    border-color: rgba(139,92,246,0.28);
+  }
+
+  /* ── Sidebar ────────────────────────────────────────────────────────────── */
   .glass-sidebar {
-    background: rgba(255, 255, 255, 0.7);
-    backdrop-filter: blur(30px) saturate(200%);
-    -webkit-backdrop-filter: blur(30px) saturate(200%);
-    border-right: 1px solid rgba(255,255,255,0.6);
+    /* GPU layer — decouples from scroll compositing */
+    transform: translateZ(0);
+    background: rgba(248, 250, 255, 0.97);
+    border-right: 1px solid rgba(0, 0, 0, 0.08);
   }
 
   .dark .glass-sidebar {
-    background: rgba(3, 7, 18, 0.6);
-    border-right: 1px solid rgba(255,255,255,0.05);
+    transform: translateZ(0);
+    background: rgba(9, 11, 23, 0.97);
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
   }
 
+  /* ── Top bar ─────────────────────────────────────────────────────────────── */
   .glass-topbar {
-    background: rgba(248, 250, 252, 0.75);
-    backdrop-filter: blur(30px) saturate(200%);
-    -webkit-backdrop-filter: blur(30px) saturate(200%);
-    border-bottom: 1px solid rgba(255,255,255,0.6);
+    transform: translateZ(0);
+    background: rgba(248, 250, 255, 0.88);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.07);
   }
 
   .dark .glass-topbar {
-    background: rgba(3, 7, 18, 0.75);
-    border-bottom: 1px solid rgba(255,255,255,0.05);
+    transform: translateZ(0);
+    background: rgba(9, 11, 23, 0.88);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  /* ── Stat numbers — tabular, tight ──────────────────────────────────────── */
+  .stat-num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+    letter-spacing: -0.03em;
+  }
+}
+
+/* ── Keyframes ───────────────────────────────────────────────────────────── */
+@keyframes fadeIn  { from { opacity: 0 }                              to { opacity: 1 } }
+@keyframes slideUp { from { opacity: 0; transform: translateY(10px) } to { opacity: 1; transform: translateY(0) } }
+@keyframes pulse-soft { 0%,100% { opacity: 1 }                        50% { opacity: 0.4 } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
   }
 }

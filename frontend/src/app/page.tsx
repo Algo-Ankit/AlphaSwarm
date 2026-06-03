@@ -1,6 +1,5 @@
 'use client'
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { AppShell } from '@/components/layout/AppShell'
 import { StrategyCard } from '@/components/dashboard/StrategyCard'
@@ -10,32 +9,51 @@ import { GlassCard } from '@/components/ui/GlassCard'
 import { api, getAccessToken } from '@/lib/api'
 import type { Strategy } from '@/lib/types'
 import { Plus, Zap, Activity } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 function Skeleton() {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
       {[1, 2, 3].map((i) => (
-        <div key={i} className="glass-card h-48 animate-pulse opacity-40 rounded-3xl" />
+        <div key={i} className="glass-card h-52 animate-pulse" style={{ opacity: 0.5 }} />
       ))}
     </div>
   )
 }
 
-function Empty() {
-  const router = useRouter()
+function Empty({ onBuild }: { onBuild: () => void }) {
   return (
-    <div className="flex flex-col items-center justify-center py-32 text-center animate-slide-up relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-b from-white/5 to-transparent">
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-violet-500/10 via-transparent to-transparent opacity-50 blur-3xl pointer-events-none" />
-      <div className="relative z-10">
-        <div className="w-20 h-20 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center mb-6 shadow-[0_0_40px_rgba(139,92,246,0.3)] hover:scale-110 transition-transform duration-500">
-          <Zap className="w-10 h-10 text-white fill-white/20" />
+    <div className={cn(
+      'relative overflow-hidden rounded-2xl',
+      'border border-zinc-200 dark:border-white/[0.07]',
+      'bg-white dark:bg-zinc-900/40',
+      'flex flex-col items-center justify-center py-24 text-center',
+    )}>
+      {/* Ambient glow */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[60%] h-48
+          bg-gradient-to-b from-violet-500/08 dark:from-violet-500/15 to-transparent rounded-full blur-3xl" />
+      </div>
+
+      <div className="relative z-10 max-w-sm mx-auto">
+        <div className="w-16 h-16 rounded-2xl mx-auto mb-6
+          bg-gradient-to-br from-violet-500 to-violet-700
+          flex items-center justify-center
+          shadow-[0_8px_32px_rgba(124,58,237,0.35)] dark:shadow-[0_8px_40px_rgba(124,58,237,0.45)]
+          hover:scale-105 transition-transform duration-500 cursor-default">
+          <Zap className="w-8 h-8 text-white fill-white/20" />
         </div>
-        <h2 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-zinc-900 to-zinc-500 dark:from-white dark:to-zinc-500 mb-3">No strategies yet</h2>
-        <p className="text-base text-zinc-500 dark:text-zinc-400 mb-8 max-w-md mx-auto leading-relaxed">
-          Describe your trading idea in plain English and let our advanced AI engine turn it into a high-performance live bot.
+
+        <h2 className="text-2xl font-extrabold text-zinc-900 dark:text-zinc-50 mb-2 tracking-tight">
+          No strategies yet
+        </h2>
+        <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-8 leading-relaxed">
+          Describe your trading idea in plain English — our AI turns it into a live, risk-managed bot in seconds.
         </p>
-        <Button size="lg" onClick={() => router.push('/strategies/new')} className="shadow-[0_0_20px_rgba(139,92,246,0.25)] hover:shadow-[0_0_30px_rgba(139,92,246,0.4)] transition-all duration-300">
-          <Plus className="w-5 h-5 mr-2" />
+
+        <Button size="lg" onClick={onBuild}
+          className="shadow-[0_4px_20px_rgba(109,40,217,0.35)] hover:shadow-[0_6px_28px_rgba(109,40,217,0.5)] transition-shadow">
+          <Plus className="w-4 h-4 mr-2" />
           Build First Strategy
         </Button>
       </div>
@@ -60,38 +78,60 @@ export default function DashboardPage() {
       .finally(() => setLoading(false))
   }, [router])
 
+  const activeCount = strategies.filter((s) => s.status === 'active').length
+
   return (
     <AppShell>
-      <div className="space-y-10 animate-fade-in relative z-10">
-        <div className="flex items-end justify-between">
+      <div className="space-y-8" style={{ animation: 'fadeIn 0.2s ease-out' }}>
+
+        {/* Header */}
+        <div className="flex items-end justify-between gap-4">
           <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400 text-xs font-semibold tracking-wide uppercase mb-4">
-              <Activity className="w-3.5 h-3.5" /> System Active
+            <div className={cn(
+              'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full mb-4',
+              'text-[11px] font-bold uppercase tracking-widest',
+              'bg-violet-100 text-violet-700 border border-violet-200',
+              'dark:bg-violet-500/12 dark:text-violet-300 dark:border-violet-500/20',
+            )}>
+              <Activity className="w-3 h-3" />
+              System Active
             </div>
-            <h2 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-zinc-900 to-zinc-600 dark:from-white dark:to-zinc-400 tracking-tight">Good morning, Trader</h2>
-            <p className="text-base text-zinc-500 dark:text-zinc-400 mt-2 font-medium">
+            <h1 className="text-4xl font-extrabold text-zinc-900 dark:text-zinc-50 tracking-tight">
+              Good morning, Trader
+            </h1>
+            <p className="text-base text-zinc-500 dark:text-zinc-400 mt-1.5 font-medium">
               {strategies.length > 0
-                ? `${strategies.filter((s) => s.status === 'active').length} active bots generating alpha.`
-                : 'Ready to deploy your first strategy?'}
+                ? activeCount > 0
+                  ? `${activeCount} bot${activeCount > 1 ? 's' : ''} running — generating alpha right now.`
+                  : `${strategies.length} strateg${strategies.length > 1 ? 'ies' : 'y'} ready to deploy.`
+                : 'What will you trade today?'}
             </p>
           </div>
+
           {strategies.length > 0 && (
-            <Button size="md" onClick={() => router.push('/strategies/new')} className="shadow-[0_0_15px_rgba(139,92,246,0.2)] hover:shadow-[0_0_25px_rgba(139,92,246,0.4)]">
-              <Plus className="w-4 h-4 mr-2" />
+            <Button size="md" onClick={() => router.push('/strategies/new')}
+              className="flex-shrink-0 shadow-[0_4px_14px_rgba(109,40,217,0.3)] hover:shadow-[0_6px_22px_rgba(109,40,217,0.45)]">
+              <Plus className="w-4 h-4 mr-1.5" />
               New Strategy
             </Button>
           )}
         </div>
 
+        {/* Stats */}
         {strategies.length > 0 && <StatsBar strategies={strategies} />}
 
-        {loading ? <Skeleton /> : error ? (
-          <GlassCard padding="lg" className="text-center border-rose-500/20 bg-rose-500/5">
-            <p className="text-base text-rose-600 dark:text-rose-400 font-semibold">Failed to load strategies</p>
-            <p className="text-sm text-zinc-500 mt-2">{error}</p>
+        {/* Content */}
+        {loading ? (
+          <Skeleton />
+        ) : error ? (
+          <GlassCard padding="lg" className="text-center border-rose-300 dark:border-rose-500/25 bg-rose-50 dark:bg-rose-500/06">
+            <p className="text-base font-bold text-rose-700 dark:text-rose-400">Failed to load strategies</p>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1.5">{error}</p>
           </GlassCard>
-        ) : strategies.length === 0 ? <Empty /> : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        ) : strategies.length === 0 ? (
+          <Empty onBuild={() => router.push('/strategies/new')} />
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {strategies.map((s) => <StrategyCard key={s.id} strategy={s} />)}
           </div>
         )}
@@ -99,4 +139,3 @@ export default function DashboardPage() {
     </AppShell>
   )
 }
-

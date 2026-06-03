@@ -9,23 +9,26 @@ export function ThemeToggle({ className }: { className?: string }) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
 
-  if (!mounted) return <div className={cn('w-9 h-9', className)} />
+  if (!mounted) return <div className={cn('w-[34px] h-[34px]', className)} />
+
+  const isDark = theme === 'dark'
 
   return (
     <button
-      onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-      aria-label="Toggle theme"
+      onClick={() => setTheme(isDark ? 'light' : 'dark')}
+      aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
       className={cn(
-        'flex items-center justify-center w-9 h-9 rounded-xl',
-        'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100',
-        'hover:bg-zinc-100 dark:hover:bg-zinc-800',
-        'transition-all duration-200',
+        'relative flex items-center justify-center w-[34px] h-[34px] rounded-xl',
+        'transition-all duration-200 select-none',
+        isDark
+          ? 'bg-zinc-800 text-amber-400 hover:bg-zinc-700 hover:text-amber-300 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]'
+          : 'bg-zinc-100 text-violet-600 hover:bg-violet-50 hover:text-violet-700 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.07)]',
         className,
       )}
     >
-      {theme === 'dark'
-        ? <Sun className="w-[18px] h-[18px]" />
-        : <Moon className="w-[18px] h-[18px]" />}
+      {isDark
+        ? <Sun  className="w-[15px] h-[15px]" />
+        : <Moon className="w-[15px] h-[15px]" />}
     </button>
   )
 }
