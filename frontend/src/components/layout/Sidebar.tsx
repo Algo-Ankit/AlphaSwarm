@@ -11,7 +11,7 @@ const nav = [
 ]
 
 const bottom = [
-  { href: '/settings', icon: Settings, label: 'Settings', soon: true },
+  { href: '/settings/brokers', icon: Settings, label: 'Settings' },
 ]
 
 function NavLink({ href, icon: Icon, label, soon }: {

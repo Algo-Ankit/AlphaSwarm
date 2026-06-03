@@ -7,6 +7,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.auth import router as auth_router
+from app.api.brokers import router as broker_router
 from app.api.routes import router as strategy_router
 from app.core.config import get_settings
 from app.db.connection import close_pool, create_pool, get_pool
@@ -72,6 +73,7 @@ app.add_middleware(
 
 # ── Routes ────────────────────────────────────────────────────
 app.include_router(auth_router)
+app.include_router(broker_router)
 app.include_router(strategy_router)
 
 

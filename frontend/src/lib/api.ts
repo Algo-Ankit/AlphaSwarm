@@ -1,8 +1,11 @@
 import type {
+  BrokerConnectRequest,
+  BrokerConnection,
   Strategy,
   StrategyCreateRequest,
   StrategyRunResponse,
   TaskStatusResponse,
+  TestConnectionResponse,
   TokenResponse,
 } from './types'
 
@@ -111,4 +114,29 @@ export const api = {
 
   getTaskStatus: (taskId: string) =>
     req<TaskStatusResponse>(`/v1/tasks/${taskId}`, { headers: authHeaders() }),
+
+  // ── Brokers ───────────────────────────────────────────────
+  listBrokers: () =>
+    req<BrokerConnection[]>('/v1/brokers', { headers: authHeaders() }),
+
+  connectBroker: (data: BrokerConnectRequest) =>
+    req<BrokerConnection>('/v1/brokers', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    }),
+
+  deleteBroker: (id: string) =>
+    fetch(`${BASE}/v1/brokers/${id}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    }).then((r) => {
+      if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`)
+    }),
+
+  testBroker: (id: string) =>
+    req<TestConnectionResponse>(`/v1/brokers/${id}/test`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+    }),
 }

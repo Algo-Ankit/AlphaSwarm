@@ -55,3 +55,28 @@ export interface TokenResponse {
   email: string
   role: string
 }
+
+export interface BrokerConnection {
+  id: string
+  broker: string
+  base_url: string | null
+  is_paper: boolean
+  is_active: boolean
+  key_preview: string
+  created_at: string
+  updated_at: string
+}
+
+export interface BrokerConnectRequest {
+  broker: string
+  api_key: string
+  api_secret: string
+  is_paper: boolean
+  base_url?: string
+}
+
+export interface TestConnectionResponse {
+  ok: boolean
+  message: string
+  account_id: string | null
+}

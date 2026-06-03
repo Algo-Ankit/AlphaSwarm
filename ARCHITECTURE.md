@@ -948,6 +948,13 @@ When paid tiers launch, founding members get 3 months free on the Trader plan.
   - [x] `app/services/auth.py` — JWT sign/verify + bcrypt + refresh token service
   - [x] `tenants.plan` supports: founding_member | trader | pro | quant
 - [ ] Phase 3 — Market Data & Intelligence
+  - [x] **Phase 3A — Broker Integration (BYOB)**
+    - [x] `app/services/broker_crypto.py` — Fernet AES-256 encrypt/decrypt for API keys
+    - [x] `app/db/repositories/brokers.py` — BrokerRepo (tenant-scoped upsert/list/delete)
+    - [x] `app/api/brokers.py` — POST /v1/brokers, GET /v1/brokers, DELETE /v1/brokers/{id}, PATCH /v1/brokers/{id}/test
+    - [x] Alpaca connection validated via live API ping before storing credentials
+    - [x] `frontend/src/app/settings/brokers/page.tsx` — broker management UI (connect, list, test, remove)
+    - [x] Sidebar Settings link active → /settings/brokers
   - [ ] `app/domain/market_data.py` — canonical Bar model (done)
   - [ ] `app/domain/market_hours.py` — exchange schedules (done)
   - [ ] `app/services/market_data.py` — Alpaca Data + yfinance, normalizes to Bar

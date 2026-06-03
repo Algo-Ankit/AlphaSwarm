@@ -1,0 +1,58 @@
+from uuid import UUID
+
+import asyncpg
+
+from app.db.base_repo import BaseRepo
+
+
+class BrokerRepo(BaseRepo):
+
+    async def upsert(
+        self,
+        broker: str,
+        key_encrypted: str,
+        secret_encrypted: str,
+        base_url: str,
+        is_paper: bool,
+    ) -> asyncpg.Record:
+        return await self.fetchrow(
+            """
+            INSERT INTO broker_connections
+                (tenant_id, broker, key_encrypted, secret_encrypted, base_url, is_paper)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (tenant_id, broker)
+            DO UPDATE SET
+                key_encrypted    = EXCLUDED.key_encrypted,
+                secret_encrypted = EXCLUDED.secret_encrypted,
+                base_url         = EXCLUDED.base_url,
+                is_paper         = EXCLUDED.is_paper,
+                updated_at       = now()
+            RETURNING *
+            """,
+            self.tenant_id, broker, key_encrypted, secret_encrypted, base_url, is_paper,
+        )
+
+    async def get_all(self) -> list[asyncpg.Record]:
+        return await self.fetch(
+            """
+            SELECT * FROM broker_connections
+            WHERE tenant_id = $1 AND is_active = true
+            ORDER BY created_at
+            """,
+            self.tenant_id,
+        )
+
+    async def get_by_id(self, connection_id: UUID) -> asyncpg.Record | None:
+        return await self.fetchrow(
+            """
+            SELECT * FROM broker_connections
+            WHERE id = $1 AND tenant_id = $2 AND is_active = true
+            """,
+            connection_id, self.tenant_id,
+        )
+
+    async def delete(self, connection_id: UUID) -> None:
+        await self.execute(
+            "DELETE FROM broker_connections WHERE id = $1 AND tenant_id = $2",
+            connection_id, self.tenant_id,
+        )
