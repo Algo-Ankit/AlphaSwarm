@@ -42,6 +42,11 @@ function authHeaders(): Record<string, string> {
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, init)
   if (!res.ok) {
+    if (res.status === 401 && typeof window !== 'undefined' && !path.includes('/auth/')) {
+      clearTokens()
+      window.location.href = '/login'
+      return new Promise(() => {})
+    }
     const text = await res.text().catch(() => res.statusText)
     throw new Error(text || `HTTP ${res.status}`)
   }

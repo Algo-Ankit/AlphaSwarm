@@ -7,7 +7,7 @@ import { StrategyCard } from '@/components/dashboard/StrategyCard'
 import { StatsBar } from '@/components/dashboard/StatsBar'
 import { Button } from '@/components/ui/Button'
 import { GlassCard } from '@/components/ui/GlassCard'
-import { api } from '@/lib/api'
+import { api, getAccessToken } from '@/lib/api'
 import type { Strategy } from '@/lib/types'
 import { Plus, Zap, Activity } from 'lucide-react'
 
@@ -50,11 +50,15 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (!getAccessToken()) {
+      router.replace('/login')
+      return
+    }
     api.listStrategies()
       .then(setStrategies)
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
-  }, [])
+  }, [router])
 
   return (
     <AppShell>
@@ -83,8 +87,8 @@ export default function DashboardPage() {
 
         {loading ? <Skeleton /> : error ? (
           <GlassCard padding="lg" className="text-center border-rose-500/20 bg-rose-500/5">
-            <p className="text-base text-rose-600 dark:text-rose-400 font-semibold">{error}</p>
-            <p className="text-sm text-zinc-500 mt-2">Make sure the backend is running on port 8000.</p>
+            <p className="text-base text-rose-600 dark:text-rose-400 font-semibold">Failed to load strategies</p>
+            <p className="text-sm text-zinc-500 mt-2">{error}</p>
           </GlassCard>
         ) : strategies.length === 0 ? <Empty /> : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
