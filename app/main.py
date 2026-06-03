@@ -4,7 +4,7 @@ import redis.asyncio as aioredis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import ORJSONResponse
+from fastapi.responses import JSONResponse
 
 from app.api.auth import router as auth_router
 from app.api.routes import router as strategy_router
@@ -54,7 +54,6 @@ app = FastAPI(
     description="Multi-tenant algorithmic trading SaaS API",
     version="2.0.0",
     lifespan=lifespan,
-    default_response_class=ORJSONResponse,
     docs_url="/docs" if not settings.is_production else None,
     redoc_url="/redoc" if not settings.is_production else None,
 )
@@ -101,7 +100,7 @@ async def health_ready():
         checks["db"] = f"error: {exc}"
 
     all_ok = all(v == "ok" for v in checks.values())
-    return ORJSONResponse(
+    return JSONResponse(
         content={"status": "ready" if all_ok else "degraded", "checks": checks},
         status_code=200 if all_ok else 503,
     )
