@@ -955,15 +955,21 @@ When paid tiers launch, founding members get 3 months free on the Trader plan.
     - [x] Alpaca connection validated via live API ping before storing credentials
     - [x] `frontend/src/app/settings/brokers/page.tsx` — broker management UI (connect, list, test, remove)
     - [x] Sidebar Settings link active → /settings/brokers
-  - [ ] `app/domain/market_data.py` — canonical Bar model (done)
-  - [ ] `app/domain/market_hours.py` — exchange schedules (done)
-  - [ ] `app/services/market_data.py` — Alpaca Data + yfinance, normalizes to Bar
-  - [ ] `app/services/indicators.py` — pandas-ta, parameterized, canonical output dict
+  - [x] `app/domain/market_data.py` — canonical Bar model + Exchange/Timeframe enums
+  - [x] `app/domain/market_hours.py` — exchange schedules, is_market_open, get_session_status
+  - [x] **Phase 3B — Market Data Service**
+    - [x] `app/db/repositories/market_data.py` — MarketDataRepo (bulk upsert, get_bars, latest_bar_time)
+    - [x] `app/services/market_data.py` — Alpaca Data API (US/Crypto) + yfinance (Indian/global), normalizes to Bar, DB cache with staleness check
+    - [x] `app/services/indicators.py` — pandas-ta: rsi, macd, bb, ema, sma, vwap, atr, stoch, roc — parameterized spec notation
+    - [x] `app/services/symbol_search.py` — static symbol DB (NASDAQ/NYSE/NSE/BSE/Crypto), prefix+name search
+    - [x] `app/api/market.py` — GET /v1/market/bars/{symbol}, /v1/market/indicators/{symbol}, /v1/market/search
+    - [x] `app/ws/manager.py` — WebSocketManager + Redis pub/sub bridge (bars/portfolio/run channels)
+    - [x] `app/api/ws.py` — /v1/ws/bars/{symbol}, /v1/ws/portfolio, /v1/ws/run/{run_id} with JWT auth + heartbeat
+  - [ ] Phase 3C — Intelligence Layer
   - [ ] `app/services/forecaster.py` — Prophet + ARIMA ensemble, cached
   - [ ] `app/services/news_intel.py` — NewsAPI + Alpha Vantage + Claude Haiku sentiment
-  - [ ] REST endpoints: bars, indicators, forecast, news, search
-  - [ ] Celery Beat config + beat tasks: snapshot, news refresh, forecast refresh
-  - [ ] WebSocket infrastructure: Redis pub/sub + FastAPI WS manager + Alpaca live feed
+  - [ ] REST endpoints: /v1/market/forecast/{symbol}, /v1/market/news/{symbol}
+  - [ ] Celery Beat tasks: snapshot_portfolio, refresh_active_symbols_news, refresh_stale_forecasts
 - [ ] Phase 4 — Execution Engine
   - [ ] `app/domain/base_strategy.py` — BaseStrategy + StrategyContext (multi-symbol support)
   - [ ] `app/domain/risk.py` — expand with market hours check + position limits

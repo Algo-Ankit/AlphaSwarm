@@ -1,0 +1,94 @@
+"""Static symbol database for ticker search. Updated manually each release cycle."""
+
+_SYMBOLS: list[dict] = [
+    # ── NASDAQ ────────────────────────────────────────────────
+    {"symbol": "AAPL",   "name": "Apple Inc.",                      "exchange": "NASDAQ"},
+    {"symbol": "MSFT",   "name": "Microsoft Corporation",           "exchange": "NASDAQ"},
+    {"symbol": "GOOGL",  "name": "Alphabet Inc. Class A",           "exchange": "NASDAQ"},
+    {"symbol": "GOOG",   "name": "Alphabet Inc. Class C",           "exchange": "NASDAQ"},
+    {"symbol": "AMZN",   "name": "Amazon.com Inc.",                 "exchange": "NASDAQ"},
+    {"symbol": "META",   "name": "Meta Platforms Inc.",             "exchange": "NASDAQ"},
+    {"symbol": "NVDA",   "name": "NVIDIA Corporation",              "exchange": "NASDAQ"},
+    {"symbol": "TSLA",   "name": "Tesla Inc.",                      "exchange": "NASDAQ"},
+    {"symbol": "NFLX",   "name": "Netflix Inc.",                    "exchange": "NASDAQ"},
+    {"symbol": "ADBE",   "name": "Adobe Inc.",                      "exchange": "NASDAQ"},
+    {"symbol": "INTC",   "name": "Intel Corporation",               "exchange": "NASDAQ"},
+    {"symbol": "AMD",    "name": "Advanced Micro Devices Inc.",     "exchange": "NASDAQ"},
+    {"symbol": "QCOM",   "name": "Qualcomm Inc.",                   "exchange": "NASDAQ"},
+    {"symbol": "PYPL",   "name": "PayPal Holdings Inc.",            "exchange": "NASDAQ"},
+    {"symbol": "SBUX",   "name": "Starbucks Corporation",           "exchange": "NASDAQ"},
+    {"symbol": "COST",   "name": "Costco Wholesale Corporation",    "exchange": "NASDAQ"},
+    {"symbol": "AMGN",   "name": "Amgen Inc.",                      "exchange": "NASDAQ"},
+    {"symbol": "CSCO",   "name": "Cisco Systems Inc.",              "exchange": "NASDAQ"},
+    {"symbol": "AVGO",   "name": "Broadcom Inc.",                   "exchange": "NASDAQ"},
+    {"symbol": "TXN",    "name": "Texas Instruments Inc.",          "exchange": "NASDAQ"},
+    {"symbol": "QQQ",    "name": "Invesco QQQ Trust (NASDAQ ETF)",  "exchange": "NASDAQ"},
+    {"symbol": "TQQQ",   "name": "ProShares UltraPro QQQ",         "exchange": "NASDAQ"},
+    # ── NYSE ─────────────────────────────────────────────────
+    {"symbol": "JPM",    "name": "JPMorgan Chase & Co.",            "exchange": "NYSE"},
+    {"symbol": "BAC",    "name": "Bank of America Corp.",           "exchange": "NYSE"},
+    {"symbol": "GS",     "name": "Goldman Sachs Group Inc.",        "exchange": "NYSE"},
+    {"symbol": "WFC",    "name": "Wells Fargo & Co.",               "exchange": "NYSE"},
+    {"symbol": "C",      "name": "Citigroup Inc.",                  "exchange": "NYSE"},
+    {"symbol": "BRK.B",  "name": "Berkshire Hathaway Inc. Class B", "exchange": "NYSE"},
+    {"symbol": "JNJ",    "name": "Johnson & Johnson",               "exchange": "NYSE"},
+    {"symbol": "PFE",    "name": "Pfizer Inc.",                     "exchange": "NYSE"},
+    {"symbol": "UNH",    "name": "UnitedHealth Group Inc.",         "exchange": "NYSE"},
+    {"symbol": "KO",     "name": "Coca-Cola Company",               "exchange": "NYSE"},
+    {"symbol": "PEP",    "name": "PepsiCo Inc.",                    "exchange": "NYSE"},
+    {"symbol": "MCD",    "name": "McDonald's Corporation",          "exchange": "NYSE"},
+    {"symbol": "DIS",    "name": "The Walt Disney Company",         "exchange": "NYSE"},
+    {"symbol": "WMT",    "name": "Walmart Inc.",                    "exchange": "NYSE"},
+    {"symbol": "XOM",    "name": "Exxon Mobil Corporation",         "exchange": "NYSE"},
+    {"symbol": "CVX",    "name": "Chevron Corporation",             "exchange": "NYSE"},
+    {"symbol": "V",      "name": "Visa Inc.",                       "exchange": "NYSE"},
+    {"symbol": "MA",     "name": "Mastercard Inc.",                 "exchange": "NYSE"},
+    {"symbol": "HD",     "name": "Home Depot Inc.",                 "exchange": "NYSE"},
+    {"symbol": "IBM",    "name": "International Business Machines", "exchange": "NYSE"},
+    {"symbol": "GE",     "name": "General Electric Co.",            "exchange": "NYSE"},
+    {"symbol": "SPY",    "name": "SPDR S&P 500 ETF Trust",          "exchange": "NYSE"},
+    {"symbol": "IWM",    "name": "iShares Russell 2000 ETF",        "exchange": "NYSE"},
+    {"symbol": "GLD",    "name": "SPDR Gold Shares ETF",            "exchange": "NYSE"},
+    # ── NSE India ────────────────────────────────────────────
+    {"symbol": "RELIANCE",    "name": "Reliance Industries Ltd",       "exchange": "NSE"},
+    {"symbol": "TCS",         "name": "Tata Consultancy Services",     "exchange": "NSE"},
+    {"symbol": "INFY",        "name": "Infosys Ltd",                   "exchange": "NSE"},
+    {"symbol": "HDFCBANK",    "name": "HDFC Bank Ltd",                 "exchange": "NSE"},
+    {"symbol": "ICICIBANK",   "name": "ICICI Bank Ltd",                "exchange": "NSE"},
+    {"symbol": "WIPRO",       "name": "Wipro Ltd",                     "exchange": "NSE"},
+    {"symbol": "HINDUNILVR",  "name": "Hindustan Unilever Ltd",        "exchange": "NSE"},
+    {"symbol": "ITC",         "name": "ITC Ltd",                       "exchange": "NSE"},
+    {"symbol": "SBIN",        "name": "State Bank of India",           "exchange": "NSE"},
+    {"symbol": "TATAMOTORS",  "name": "Tata Motors Ltd",               "exchange": "NSE"},
+    {"symbol": "BAJFINANCE",  "name": "Bajaj Finance Ltd",             "exchange": "NSE"},
+    {"symbol": "MARUTI",      "name": "Maruti Suzuki India Ltd",       "exchange": "NSE"},
+    {"symbol": "ASIANPAINT",  "name": "Asian Paints Ltd",              "exchange": "NSE"},
+    {"symbol": "KOTAKBANK",   "name": "Kotak Mahindra Bank Ltd",       "exchange": "NSE"},
+    {"symbol": "LT",          "name": "Larsen & Toubro Ltd",           "exchange": "NSE"},
+    {"symbol": "AXISBANK",    "name": "Axis Bank Ltd",                 "exchange": "NSE"},
+    {"symbol": "TITAN",       "name": "Titan Company Ltd",             "exchange": "NSE"},
+    {"symbol": "SUNPHARMA",   "name": "Sun Pharmaceutical Industries", "exchange": "NSE"},
+    {"symbol": "ULTRACEMCO",  "name": "UltraTech Cement Ltd",          "exchange": "NSE"},
+    {"symbol": "TECHM",       "name": "Tech Mahindra Ltd",             "exchange": "NSE"},
+    # ── Crypto (Alpaca format) ────────────────────────────────
+    {"symbol": "BTC/USD",   "name": "Bitcoin",          "exchange": "CRYPTO"},
+    {"symbol": "ETH/USD",   "name": "Ethereum",         "exchange": "CRYPTO"},
+    {"symbol": "SOL/USD",   "name": "Solana",           "exchange": "CRYPTO"},
+    {"symbol": "ADA/USD",   "name": "Cardano",          "exchange": "CRYPTO"},
+    {"symbol": "AVAX/USD",  "name": "Avalanche",        "exchange": "CRYPTO"},
+    {"symbol": "DOT/USD",   "name": "Polkadot",         "exchange": "CRYPTO"},
+    {"symbol": "LINK/USD",  "name": "Chainlink",        "exchange": "CRYPTO"},
+    {"symbol": "MATIC/USD", "name": "Polygon",          "exchange": "CRYPTO"},
+    {"symbol": "LTC/USD",   "name": "Litecoin",         "exchange": "CRYPTO"},
+    {"symbol": "DOGE/USD",  "name": "Dogecoin",         "exchange": "CRYPTO"},
+]
+
+
+def search(q: str, limit: int = 10) -> list[dict]:
+    """Return symbols matching the query, symbol-prefix matches ranked first."""
+    q_up = q.upper().strip()
+    if not q_up:
+        return []
+    by_symbol = [s for s in _SYMBOLS if s["symbol"].startswith(q_up)]
+    by_name   = [s for s in _SYMBOLS if s not in by_symbol and q_up in s["name"].upper()]
+    return (by_symbol + by_name)[:limit]
