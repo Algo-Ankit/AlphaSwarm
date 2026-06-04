@@ -16,24 +16,25 @@ def verify_order_intent(
     strategy_risk: StrategyRiskConfig,
     market_state: MarketState | None = None,
     settings: Settings | None = None,
+    current_position: float | None = None,
 ) -> RiskCheckResult:
     """
     Validates an order intent against all risk rules.
     Returns RiskCheckResult with approved=True only if ALL checks pass.
-    Checks are ordered from fastest/cheapest to slowest.
 
     Args:
         order: The proposed order.
         strategy_risk: Per-strategy risk config.
-        market_state: Current market state (hours, today's notional, open exposure).
-                      If None, market hours check is skipped (use in backtesting only).
+        market_state: Current market state. If None, market hours check is skipped (backtesting).
         settings: App settings. Defaults to singleton.
+        current_position: Current held quantity for this symbol (positive=long, negative=short, None/0=flat).
+                          Used to determine whether an order is risk-reducing or risk-adding.
     """
     settings = settings or get_settings()
     symbol = order.symbol.upper()
     notional = order.estimated_notional
 
-    # ── Check 1: Market is open (skip during backtesting when market_state is None) ──
+    # ── Check 1: Market is open ───────────────────────────────────────────────
     if market_state is not None:
         if not market_state.is_open:
             return RiskCheckResult(
@@ -51,7 +52,6 @@ def verify_order_intent(
         )
 
     # ── Check 3: Symbol allowed by strategy ──────────────────────────────────
-    # Empty allowed_symbols means no symbols are permitted (not "all symbols").
     allowed = {s.upper() for s in strategy_risk.allowed_symbols}
     if symbol not in allowed:
         return RiskCheckResult(
@@ -69,9 +69,17 @@ def verify_order_intent(
         )
 
     # ── Check 5: Today's executed notional ≤ daily limit ─────────────────────
-    # Sell orders are risk-reducing — exempted from daily notional cap so positions
-    # can always be closed even after the daily buy limit is reached.
-    if market_state is not None and order.side == OrderSide.buy:
+    # Only exempt genuinely risk-reducing trades (closing an open position).
+    # A SELL when flat is a short sale — subject to the cap.
+    # A BUY when flat is a new long — subject to the cap.
+    # Exempting all SELLs (old behaviour) allowed unbounded short selling and
+    # then trapped the strategy: the buy-to-cover would be blocked by the daily cap.
+    pos = current_position or 0.0
+    is_risk_reducing = (
+        (order.side == OrderSide.sell and pos > 0) or   # closing a long
+        (order.side == OrderSide.buy  and pos < 0)       # covering a short
+    )
+    if market_state is not None and not is_risk_reducing:
         projected_daily = market_state.today_executed_notional + notional
         if projected_daily > strategy_risk.max_daily_notional:
             return RiskCheckResult(

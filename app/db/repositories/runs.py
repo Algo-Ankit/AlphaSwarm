@@ -70,3 +70,46 @@ class RunRepo(BaseRepo):
             """,
             strategy_id, self.tenant_id,
         )
+
+    async def mark_running(self, run_id: UUID) -> None:
+        await self.execute(
+            """
+            UPDATE strategy_runs
+            SET status = 'running', started_at = now(), updated_at = now()
+            WHERE id = $1 AND tenant_id = $2
+            """,
+            run_id, self.tenant_id,
+        )
+
+    async def mark_completed(self, run_id: UUID, result: dict) -> None:
+        import json
+        await self.execute(
+            """
+            UPDATE strategy_runs
+            SET status = 'completed', result = $1, ended_at = now(), updated_at = now()
+            WHERE id = $2 AND tenant_id = $3
+            """,
+            json.dumps(result), run_id, self.tenant_id,
+        )
+
+    async def mark_crashed(self, run_id: UUID, reason: str) -> None:
+        await self.execute(
+            """
+            UPDATE strategy_runs
+            SET status = 'failed', error = $1, ended_at = now(), updated_at = now()
+            WHERE id = $2 AND tenant_id = $3
+            """,
+            reason, run_id, self.tenant_id,
+        )
+
+    async def get_stale_running_runs(self, stale_seconds: int = 90) -> list[asyncpg.Record]:
+        """Returns runs stuck in 'running' status with no update for stale_seconds."""
+        return await self.fetch(
+            """
+            SELECT * FROM strategy_runs
+            WHERE tenant_id = $1
+              AND status = 'running'
+              AND updated_at < now() - ($2 * INTERVAL '1 second')
+            """,
+            self.tenant_id, stale_seconds,
+        )

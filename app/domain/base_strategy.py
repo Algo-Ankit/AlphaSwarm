@@ -17,6 +17,7 @@ class StrategyContext:
     Passed to BaseStrategy on every bar. Contains everything a strategy needs
     to make a trading decision — no external API calls needed inside on_bar().
     """
+    strategy_id: str     # UUID string — required for OrderIntent construction inside on_bar()
     symbol: str
     exchange: str        # NASDAQ | NYSE | NSE | BSE | CRYPTO
     timeframe: str       # 1m | 5m | 15m | 1h | 4h | 1d

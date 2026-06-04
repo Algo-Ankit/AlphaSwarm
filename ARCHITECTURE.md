@@ -973,13 +973,13 @@ When paid tiers launch, founding members get 3 months free on the Trader plan.
     - [x] `GET /v1/market/forecast/{symbol}` — ?horizon=5&exchange=NASDAQ; 60/min rate limited
     - [x] `GET /v1/market/news/{symbol}` — ?days=7&limit=20; 60/min rate limited
     - [x] Beat tasks implemented: `refresh_active_symbols_news` (hourly :00), `refresh_stale_forecasts` (hourly :30)
-- [ ] Phase 4 — Execution Engine
-  - [ ] `app/domain/base_strategy.py` — BaseStrategy + StrategyContext (multi-symbol support)
-  - [ ] `app/domain/risk.py` — expand with market hours check + position limits
-  - [ ] `app/services/execution.py` — Alpaca order placement, position tracking
-  - [ ] `app/worker/tasks.py` — real StrategyRunAgent using AutoGen + BaseStrategy
-  - [ ] Worker heartbeat + crash recovery
-  - [ ] Position reconciliation beat task
+- [x] Phase 4 — Execution Engine ✓ 2026-06-04
+  - [x] `app/domain/base_strategy.py` — BaseStrategy + StrategyContext (multi-symbol support)
+  - [x] `app/domain/risk.py` — expand with market hours check + position limits
+  - [x] `app/services/execution.py` — Alpaca order placement, position tracking
+  - [x] `app/worker/tasks.py` — real StrategyRunAgent using AutoGen + BaseStrategy
+  - [x] Worker heartbeat + crash recovery
+  - [x] Position reconciliation beat task
 - [ ] Phase 5 — Strategy Builder & Backtesting
   - [ ] `app/services/strategy_builder_agent.py` — AutoGen StrategyBuilderAgent (real NL→code)
   - [ ] `app/services/backtester.py` — BacktestRunner + PerformanceMetrics

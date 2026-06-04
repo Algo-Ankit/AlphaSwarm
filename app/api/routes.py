@@ -124,15 +124,27 @@ async def run_strategy(
         dry_run=request.dry_run,
     )
 
+    # asyncpg may return JSONB columns as str; parse defensively before dispatch
+    import json as _json
+    _rc = record["risk_config"]
+    if isinstance(_rc, str):
+        try:
+            _rc = _json.loads(_rc)
+        except Exception:
+            _rc = {}
+    risk_cfg_dict = _rc if isinstance(_rc, dict) else {}
+
     try:
         task = execute_trading_strategy.apply_async(
             args=[
                 str(strategy_id),
+                str(current_user.tenant_id),
                 str(current_user.user_id),
                 str(run["id"]),
                 request.dry_run,
                 list(record["symbols"]),
-                dict(record["risk_config"]) if isinstance(record["risk_config"], dict) else {},
+                str(record.get("timeframe") or "1d"),
+                risk_cfg_dict,
             ],
             queue="trading_tasks",
         )
@@ -158,7 +170,15 @@ async def run_strategy(
 async def get_task_status(
     task_id: str,
     current_user: CurrentUser = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> TaskStatusResponse:
+    # Verify the task belongs to a run owned by this tenant (IDOR prevention)
+    run = await pool.fetchrow(
+        "SELECT id FROM strategy_runs WHERE celery_task_id = $1 AND tenant_id = $2",
+        task_id, current_user.tenant_id,
+    )
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     result = celery_app.AsyncResult(task_id)
     payload = result.result if isinstance(result.result, dict) else None
     return TaskStatusResponse(task_id=task_id, celery_status=result.status, result=payload)

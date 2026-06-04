@@ -25,11 +25,71 @@ def _get_pool():
 
 @celery_app.task(name="app.worker.beat_tasks.snapshot_portfolio")
 def snapshot_portfolio():
-    """
-    Write a portfolio_snapshots row for every active tenant.
-    Runs every 5 minutes. Powers the equity curve on the dashboard.
-    Implemented in Phase 4 (requires positions table + execution engine).
-    """
+    """Write a portfolio_snapshots row for every active tenant every 5 minutes."""
+    asyncio.run(_snapshot_portfolio_async())
+
+
+async def _snapshot_portfolio_async() -> None:
+    from decimal import Decimal
+
+    pool = await _get_pool()
+    try:
+        # Get all tenants with at least one active broker connection
+        rows = await pool.fetch(
+            """
+            SELECT DISTINCT bc.tenant_id
+            FROM broker_connections bc
+            WHERE bc.is_active = true
+            """
+        )
+        if not rows:
+            logger.info("snapshot_portfolio: no active broker connections")
+            return
+
+        for row in rows:
+            tenant_id = row["tenant_id"]
+            try:
+                # Aggregate open positions
+                pnl_row = await pool.fetchrow(
+                    """
+                    SELECT
+                        COUNT(DISTINCT strategy_id) AS active_strategies,
+                        COALESCE(SUM(unrealized_pnl), 0) AS open_pnl
+                    FROM positions
+                    WHERE tenant_id = $1 AND quantity != 0
+                    """,
+                    tenant_id,
+                )
+                # Today's realized P&L
+                realized_row = await pool.fetchrow(
+                    """
+                    SELECT COALESCE(SUM(realized_pnl), 0) AS realized
+                    FROM positions
+                    WHERE tenant_id = $1
+                    """,
+                    tenant_id,
+                )
+                # Use broker account equity if available; fall back to 0
+                open_pnl = Decimal(str(pnl_row["open_pnl"] or 0))
+                realized_today = Decimal(str(realized_row["realized"] or 0))
+                active = int(pnl_row["active_strategies"] or 0)
+
+                await pool.execute(
+                    """
+                    INSERT INTO portfolio_snapshots
+                        (tenant_id, total_equity, cash_balance, open_pnl, realized_pnl_today, active_strategies)
+                    VALUES ($1, $2, NULL, $3, $4, $5)
+                    """,
+                    tenant_id,
+                    float(open_pnl + realized_today),
+                    float(open_pnl),
+                    float(realized_today),
+                    active,
+                )
+            except Exception as exc:
+                logger.warning("snapshot_portfolio: tenant %s failed: %s", tenant_id, exc)
+    finally:
+        await pool.close()
 
 
 @celery_app.task(name="app.worker.beat_tasks.refresh_active_symbols_news")
@@ -142,16 +202,100 @@ async def _refresh_forecasts_async() -> None:
 
 @celery_app.task(name="app.worker.beat_tasks.check_worker_heartbeats")
 def check_worker_heartbeats():
-    """
-    Check Redis for strategy worker heartbeat keys.
-    If any run_id key is stale (> 30s), mark that run as ERROR.
-    Implemented in Phase 4.
-    """
+    """Mark runs stuck in 'running' > 90s with no DB update as failed."""
+    asyncio.run(_check_heartbeats_async())
+
+
+async def _check_heartbeats_async() -> None:
+    from uuid import UUID
+
+    pool = await _get_pool()
+    try:
+        # Find all stale running runs across all tenants
+        stale = await pool.fetch(
+            """
+            SELECT id, tenant_id FROM strategy_runs
+            WHERE status = 'running'
+              AND updated_at < now() - INTERVAL '90 seconds'
+            """
+        )
+        if not stale:
+            return
+
+        logger.warning("check_worker_heartbeats: %d stale run(s) found", len(stale))
+        for row in stale:
+            run_id = row["id"]
+            tenant_id = row["tenant_id"]
+            await pool.execute(
+                """
+                UPDATE strategy_runs
+                SET status = 'failed',
+                    error = 'Worker heartbeat timeout — process likely crashed',
+                    ended_at = now(),
+                    updated_at = now()
+                WHERE id = $1 AND tenant_id = $2
+                """,
+                run_id, tenant_id,
+            )
+            logger.warning("  marked run %s as failed (heartbeat timeout)", run_id)
+    finally:
+        await pool.close()
 
 
 @celery_app.task(name="app.worker.beat_tasks.reconcile_positions")
 def reconcile_positions():
-    """
-    End-of-day: compare positions table against actual broker positions.
-    Flag any discrepancy in audit_events. Implemented in Phase 4.
-    """
+    """End-of-day: compare DB positions against actual broker positions."""
+    asyncio.run(_reconcile_positions_async())
+
+
+async def _reconcile_positions_async() -> None:
+    from decimal import Decimal
+    from uuid import UUID
+
+    pool = await _get_pool()
+    try:
+        brokers = await pool.fetch(
+            "SELECT * FROM broker_connections WHERE is_active = true AND broker = 'alpaca'"
+        )
+        if not brokers:
+            logger.info("reconcile_positions: no active Alpaca connections")
+            return
+
+        from app.services.broker_crypto import decrypt_key
+        from app.services.execution import AlpacaExecutor
+
+        for row in brokers:
+            tenant_id = row["tenant_id"]
+            try:
+                executor = AlpacaExecutor(
+                    api_key=decrypt_key(row["key_encrypted"]),
+                    secret_key=decrypt_key(row["secret_encrypted"]),
+                    paper=bool(row["is_paper"]),
+                )
+                broker_positions = executor.get_positions()
+
+                # Load DB positions for this tenant
+                db_rows = await pool.fetch(
+                    "SELECT symbol, quantity FROM positions WHERE tenant_id = $1",
+                    tenant_id,
+                )
+                db_positions = {r["symbol"].upper(): Decimal(str(r["quantity"])) for r in db_rows}
+
+                for symbol, broker_qty in broker_positions.items():
+                    db_qty = db_positions.get(symbol, Decimal("0"))
+                    diff = abs(broker_qty - db_qty)
+                    if diff > Decimal("0.0001"):
+                        # Log discrepancy — cannot auto-correct since strategy_id is required
+                        logger.warning(
+                            "reconcile_positions: MISMATCH tenant=%s  %s  db=%s  broker=%s  diff=%s",
+                            tenant_id, symbol, db_qty, broker_qty, diff,
+                        )
+
+                logger.info(
+                    "reconcile_positions: tenant=%s  broker_positions=%d  db_positions=%d",
+                    tenant_id, len(broker_positions), len(db_positions),
+                )
+            except Exception as exc:
+                logger.warning("reconcile_positions: tenant %s failed: %s", tenant_id, exc)
+    finally:
+        await pool.close()

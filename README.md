@@ -26,8 +26,8 @@
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
-[![Build Status](https://img.shields.io/badge/Backend-Phase_2_Complete-success?style=flat-square)](https://github.com/Algo-Ankit/AlphaSwarm)
-[![Phase](https://img.shields.io/badge/Current_Phase-3_(Market_Data)-blue?style=flat-square)](https://github.com/Algo-Ankit/AlphaSwarm)
+[![Build Status](https://img.shields.io/badge/Backend-Phase_4_Complete-success?style=flat-square)](https://github.com/Algo-Ankit/AlphaSwarm)
+[![Phase](https://img.shields.io/badge/Current_Phase-5_(Strategy_Builder)-blue?style=flat-square)](https://github.com/Algo-Ankit/AlphaSwarm)
 [![Founding Members](https://img.shields.io/badge/Founding_Members-500_spots-gold?style=flat-square)](https://github.com/Algo-Ankit/AlphaSwarm)
 
 </div>
@@ -305,8 +305,8 @@ curl -X POST http://localhost:8000/v1/strategies \
 
 > Full OpenAPI spec: [`openapi.json`](openapi.json) — or visit `/docs` when running locally.
 
-**Upcoming in Phase 3:**
-`GET /v1/market/bars/{symbol}` · `/indicators/{symbol}` · `/forecast/{symbol}` · `/news/{symbol}` · `/search`
+**Upcoming in Phase 5:**
+`POST /v1/strategies/build` (AutoGen generation) · `/sandbox/validate` · `/v1/backtest` (Historical execution)
 
 ---
 
@@ -419,22 +419,20 @@ Real problems that came up during development and how they were fixed.
 Phase 0  [██████████] System Design v2.0 — complete, all gaps resolved
 Phase 1  [██████████] Backend Foundation — FastAPI, Celery, Docker, Nginx, Pydantic models
 Phase 2  [██████████] DB Layer + Auth — asyncpg pool, Alembic, repositories, JWT RS256/HS256
-Phase 3  [░░░░░░░░░░] Market Data & Intelligence — NEXT
-Phase 4  [░░░░░░░░░░] Execution Engine — AutoGen agents, Alpaca broker, crash recovery
-Phase 5  [░░░░░░░░░░] Strategy Builder + Backtesting — NL→code, BacktestRunner, sandbox
+Phase 3  [██████████] Market Data & Intelligence — Alpaca/yfinance feeds, pandas-ta, AI forecasting
+Phase 4  [██████████] Execution Engine — Live Alpaca broker, position tracking, strict risk engine
+Phase 5  [░░░░░░░░░░] Strategy Builder & Backtesting — NEXT
 Phase 6  [░░░░░░░░░░] Frontend — TradingView terminal, auth pages, dual-path builder
 Phase 7  [░░░░░░░░░░] Production Hardening — rate limiting, Sentry, billing, live gate
 ```
 
-### Phase 3 — What's next
+### Phase 5 — What's next
 
-- `app/services/market_data.py` — Alpaca Data API (US) + yfinance (Indian/global), normalized to canonical `Bar` model
-- `app/services/indicators.py` — pandas-ta, parameterized: `rsi(14)`, `macd(12,26,9)`, `bb(20,2)`, `ema(200)`, `vwap`
-- `app/services/forecaster.py` — Prophet + ARIMA ensemble, cached in `forecasts` table
-- `app/services/news_intel.py` — NewsAPI + Alpha Vantage + Claude Haiku sentiment scoring
-- REST endpoints: `GET /v1/market/bars/{symbol}`, `/indicators/{symbol}`, `/forecast/{symbol}`, `/news/{symbol}`
-- WebSocket infrastructure: Redis pub/sub + FastAPI WS manager + Alpaca live feed
-- Celery Beat tasks: portfolio snapshots, news refresh, forecast regeneration
+- `app/services/strategy_builder_agent.py` — AutoGen `StrategyBuilderAgent` (Natural Language → Python)
+- `app/services/backtester.py` — `BacktestRunner` strictly enforcing risk parity with live mode
+- `app/domain/sandbox.py` — `RestrictedPython` execution environment for user-submitted code
+- Strategy versioning in PostgreSQL (immutable historic runs)
+- WebSockets for streaming backtest progression and performance metrics
 
 ---
 
@@ -585,6 +583,6 @@ Star the repo to follow the journey from infrastructure to a full trading termin
 
 [![GitHub Stars](https://img.shields.io/github/stars/Algo-Ankit/AlphaSwarm?style=social)](https://github.com/Algo-Ankit/AlphaSwarm)
 
-*Phase 2 complete. Phase 3 (Market Data & Intelligence) in progress.*
+*Phase 4 complete. Phase 5 (Strategy Builder & Backtesting) in progress.*
 
 </div>

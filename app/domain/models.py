@@ -111,13 +111,31 @@ class OrderIntent(BaseModel):
 
     @property
     def estimated_notional(self) -> Decimal:
-        return self.quantity * self.estimated_price
+        # Use limit_price for risk sizing on limit orders — estimated_price may be stale
+        price = (
+            self.limit_price
+            if self.order_type == OrderType.limit and self.limit_price is not None
+            else self.estimated_price
+        )
+        return self.quantity * price
 
 
 class RiskCheckResult(BaseModel):
     approved: bool
     reason: str
     order_notional: JsonDecimal
+
+
+class OrderResult(BaseModel):
+    order_id: str | None = None           # broker order ID; None for dry runs
+    symbol: str
+    side: OrderSide
+    quantity: JsonDecimal
+    fill_price: JsonDecimal | None = None
+    estimated_price: JsonDecimal
+    broker_status: str                     # filled | pending | dry_run | rejected
+    is_paper: bool
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class TaskStatusResponse(BaseModel):
