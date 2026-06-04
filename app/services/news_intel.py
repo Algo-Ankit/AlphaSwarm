@@ -145,7 +145,12 @@ async def _classify_batch(symbol: str, articles: list[dict]) -> list[dict]:
     if not articles:
         return []
 
-    import anthropic
+    try:
+        import anthropic
+    except ModuleNotFoundError:
+        raise RuntimeError(
+            "anthropic package is not installed — run: pip install anthropic"
+        )
 
     client = anthropic.AsyncAnthropic(api_key=_settings.anthropic_api_key)
     headline_list = "\n".join(

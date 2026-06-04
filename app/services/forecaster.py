@@ -142,7 +142,7 @@ def _run_arima(series: pd.Series, horizon: int) -> list[float]:
 
 def _compute_ensemble_sync(
     close_prices: list[tuple[datetime, float]], horizon: int
-) -> tuple[list[dict], float | None, float | None]:
+) -> tuple[list[dict], str, float | None, float | None]:
     """
     Runs Prophet + ARIMA in the current thread, returns ensemble forecast.
     Called via asyncio.to_thread() — never call directly from async context.
