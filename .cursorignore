@@ -1,0 +1,4 @@
+*.log
+*.err.log
+README.md
+docs/

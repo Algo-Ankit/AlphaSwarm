@@ -54,6 +54,10 @@ httpx>=0.28.0                      # async HTTP client for all external calls
 # ──────────────────────────────────────────
 # Technical Analysis
 # ──────────────────────────────────────────
+# IMPORTANT: install pandas-ta BEFORE running pip install -r requirements.txt, or use --no-deps:
+#   pip install "pandas-ta==0.4.71b0" --no-deps
+# pandas-ta pulls in numba which does not yet support Python 3.14.
+# Once pre-installed without numba, pip will skip it here (satisfied by 0.4.71b0).
 pandas-ta>=0.3.14b                 # RSI, MACD, Bollinger Bands, EMA, VWAP, ATR, Stoch
 pandas>=2.2.0
 numpy>=1.26.0
