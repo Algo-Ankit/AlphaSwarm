@@ -21,7 +21,7 @@ AlphaSwarm is a production-grade algorithmic trading SaaS.
 3. **Risk function is sacred.** `verify_order_intent()` cannot be bypassed.
 4. **Tenant isolation.** Every SQL query includes tenant_id.
 5. **Paper by default.** Live trading requires explicit opt-in.
-
+6. **Flexible LLM Strategy (BYOK & Local-First).** Users can provide their own Anthropic/OpenAI keys (BYOK) OR use a local GPU model (e.g. Ollama) for 100% free operation. AutoGen and News Intel must support this dynamic fallback.
 ## CURRENT STATE & ROADMAP
 - [x] Phase 0-2: COMPLETE (DB, Auth, Multi-tenancy, Docker, Celery setup)
 - [x] Phase 3: Market Data & Intelligence COMPLETE (Broker BYOB, Market Data cache, Forecast, News, WebSockets)
