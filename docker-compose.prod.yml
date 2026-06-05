@@ -34,6 +34,12 @@ services:
       context: .
       dockerfile: Dockerfile
     env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://alphaswarm:alphaswarm@postgres:5432/alphaswarm
+      DATABASE_SYNC_URL: postgresql://alphaswarm:alphaswarm@postgres:5432/alphaswarm
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
     depends_on:
       postgres:
         condition: service_healthy
@@ -56,6 +62,18 @@ services:
       --max-tasks-per-child=50
       --loglevel=info
     env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://alphaswarm:alphaswarm@postgres:5432/alphaswarm
+      DATABASE_SYNC_URL: postgresql://alphaswarm:alphaswarm@postgres:5432/alphaswarm
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    healthcheck:
+      test: ["CMD", "celery", "-A", "app.core.celery_app.celery_app", "inspect", "ping", "-d", "celery@$$HOSTNAME", "--timeout", "5"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     depends_on:
       redis:
         condition: service_healthy
@@ -68,8 +86,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: celery -A app.core.celery_app.celery_app beat --loglevel=info
+    command: celery -A app.core.celery_app.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule
     env_file: .env
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    healthcheck:
+      disable: true
     depends_on:
       - redis
     restart: unless-stopped

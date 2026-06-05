@@ -1,4 +1,6 @@
 import type {
+  BacktestRequest,
+  BacktestResult,
   BrokerConnectRequest,
   BrokerConnection,
   Strategy,
@@ -6,6 +8,7 @@ import type {
   StrategyRunResponse,
   TaskStatusResponse,
   TestConnectionResponse,
+  TickerSearchResult,
   TokenResponse,
 } from './types'
 
@@ -138,5 +141,20 @@ export const api = {
     req<TestConnectionResponse>(`/v1/brokers/${id}/test`, {
       method: 'PATCH',
       headers: authHeaders(),
+    }),
+
+  // ── Search ────────────────────────────────────────────────
+  searchTickers: (q: string, limit = 8) =>
+    req<TickerSearchResult[]>(
+      `/v1/market/search?q=${encodeURIComponent(q)}&limit=${limit}`,
+      { headers: authHeaders() },
+    ),
+
+  // ── Backtest ──────────────────────────────────────────────
+  runBacktest: (strategyId: string, params: BacktestRequest) =>
+    req<BacktestResult>(`/v1/strategies/${strategyId}/backtest`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(params),
     }),
 }

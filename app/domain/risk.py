@@ -17,6 +17,8 @@ def verify_order_intent(
     market_state: MarketState | None = None,
     settings: Settings | None = None,
     current_position: float | None = None,
+    current_position_value: float | None = None,
+    open_positions_count: int = 0,
 ) -> RiskCheckResult:
     """
     Validates an order intent against all risk rules.
@@ -67,6 +69,31 @@ def verify_order_intent(
             reason=f"Order notional ${notional:.2f} exceeds strategy limit ${strategy_risk.max_order_notional:.2f}.",
             order_notional=notional,
         )
+
+    # ── Check 4a: Per-symbol position notional cap ────────────────────────────
+    if current_position_value is not None and order.side == OrderSide.buy:
+        projected_position = Decimal(str(current_position_value)) + notional
+        if projected_position > strategy_risk.max_position_notional:
+            return RiskCheckResult(
+                approved=False,
+                reason=(
+                    f"Order would bring {symbol} exposure to ${projected_position:.2f}, "
+                    f"exceeding the per-symbol position limit of ${strategy_risk.max_position_notional:.2f}."
+                ),
+                order_notional=notional,
+            )
+
+    # ── Check 4b: Max concurrent open positions ───────────────────────────────
+    if (current_position is None or current_position == 0.0) and order.side == OrderSide.buy:
+        if open_positions_count >= strategy_risk.max_open_positions:
+            return RiskCheckResult(
+                approved=False,
+                reason=(
+                    f"Strategy has {open_positions_count} open positions at the limit of "
+                    f"{strategy_risk.max_open_positions}. Close an existing position before opening {symbol}."
+                ),
+                order_notional=notional,
+            )
 
     # ── Check 5: Today's executed notional ≤ daily limit ─────────────────────
     # Only exempt genuinely risk-reducing trades (closing an open position).

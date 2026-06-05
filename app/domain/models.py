@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Annotated
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, PlainSerializer
+from pydantic import BaseModel, ConfigDict, Field, PlainSerializer
 
 # Decimal that serializes to float in JSON/dict-mode so DB JSON columns and
 # API responses receive numeric values, not strings.
@@ -41,8 +41,32 @@ class OrderType(str, Enum):
 
 
 class StrategyRiskConfig(BaseModel):
+    # frozen so sandbox strategies cannot mutate risk limits at runtime.
+    model_config = ConfigDict(frozen=True)
+
+    # ── Per-order ─────────────────────────────────────────────────────────────
     max_order_notional: JsonDecimal = Field(default=Decimal("1000"), gt=0)
-    max_daily_notional: JsonDecimal = Field(default=Decimal("5000"), gt=0)
+
+    # ── Position limits ───────────────────────────────────────────────────────
+    max_position_notional: JsonDecimal = Field(default=Decimal("10000"), gt=0)
+    max_open_positions: int = Field(default=5, ge=1, le=100)
+
+    # ── Daily gross turnover cap (buy + sell) ─────────────────────────────────
+    max_daily_notional: JsonDecimal = Field(default=Decimal("50000"), gt=0)
+
+    # ── Automated exit params — None = disabled ───────────────────────────────
+    # float (not Decimal) so JSON serialization produces a number, not a string
+    stop_loss_pct: float | None = Field(default=None, ge=0)
+    take_profit_pct: float | None = Field(default=None, ge=0)
+
+    # ── Execution cost model (informational, used in backtest P&L) ────────────
+    slippage_bps: int = Field(default=5, ge=0, le=500)
+    commission_per_share: JsonDecimal = Field(default=Decimal("0.005"), ge=0)
+
+    # ── Session gate ──────────────────────────────────────────────────────────
+    trade_session: str = Field(default="regular")  # "regular" | "extended"
+
+    # ── Existing ──────────────────────────────────────────────────────────────
     allowed_symbols: list[str] = Field(default_factory=lambda: ["SPY"])
     paper_trading_only: bool = True
 
@@ -142,3 +166,45 @@ class TaskStatusResponse(BaseModel):
     task_id: str
     celery_status: str
     result: dict | None = None
+
+
+# ── Phase 5: Backtest ─────────────────────────────────────────────────────────
+
+class BacktestRequest(BaseModel):
+    symbol: str
+    exchange: str = "NASDAQ"
+    timeframe: str = "1d"
+    limit: int = Field(default=252, ge=20, le=1000)
+    initial_equity: float = Field(default=10_000.0, gt=0)
+
+
+class BacktestTradeRecord(BaseModel):
+    bar_index: int
+    timestamp: datetime
+    symbol: str
+    side: str
+    quantity: JsonDecimal
+    price: JsonDecimal
+
+
+class BacktestMetricsModel(BaseModel):
+    total_return_pct: float
+    sharpe_ratio: float
+    max_drawdown_pct: float
+    win_rate_pct: float
+    total_trades: int
+    profitable_trades: int
+    initial_equity: float
+    final_equity: float
+
+
+class BacktestResponse(BaseModel):
+    strategy_id: str
+    symbol: str
+    timeframe: str
+    bars_processed: int
+    trades: list[BacktestTradeRecord]
+    equity_curve: list[float]
+    metrics: BacktestMetricsModel
+    started_at: datetime
+    completed_at: datetime

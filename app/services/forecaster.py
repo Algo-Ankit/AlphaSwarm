@@ -130,12 +130,12 @@ def _run_prophet(
 
 def _run_arima(series: pd.Series, horizon: int) -> list[float]:
     """
-    ARIMA(5,1,0) point forecast.
+    ARIMA(1,1,0) point forecast.
     Raises on convergence failure — caller decides whether to degrade gracefully.
     """
     from statsmodels.tsa.arima.model import ARIMA
 
-    model = ARIMA(series, order=(5, 1, 0))
+    model = ARIMA(series, order=(1, 1, 0))
     fit = model.fit()
     return [round(float(v), 4) for v in fit.forecast(steps=horizon)]
 
@@ -168,18 +168,22 @@ def _compute_ensemble_sync(
         )
         return prophet_points, "prophet", mae, mape
 
-    # Ensemble: average Prophet + ARIMA yhats; shift CI bands by same delta
+    # Ensemble: average Prophet + ARIMA yhats; widen CI by model disagreement
     ensemble: list[dict] = []
     for i, pt in enumerate(prophet_points):
         arima_val = arima_preds[i] if i < len(arima_preds) else pt["yhat"]
         ens_yhat = round((pt["yhat"] + arima_val) / 2.0, 4)
-        delta = ens_yhat - pt["yhat"]
+        
+        half_width = (pt["yhat_upper"] - pt["yhat_lower"]) / 2.0
+        disagreement = abs(pt["yhat"] - arima_val) / 2.0
+        adjusted_half_width = half_width + disagreement
+        
         ensemble.append(
             {
                 "date": pt["date"],
                 "yhat": ens_yhat,
-                "yhat_lower": round(pt["yhat_lower"] + delta, 4),
-                "yhat_upper": round(pt["yhat_upper"] + delta, 4),
+                "yhat_lower": round(ens_yhat - adjusted_half_width, 4),
+                "yhat_upper": round(ens_yhat + adjusted_half_width, 4),
             }
         )
 

@@ -154,7 +154,7 @@ async def _classify_batch(symbol: str, articles: list[dict]) -> list[dict]:
 
     client = anthropic.AsyncAnthropic(api_key=_settings.anthropic_api_key)
     headline_list = "\n".join(
-        f"{i + 1}. {a['headline']}" for i, a in enumerate(articles)
+        f"{i + 1}. {a['headline']} (Summary: {a.get('summary', 'N/A')})" for i, a in enumerate(articles)
     )
     prompt = (
         f"Classify each news headline about the stock ticker {symbol}.\n\n"

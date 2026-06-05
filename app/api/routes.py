@@ -63,7 +63,7 @@ async def create_strategy(
         generated_logic = request.code_source
         prompt_text = f"[quant] {request.name}"
     else:
-        generated_logic = compile_strategy_prompt(request)
+        generated_logic = await compile_strategy_prompt(request)
         prompt_text = request.prompt
 
     record = await repo.create(

@@ -980,12 +980,13 @@ When paid tiers launch, founding members get 3 months free on the Trader plan.
   - [x] `app/worker/tasks.py` — real StrategyRunAgent using AutoGen + BaseStrategy
   - [x] Worker heartbeat + crash recovery
   - [x] Position reconciliation beat task
-- [ ] Phase 5 — Strategy Builder & Backtesting
-  - [ ] `app/services/strategy_builder_agent.py` — AutoGen StrategyBuilderAgent (real NL→code)
-  - [ ] `app/services/backtester.py` — BacktestRunner + PerformanceMetrics
-  - [ ] `app/domain/sandbox.py` — RestrictedPython sandbox for user code
-  - [ ] Strategy versioning (new version on edit, run links to version)
-  - [ ] `app/services/performance.py` — live performance metrics from orders/positions
+- [x] Phase 5 — Strategy Builder & Backtesting ✓ 2026-06-05
+  - [x] `app/services/strategy_builder.py` — AutoGen StrategyBuilderAgent (NL→validated BaseStrategy subclass, Claude Sonnet 4.6, 3-retry sandbox loop)
+  - [x] `app/services/backtest.py` — BacktestRunner (fills at next-bar open, cash/position P&L, timeframe-aware Sharpe, bankruptcy halt, O(n) indicators)
+  - [x] `app/services/strategy_sandbox.py` — RestrictedPython sandbox (AST prescan + blocked imports; pd/np excluded)
+  - [x] `app/api/backtest.py` — POST /v1/strategies/{id}/backtest
+  - [x] Frontend: backtest panel on strategy detail page (metrics grid + SVG equity curve)
+  - [x] Math & Security hardening (ReadOnlyDataFrame to prevent pandas RCE, bankruptcy liquidation fix, zero-crossing cost basis fix)
 - [ ] Phase 6 — Frontend
   - [ ] Auth pages (login, register) + JWT token management
   - [ ] Dashboard with real WebSocket equity curve + live P&L

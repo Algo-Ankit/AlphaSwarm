@@ -11,6 +11,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.api.auth import router as auth_router
+from app.api.backtest import router as backtest_router
 from app.api.brokers import router as broker_router
 from app.api.market import router as market_router
 from app.api.routes import router as strategy_router
@@ -103,6 +104,7 @@ app.include_router(broker_router)
 app.include_router(market_router)
 app.include_router(ws_router)
 app.include_router(strategy_router)
+app.include_router(backtest_router)
 
 
 # ── Health checks ─────────────────────────────────────────────

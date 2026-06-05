@@ -1,10 +1,27 @@
+// Values must match market_data.py _alpaca_timeframe / _YF_PARAMS keys exactly.
 export const TIMEFRAMES = [
-  { value: '1Min',  label: '1 Minute' },
-  { value: '5Min',  label: '5 Minutes' },
-  { value: '15Min', label: '15 Minutes' },
-  { value: '1Hour', label: '1 Hour' },
-  { value: '1Day',  label: '1 Day' },
+  { value: '1m',  label: '1 min' },
+  { value: '5m',  label: '5 min' },
+  { value: '15m', label: '15 min' },
+  { value: '1h',  label: '1 hour' },
+  { value: '4h',  label: '4 hour' },
+  { value: '1d',  label: '1 day' },
+  { value: '1w',  label: '1 week' },
 ]
+
+// Normalise legacy timeframe values saved before the constants fix.
+export const TIMEFRAME_NORMALIZE: Record<string, string> = {
+  '1Min':  '1m',
+  '5Min':  '5m',
+  '15Min': '15m',
+  '1Hour': '1h',
+  '4Hour': '4h',
+  '1Day':  '1d',
+}
+
+export function normalizeTimeframe(tf: string): string {
+  return TIMEFRAME_NORMALIZE[tf] ?? tf
+}
 
 export const DEFAULT_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'QQQ', 'SPY', 'TSLA']
 

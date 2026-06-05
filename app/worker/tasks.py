@@ -121,14 +121,22 @@ async def _write_order_async(
                         0
                     )
                 -- Adding to / opening a short (delta < 0, current qty ≤ 0)
-                -- Use absolute values so the weighted-average formula stays positive
                 WHEN $5 < 0 AND positions.quantity <= 0 THEN
                     COALESCE(
                         (positions.avg_cost * ABS(positions.quantity) + $6 * ABS($5)) /
                         NULLIF(ABS(positions.quantity) + ABS($5), 0),
                         0
                     )
-                -- Partial or full close in either direction — preserve avg_cost for P&L
+                -- Flipping from Short to Long
+                WHEN $5 > 0 AND positions.quantity < 0 AND positions.quantity + $5 > 0 THEN
+                    $6
+                -- Flipping from Long to Short
+                WHEN $5 < 0 AND positions.quantity > 0 AND positions.quantity + $5 < 0 THEN
+                    $6
+                -- Closing to exactly zero
+                WHEN positions.quantity + $5 = 0 THEN
+                    NULL
+                -- Partial close in either direction
                 ELSE positions.avg_cost
             END,
             updated_at = now()
@@ -213,13 +221,18 @@ async def _execute_async(
             }
 
         # Today's notional uses Eastern Time — US market day resets at ET midnight, not UTC
+        # Gross Notional Turnover: sum ALL orders (buys + sells) regardless of side.
+        # We cannot reconstruct risk-adding vs. risk-reducing without replaying position
+        # state, so we treat max_daily_notional as a turnover cap. A $10k cap allows
+        # $5k buys + $5k sells — both directions consume the budget equally.
+        # This prevents a malicious strategy from shorting to infinity across worker restarts.
         today_notional_row = await pool.fetchrow(
             """
             SELECT COALESCE(SUM(estimated_notional), 0) AS total
             FROM orders
             WHERE tenant_id = $1
               AND strategy_id = $2
-              AND side = 'buy'
+              AND broker_status IN ('filled', 'open', 'pending')
               AND created_at >= (
                   date_trunc('day', now() AT TIME ZONE 'America/New_York')
                   AT TIME ZONE 'America/New_York'
@@ -278,14 +291,38 @@ async def _execute_async(
                 secret_key=broker_creds["secret_key"],
                 paper=broker_creds["paper"],
             )
-            live_positions = executor.get_positions()
-            for sym in tradable_symbols:
-                if sym in live_positions:
-                    positions[sym] = live_positions[sym]
+            # BUG FIX #5: Do NOT override DB positions with broker live_positions.
+            # Two strategies trading the same symbol would corrupt each other's
+            # position state — the broker account is a shared resource.
+            # Source of truth for per-strategy positions is the positions table.
             if log:
                 log.info(f"Broker connected — paper={broker_creds['paper']}  positions={dict(positions)}")
 
         results = []
+
+        # Load AI-generated strategy class from DB (Phase 5); fall back to default RSI
+        from app.services.strategy_sandbox import SandboxError, compile_strategy_code
+
+        strategy_row = await pool.fetchrow(
+            """
+            SELECT sv.generated_logic
+            FROM strategies s
+            JOIN strategy_versions sv ON sv.id = s.current_version_id
+            WHERE s.id = $1 AND s.tenant_id = $2
+            """,
+            UUID(strategy_id), UUID(tenant_id),
+        )
+        generated_logic = (strategy_row["generated_logic"] or "") if strategy_row else ""
+
+        _strategy_class = None
+        if len(generated_logic.strip()) > 30:
+            try:
+                _strategy_class = compile_strategy_code(generated_logic)
+                if log:
+                    log.info(f"Loaded AI-generated strategy class: {_strategy_class.__name__}")
+            except SandboxError as exc:
+                if log:
+                    log.info(f"Sandbox load failed ({exc}) — using default RSI strategy")
 
         for symbol in tradable_symbols:
             bars = bars_by_symbol.get(symbol, [])
@@ -304,7 +341,8 @@ async def _execute_async(
             if log:
                 rsi_val = ind.get("RSI_14")
                 rsi_str = f"RSI={rsi_val:.1f}" if rsi_val is not None else "RSI=n/a"
-                log.info(f"{symbol}  close=${close:.2f}  {rsi_str}  position={position_qty}")
+                strat_name = _strategy_class.__name__ if _strategy_class else "_DefaultRSIStrategy"
+                log.info(f"{symbol}  close=${close:.2f}  {rsi_str}  position={position_qty}  strategy={strat_name}")
 
             ctx = StrategyContext(
                 strategy_id=strategy_id,
@@ -317,7 +355,14 @@ async def _execute_async(
                 avg_cost=avg_cost,
                 risk=risk_profile,
             )
-            signal: OrderIntent | None = _DefaultRSIStrategy(ctx).on_bar()
+            active_class = _strategy_class if _strategy_class is not None else _DefaultRSIStrategy
+            try:
+                signal: OrderIntent | None = active_class(ctx).on_bar()
+            except Exception as exc:
+                if log:
+                    log.error(f"{symbol}: strategy crashed during on_bar: {exc}")
+                results.append({"symbol": symbol, "action": "error", "reason": str(exc)})
+                continue
 
             if signal is None:
                 if log:
@@ -345,8 +390,13 @@ async def _execute_async(
                 today_executed_notional=today_notional,
             )
             current_pos = float(position_qty) if position_qty is not None else None
+            current_pos_qty = positions.get(symbol) or Decimal("0")
+            current_pos_value = float(abs(current_pos_qty)) * close
+            open_pos_count = sum(1 for q in positions.values() if q and q != 0)
             risk_result = verify_order_intent(
-                signal, risk_profile, market_state, current_position=current_pos
+                signal, risk_profile, market_state, current_position=current_pos,
+                current_position_value=current_pos_value,
+                open_positions_count=open_pos_count,
             )
 
             if not risk_result.approved:
@@ -383,17 +433,9 @@ async def _execute_async(
                         f"— broker_status={order_result.broker_status}  id={order_result.order_id}"
                     )
 
-            # Only count risk-adding trades against the daily notional cap;
-            # mirrors is_risk_reducing in risk.py Check 5 so the two stay in sync.
-            # Closing trades (long→flat, short→cover) must not inflate the counter
-            # or they'd push neutral/risk-reducing activity toward the daily limit.
-            _pos_val = current_pos or 0.0
-            _is_risk_reducing = (
-                (signal.side == OrderSide.sell and _pos_val > 0) or
-                (signal.side == OrderSide.buy  and _pos_val < 0)
-            )
-            if not _is_risk_reducing:
-                today_notional += risk_result.order_notional
+            # Gross turnover: every approved order consumes the daily cap regardless of
+            # whether it opens or closes a position. Consistent with the SQL startup sum.
+            today_notional += risk_result.order_notional
 
             if run_id:
                 await _write_order_async(

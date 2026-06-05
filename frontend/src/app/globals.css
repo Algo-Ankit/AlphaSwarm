@@ -111,6 +111,21 @@
     border-color: rgba(139,92,246,0.28);
   }
 
+  /* Persistent focus ring — visible for the entire duration of text entry, not just on click */
+  .glass-card:focus-within {
+    transform: none !important;
+    border-color: rgba(109, 40, 217, 0.30) !important;
+    box-shadow: var(--shadow-card), 0 0 0 3px rgba(109, 40, 217, 0.10) !important;
+    transition: border-color 120ms ease, box-shadow 120ms ease !important;
+  }
+
+  .dark .glass-card:focus-within {
+    transform: none !important;
+    border-color: rgba(139, 92, 246, 0.40) !important;
+    box-shadow: var(--shadow-card), 0 0 0 3px rgba(139, 92, 246, 0.14), 0 0 24px rgba(139, 92, 246, 0.08) !important;
+    transition: border-color 120ms ease, box-shadow 120ms ease !important;
+  }
+
   /* ── Sidebar ────────────────────────────────────────────────────────────── */
   .glass-sidebar {
     /* GPU layer — decouples from scroll compositing */

@@ -3,9 +3,22 @@ export type RunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'rejecte
 
 export interface StrategyRiskConfig {
   max_order_notional: number
+  max_position_notional: number
+  max_open_positions: number
   max_daily_notional: number
+  stop_loss_pct: number | null
+  take_profit_pct: number | null
+  slippage_bps: number
+  commission_per_share: number
+  trade_session: string
   allowed_symbols: string[]
   paper_trading_only: boolean
+}
+
+export interface TickerSearchResult {
+  symbol: string
+  name: string
+  exchange: string
 }
 
 export interface Strategy {
@@ -81,4 +94,46 @@ export interface TestConnectionResponse {
   ok: boolean
   message: string
   account_id: string | null
+}
+
+// ── Phase 5: Backtesting ───────────────────────────────────────────────────
+
+export interface BacktestMetrics {
+  total_return_pct: number
+  sharpe_ratio: number
+  max_drawdown_pct: number
+  win_rate_pct: number
+  total_trades: number
+  profitable_trades: number
+  initial_equity: number
+  final_equity: number
+}
+
+export interface BacktestTrade {
+  bar_index: number
+  timestamp: string
+  symbol: string
+  side: 'buy' | 'sell'
+  quantity: number
+  price: number
+}
+
+export interface BacktestRequest {
+  symbol: string
+  exchange?: string
+  timeframe?: string
+  limit?: number
+  initial_equity?: number
+}
+
+export interface BacktestResult {
+  strategy_id: string
+  symbol: string
+  timeframe: string
+  bars_processed: number
+  trades: BacktestTrade[]
+  equity_curve: number[]
+  metrics: BacktestMetrics
+  started_at: string
+  completed_at: string
 }

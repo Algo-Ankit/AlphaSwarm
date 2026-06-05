@@ -1,5 +1,5 @@
 # ── Stage 1: dependency builder ──────────────────────────────
-FROM python:3.11-slim AS builder
+FROM python:3.12-slim AS builder
 
 WORKDIR /build
 
@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 
 # ── Stage 2: lean runtime image ──────────────────────────────
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -21,6 +21,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy installed packages from builder
 COPY --from=builder /install /usr/local
+
+# Cache dirs must be writable by the non-root user (site-packages and home are not)
+ENV NUMBA_CACHE_DIR=/tmp
+ENV YFINANCE_CACHE_DIR=/tmp
 
 # Non-root user for security
 RUN useradd --system --no-create-home alphaswarm

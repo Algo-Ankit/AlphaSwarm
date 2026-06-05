@@ -11,6 +11,23 @@ if TYPE_CHECKING:
     from app.domain.models import OrderIntent, StrategyRiskConfig
 
 
+class ReadOnlyIloc:
+    # BUG FIX #1: lazy — never materialise all records upfront.
+    # Backtest loop created a full to_dict("records") copy on every bar = O(N×window) allocations.
+    def __init__(self, df: pd.DataFrame):
+        self._df = df
+    def __getitem__(self, idx: int) -> dict:
+        return self._df.iloc[idx].to_dict()
+
+class ReadOnlyDataFrame:
+    """Safe wrapper around pd.DataFrame that only exposes .iloc for read-only dictionary access."""
+    def __init__(self, df: pd.DataFrame):
+        self._df = df  # store ref; never copy
+    @property
+    def iloc(self) -> ReadOnlyIloc:
+        return ReadOnlyIloc(self._df)
+
+
 @dataclass
 class StrategyContext:
     """
@@ -21,7 +38,7 @@ class StrategyContext:
     symbol: str
     exchange: str        # NASDAQ | NYSE | NSE | BSE | CRYPTO
     timeframe: str       # 1m | 5m | 15m | 1h | 4h | 1d
-    bars: pd.DataFrame   # Columns: timestamp(UTC), open, high, low, close, volume
+    bars: ReadOnlyDataFrame   # Safe wrapper to prevent RCE via pandas
                          # Sorted ascending. Latest bar is bars.iloc[-1].
     indicators: dict     # Computed by indicators.py. Keys use pandas-ta naming convention:
                          # e.g. {"RSI_14": 42.3, "MACD_12_26_9": 0.12, "BBU_20_2.0": 185.4}
