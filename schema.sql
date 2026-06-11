@@ -304,3 +304,21 @@ CREATE TABLE audit_events (
 );
 CREATE INDEX idx_audit_tenant_time ON audit_events(tenant_id, created_at DESC);
 CREATE INDEX idx_audit_entity      ON audit_events(entity_type, entity_id, created_at DESC);
+
+-- ── LLM Configs (BYOAK — Bring Your Own API Key) ─────────────────────────────
+-- Users add their own LLM provider keys for NL strategy generation.
+-- Falls back to platform-level key (server .env) when none provided.
+CREATE TABLE llm_configs (
+    id               UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id        UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    owner_user_id    UUID        NOT NULL REFERENCES users(id),
+    label            TEXT        NOT NULL,
+    provider         TEXT        NOT NULL DEFAULT 'custom',
+    base_url         TEXT        NOT NULL,
+    key_encrypted    TEXT        NOT NULL,
+    model            TEXT        NOT NULL,
+    is_active        BOOLEAN     NOT NULL DEFAULT TRUE,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_llm_configs_tenant ON llm_configs(tenant_id, is_active);

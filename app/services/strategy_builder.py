@@ -1,11 +1,13 @@
 """
 StrategyBuilderAgent — AutoGen pipeline: NL description → validated Python BaseStrategy subclass.
 
-Uses AutoGen AssistantAgent backed by Claude Sonnet 4.6. Up to 3 sandbox-validate retries.
+Uses AutoGen AssistantAgent (autogen-agentchat) backed by an OpenAI-compatible
+chat completion endpoint (autogen-ext's OpenAIChatCompletionClient) — points at
+a free local model server (Ollama, LM Studio) or a free-tier proxy (Groq), so
+strategy generation never requires a paid API key. Up to 3 sandbox-validate retries.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from typing import Optional
@@ -16,10 +18,14 @@ _WRITER_SYSTEM_PROMPT = """\
 You are StrategyWriterAgent, an expert quantitative trading strategy programmer.
 
 Convert the user's natural-language trading strategy into a Python class that extends BaseStrategy.
+LIMITATIONS: You do not have access to statistical forecasting, machine learning models, or external data. 
+You are constrained to a limited set of Technical Analysis (TA) indicators. Because individual TA indicators 
+are often weak alpha factors, you must creatively combine them (e.g., trend alignment with EMA + mean 
+reversion with RSI + volatility filters with ATR) to formulate stronger, more robust trading logic.
 
 STRICT RULES:
 1. Do NOT include any import statements. Only these symbols are available in scope:
-   BaseStrategy, OrderIntent, OrderSide, OrderType, Decimal, Optional
+   BaseStrategy, OrderIntent, OrderSide, OrderType, Decimal, Optional, math, datetime
    pd and np are NOT available. Do NOT attempt to use them.
 2. Define exactly one class that extends BaseStrategy.
 3. Implement on_bar(self) -> Optional[OrderIntent].
@@ -36,6 +42,10 @@ STRICT RULES:
 11. Always set is_paper=self.ctx.risk.paper_trading_only in OrderIntent.
 12. Do NOT access self.bars for custom computation. Use self.close and self.indicators only.
 13. No network calls, file I/O, or side effects. on_bar() must complete in < 100ms.
+14. NEVER use augmented assignment on attributes (self.x += 1 is FORBIDDEN). Always write self.x = self.x + 1.
+15. Use getattr(self, 'key', default) for lazy instance state. Never define __init__.
+16. Output ONLY the fenced code block below — no explanations, no preamble, no
+    markdown outside the fences, no commentary before or after. Just the class.
 
 Wrap your code in ```python ... ``` fences. Output ONLY the class, nothing else.
 
@@ -93,89 +103,27 @@ def _build_user_message(prompt: str, symbols: list[str], timeframe: str) -> str:
     )
 
 
-def build_strategy_sync(
-    prompt: str,
-    symbols: list[str],
-    timeframe: str,
-    api_key: str,
-    max_retries: int = 3,
-) -> str:
-    """
-    Calls AutoGen StrategyWriterAgent (Claude Sonnet 4.6), validates in RestrictedPython sandbox.
-    Returns validated Python source string. Raises ValueError after all retries exhausted.
-    """
-    import autogen
-    from app.services.strategy_sandbox import SandboxError, compile_strategy_code
+def _make_model_client(api_key: str, base_url: str, model: str):
+    from autogen_core.models import ModelFamily, ModelInfo
+    from autogen_ext.models.openai import OpenAIChatCompletionClient
 
-    llm_config = {
-        "config_list": [
-            {
-                "model": "claude-sonnet-4-6",
-                "api_key": api_key,
-                "api_type": "anthropic",
-            }
-        ],
-        "temperature": 0.2,
-        "max_tokens": 4096,
-    }
-
-    writer = autogen.AssistantAgent(
-        name="StrategyWriter",
-        llm_config=llm_config,
-        system_message=_WRITER_SYSTEM_PROMPT,
-    )
-
-    conversation: list[dict] = [
-        {"role": "user", "content": _build_user_message(prompt, symbols, timeframe)}
-    ]
-    last_error = "no attempts made"
-
-    for attempt in range(1, max_retries + 1):
-        logger.info("StrategyBuilderAgent attempt %d/%d", attempt, max_retries)
-
-        try:
-            response = writer.generate_reply(messages=conversation)
-        except Exception as exc:
-            raise ValueError(f"AutoGen LLM call failed: {exc}") from exc
-
-        if not response:
-            last_error = "LLM returned empty response"
-            conversation.append({
-                "role": "user",
-                "content": "Your response was empty. Respond with the strategy class in ```python ... ``` fences.",
-            })
-            continue
-
-        content = response.get("content", str(response)) if isinstance(response, dict) else str(response)
-        conversation.append({"role": "assistant", "content": content})
-
-        code = _extract_python_block(content)
-        if not code:
-            last_error = "no ```python ... ``` code block found"
-            conversation.append({
-                "role": "user",
-                "content": "No code block found. Wrap your class in ```python ... ``` fences and respond again.",
-            })
-            continue
-
-        try:
-            compile_strategy_code(code)
-            logger.info("StrategyBuilderAgent validated on attempt %d", attempt)
-            return code
-        except SandboxError as exc:
-            last_error = str(exc)
-            logger.warning("Sandbox failure attempt %d: %s", attempt, exc)
-            if attempt < max_retries:
-                conversation.append({
-                    "role": "user",
-                    "content": (
-                        f"Sandbox validation failed: {exc}\n\n"
-                        "Fix the error and respond with the corrected class only in ```python ... ``` fences."
-                    ),
-                })
-
-    raise ValueError(
-        f"StrategyBuilderAgent failed after {max_retries} attempts. Last error: {last_error}"
+    return OpenAIChatCompletionClient(
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        temperature=0.2,
+        max_tokens=4096,
+        # Free/local models (Ollama, LM Studio, Groq) aren't in autogen's model
+        # registry, so capabilities must be declared explicitly or the client
+        # raises "model_info is required" before making any call.
+        model_info=ModelInfo(
+            vision=False,
+            function_calling=False,
+            json_output=False,
+            family=ModelFamily.UNKNOWN,
+            structured_output=False,
+            multiple_system_messages=True,
+        ),
     )
 
 
@@ -184,6 +132,81 @@ async def build_strategy_async(
     symbols: list[str],
     timeframe: str,
     api_key: str,
+    base_url: str,
+    model: str,
+    max_retries: int = 3,
 ) -> str:
-    """Async wrapper — runs build_strategy_sync in a thread pool so it doesn't block the event loop."""
-    return await asyncio.to_thread(build_strategy_sync, prompt, symbols, timeframe, api_key)
+    """
+    Calls AutoGen StrategyWriterAgent via an OpenAI-compatible endpoint, validates
+    in the RestrictedPython sandbox. Returns validated Python source string.
+    Raises ValueError after all retries exhausted.
+    """
+    from autogen_agentchat.agents import AssistantAgent
+    from autogen_agentchat.messages import TextMessage
+
+    from app.services.strategy_sandbox import SandboxError, compile_strategy_code
+
+    model_client = _make_model_client(api_key, base_url, model)
+    writer = AssistantAgent(
+        name="StrategyWriter",
+        model_client=model_client,
+        system_message=_WRITER_SYSTEM_PROMPT,
+    )
+
+    task: str = _build_user_message(prompt, symbols, timeframe)
+    last_error = "no attempts made"
+
+    try:
+        for attempt in range(1, max_retries + 1):
+            logger.info("StrategyBuilderAgent attempt %d/%d", attempt, max_retries)
+
+            # Network/API retry loop for transient failures (independent of sandbox retries)
+            result = None
+            import asyncio
+            for net_attempt in range(1, 4):
+                try:
+                    result = await asyncio.wait_for(writer.run(task=task), timeout=45.0)
+                    break  # Success
+                except asyncio.TimeoutError:
+                    if net_attempt == 3:
+                        raise ValueError("AutoGen LLM call timed out after 3 network attempts.")
+                    logger.warning("LLM API timeout, retrying %d/3...", net_attempt)
+                    await asyncio.sleep(2 ** net_attempt)
+                except Exception as exc:
+                    if net_attempt == 3:
+                        raise ValueError(f"AutoGen LLM call failed after 3 network attempts: {exc}") from exc
+                    logger.warning("LLM API error: %s, retrying %d/3...", exc, net_attempt)
+                    await asyncio.sleep(2 ** net_attempt)
+
+            reply = result.messages[-1] if result.messages else None
+            content = reply.content if isinstance(reply, TextMessage) else ""
+
+            if not content:
+                last_error = "LLM returned empty response"
+                task = "Your response was empty. Respond with the strategy class in ```python ... ``` fences."
+                continue
+
+            code = _extract_python_block(content)
+            if not code:
+                last_error = "no ```python ... ``` code block found"
+                task = "No code block found. Wrap your class in ```python ... ``` fences and respond again."
+                continue
+
+            try:
+                compile_strategy_code(code)
+                logger.info("StrategyBuilderAgent validated on attempt %d", attempt)
+                return code
+            except SandboxError as exc:
+                last_error = str(exc)
+                logger.warning("Sandbox failure attempt %d: %s", attempt, exc)
+                if attempt < max_retries:
+                    task = (
+                        f"Sandbox validation failed: {exc}\n\n"
+                        "Fix the error and respond with the corrected class only in ```python ... ``` fences."
+                    )
+    finally:
+        await model_client.close()
+
+    raise ValueError(
+        f"StrategyBuilderAgent failed after {max_retries} attempts. Last error: {last_error}"
+    )

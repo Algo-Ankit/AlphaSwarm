@@ -32,10 +32,21 @@ class Settings(BaseSettings):
     celery_result_backend: str = "redis://localhost:6379/1"
     celery_task_always_eager: bool = False
 
-    # AI (Anthropic)
+    # AI — news sentiment classification (app/services/news_intel.py only)
     anthropic_api_key: str = ""
-    strategy_builder_model: str = "claude-sonnet-4-6"
-    analysis_model: str = "claude-haiku-4-5-20251001"
+
+    # AI — AutoGen StrategyBuilderAgent, via an OpenAI-compatible client.
+    # Points at a free local model server (Ollama, LM Studio) or a free-tier
+    # proxy (e.g. Groq) — no paid Anthropic key needed to generate strategies.
+    # Default targets Ollama on the HOST machine: api/worker run inside Docker,
+    # where "localhost" is the container itself — host.docker.internal reaches
+    # the Windows/Mac Docker Desktop host (set llm_base_url in .env to override).
+    #   Ollama (host):  llm_base_url=http://host.docker.internal:11434/v1, llm_api_key=ollama
+    #   LM Studio:      llm_base_url=http://host.docker.internal:1234/v1,  llm_api_key=lm-studio
+    #   Groq free tier: llm_base_url=https://api.groq.com/openai/v1, llm_api_key=<free Groq key>, llm_model=llama-3.1-8b-instant
+    llm_base_url: str = "http://host.docker.internal:11434/v1"
+    llm_api_key: str = "ollama"
+    llm_model: str = "llama3.1"
 
     # Alpaca
     alpaca_api_key: str = ""

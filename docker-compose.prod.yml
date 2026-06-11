@@ -69,7 +69,7 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
     healthcheck:
-      test: ["CMD", "celery", "-A", "app.core.celery_app.celery_app", "inspect", "ping", "-d", "celery@$$HOSTNAME", "--timeout", "5"]
+      test: ["CMD-SHELL", "celery -A app.core.celery_app.celery_app inspect ping -d celery@$$HOSTNAME --timeout 5"]
       interval: 30s
       timeout: 10s
       retries: 3

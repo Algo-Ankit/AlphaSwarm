@@ -41,8 +41,15 @@ cryptography>=43.0.0               # Fernet encryption for broker keys
 # AI & Agent Framework
 # ──────────────────────────────────────────
 # Microsoft AutoGen — NOT LangChain
+# pyautogen>=0.3 is a proxy package for the modern autogen-agentchat/autogen-core/
+# autogen-ext stack (async-native AssistantAgent + model clients). The legacy 0.2.x
+# line (monolithic `autogen` module, AssistantAgent.generate_reply) requires numpy<2,
+# which conflicts with pandas-ta/yfinance's numpy>=2 requirement — not viable here.
+autogen-agentchat>=0.3.0
+autogen-ext[openai]>=0.3.0
 pyautogen>=0.3.0
-anthropic>=0.40.0                  # Claude API (also used by AutoGen)
+tiktoken>=0.8.0                    # autogen_ext's openai client imports this directly
+openai>=1.50.0                     # OpenAI API
 
 # ──────────────────────────────────────────
 # Market Data

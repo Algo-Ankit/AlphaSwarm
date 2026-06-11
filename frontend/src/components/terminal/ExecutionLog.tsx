@@ -53,16 +53,23 @@ function nextId() { return String(++_id) }
 interface ExecutionLogProps {
   runId: string
   className?: string
+  onStatusChange?: (connected: boolean, status: RunStatus | null) => void
 }
 
-export function ExecutionLog({ runId, className }: ExecutionLogProps) {
+export function ExecutionLog({ runId, className, onStatusChange }: ExecutionLogProps) {
   const [entries, setEntries]       = useState<LogEntry[]>([])
   const [connected, setConnected]   = useState(false)
   const [runStatus, setRunStatus]   = useState<RunStatus | null>(null)
   const [autoScroll, setAutoScroll] = useState(true)
 
-  const scrollRef  = useRef<HTMLDivElement>(null)
-  const wsRef      = useRef<WebSocket | null>(null)
+  const scrollRef      = useRef<HTMLDivElement>(null)
+  const wsRef          = useRef<WebSocket | null>(null)
+  const onStatusRef    = useRef(onStatusChange)
+  onStatusRef.current  = onStatusChange
+
+  useEffect(() => {
+    onStatusRef.current?.(connected, runStatus)
+  }, [connected, runStatus])
 
   /* ── Add entry ───────────────────────────────────────────────────────── */
   const push = useCallback((level: LogLevel, msg: string, ts?: string) => {
@@ -77,17 +84,28 @@ export function ExecutionLog({ runId, className }: ExecutionLogProps) {
     const token = getAccessToken()
     if (!token || !runId) return
 
-    const base = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000').replace(/^http/, 'ws')
+    // React 18 StrictMode mounts effects twice in development — the first
+    // socket gets torn down (often mid-CONNECTING) before the second one is
+    // created. Closing a CONNECTING socket fires synthetic onerror/onclose
+    // (code 1006) events that would otherwise show up as misleading "WebSocket
+    // error" / "Disconnected" lines for a connection the user never used.
+    // `live` tracks whether *this* effect instance is still the active one —
+    // events from a socket we deliberately tore down are swallowed.
+    let live = true
+
+    const base = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000').replace(/^https?/, m => m === 'https' ? 'wss' : 'ws')
     const url  = `${base}/v1/ws/run/${runId}?token=${token}`
     const ws   = new WebSocket(url)
     wsRef.current = ws
 
     ws.onopen = () => {
+      if (!live) return
       setConnected(true)
       push('STATUS', `Connected — run ${runId.slice(0, 8)}…`)
     }
 
     ws.onmessage = (e) => {
+      if (!live) return
       try {
         const msg = JSON.parse(e.data as string)
 
@@ -108,17 +126,22 @@ export function ExecutionLog({ runId, className }: ExecutionLogProps) {
     }
 
     ws.onclose = (ev) => {
+      if (!live) return
       setConnected(false)
       push('STATUS', `Disconnected (code ${ev.code})`)
     }
 
-    ws.onerror = () => push('ERROR', 'WebSocket error — check API server')
+    ws.onerror = () => {
+      if (!live) return
+      push('ERROR', 'WebSocket error — check API server')
+    }
 
     const ping = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) ws.send('ping')
     }, 30_000)
 
     return () => {
+      live = false
       clearInterval(ping)
       ws.close()
     }

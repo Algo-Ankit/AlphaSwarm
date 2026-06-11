@@ -98,9 +98,11 @@ class RefreshTokenRepo:
         token_hash = self.hash_token(raw_token)
         return await self._pool.fetchrow(
             """
-            SELECT rt.*, u.tenant_id, u.email, u.role
+            SELECT rt.*, u.tenant_id, u.email, u.role, u.display_name,
+                   t.name AS tenant_name, t.plan
             FROM refresh_tokens rt
             JOIN users u ON u.id = rt.user_id
+            JOIN tenants t ON t.id = u.tenant_id
             WHERE rt.token_hash = $1
               AND rt.expires_at > now()
               AND (rt.grace_period_until IS NULL OR rt.grace_period_until > now())

@@ -9,7 +9,7 @@ import { api } from '@/lib/api'
 import { TIMEFRAMES } from '@/lib/constants'
 import { X, Search, Brain, Code2, ShieldAlert, Activity, Zap, Clock, TrendingUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { TickerSearchResult } from '@/lib/types'
+import type { LLMConfig, TickerSearchResult } from '@/lib/types'
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false })
 
@@ -146,6 +146,7 @@ export default function NewStrategyPage() {
 
   // ── Universe ─────────────────────────────────────────────────────────────
   const [symbols, setSymbols]               = useState<string[]>(['SPY'])
+  const [exchange, setExchange]             = useState<string>('NASDAQ')
   const [tickerQuery, setTickerQuery]       = useState('')
   const [tickerResults, setTickerResults]   = useState<TickerSearchResult[]>([])
   const [tickerLoading, setTickerLoading]   = useState(false)
@@ -171,6 +172,20 @@ export default function NewStrategyPage() {
 
   // ── Mode ──────────────────────────────────────────────────────────────────
   const [paperOnly, setPaperOnly] = useState(true)
+
+  // ── LLM model selection (NL mode) ────────────────────────────────────────
+  const [llmConfigs, setLlmConfigs]       = useState<LLMConfig[]>([])
+  const [selectedLLM, setSelectedLLM]     = useState<string | null>(null) // null = platform default
+
+  useEffect(() => {
+    api.listLLMConfigs()
+      .then((configs) => {
+        setLlmConfigs(configs)
+        // Auto-select the only user config if exactly one exists
+        if (configs.length === 1) setSelectedLLM(configs[0].id)
+      })
+      .catch(() => {})
+  }, [])
 
   // ── UI ────────────────────────────────────────────────────────────────────
   const [loading, setLoading]         = useState(false)
@@ -221,9 +236,24 @@ export default function NewStrategyPage() {
     return () => clearTimeout(timer)
   }, [tickerQuery])
 
-  function addSymbol(sym: string) {
-    const u = sym.toUpperCase().trim()
-    if (u && !symbols.includes(u)) setSymbols(p => [...p, u])
+  function addSymbol(sym: string, exch?: string) {
+    let u = sym.toUpperCase().trim()
+    if (!u) {
+      setTickerQuery('')
+      setShowDropdown(false)
+      setDropdownIdx(-1)
+      return
+    }
+    // Carry exchange info into the symbol so the backend correctly classifies
+    // NSE/BSE strategies (yfinance requires the .NS / .BO suffix).
+    const ex = (exch ?? exchange).toUpperCase()
+    if (ex === 'NSE' && !u.endsWith('.NS')) u = `${u}.NS`
+    else if (ex === 'BSE' && !u.endsWith('.BO')) u = `${u}.BO`
+
+    if (!symbols.includes(u)) {
+      setSymbols(p => [...p, u])
+      if (symbols.length === 0 && exch) setExchange(ex)
+    }
     setTickerQuery('')
     setShowDropdown(false)
     setDropdownIdx(-1)
@@ -238,7 +268,10 @@ export default function NewStrategyPage() {
     else if (e.key === 'ArrowUp') { e.preventDefault(); setDropdownIdx(i => Math.max(i - 1, -1)) }
     else if (e.key === 'Enter') {
       e.preventDefault()
-      if (dropdownIdx >= 0 && tickerResults[dropdownIdx]) addSymbol(tickerResults[dropdownIdx].symbol)
+      if (dropdownIdx >= 0 && tickerResults[dropdownIdx]) {
+        const r = tickerResults[dropdownIdx]
+        addSymbol(r.symbol, r.exchange)
+      }
       else if (tickerQuery.trim()) addSymbol(tickerQuery)
     } else if (e.key === 'Escape') {
       setShowDropdown(false); setDropdownIdx(-1)
@@ -248,7 +281,9 @@ export default function NewStrategyPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     let finalSymbols = [...symbols]
-    const pending = tickerQuery.toUpperCase().trim()
+    let pending = tickerQuery.toUpperCase().trim()
+    if (exchange === 'NSE' && !pending.endsWith('.NS')) pending = pending ? `${pending}.NS` : pending
+    else if (exchange === 'BSE' && !pending.endsWith('.BO')) pending = pending ? `${pending}.BO` : pending
     if (pending && !finalSymbols.includes(pending)) {
       finalSymbols.push(pending)
       setSymbols(finalSymbols)
@@ -278,6 +313,7 @@ export default function NewStrategyPage() {
         name,
         prompt: mode === 'nl' ? prompt : `[quant] ${name}`,
         symbols: finalSymbols,
+        exchange,
         timeframe,
         risk: {
           max_order_notional:    orderCap,
@@ -294,6 +330,7 @@ export default function NewStrategyPage() {
         },
         creation_mode: mode,
         ...(mode === 'quant' ? { code_source: code } : {}),
+        ...(mode === 'nl' && selectedLLM ? { llm_config_id: selectedLLM } : {}),
       })
       router.push(`/strategies/${s.id}`)
     } catch (err: unknown) {
@@ -302,8 +339,9 @@ export default function NewStrategyPage() {
     }
   }
 
-  const nlReady    = name.length >= 3 && prompt.length >= 10 && symbols.length > 0
-  const quantReady = name.length >= 3 && code.trim().length >= 20 && symbols.length > 0
+  const hasSymbols = symbols.length > 0 || tickerQuery.trim().length > 0
+  const nlReady    = name.length >= 3 && prompt.length >= 10 && hasSymbols
+  const quantReady = name.length >= 3 && code.trim().length >= 20 && hasSymbols
   const ready      = mode === 'nl' ? nlReady : quantReady
 
   return (
@@ -368,6 +406,28 @@ export default function NewStrategyPage() {
                   minLength={10}
                   maxLength={4000}
                 />
+              </div>
+              {/* Model selector row */}
+              <div className="flex items-center gap-3 px-5 py-3 bg-zinc-50/50 dark:bg-zinc-900/40 border-t border-black/[0.04] dark:border-white/[0.04]">
+                <Brain className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0" />
+                <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest whitespace-nowrap">Model</span>
+                <select
+                  value={selectedLLM ?? ''}
+                  onChange={(e) => setSelectedLLM(e.target.value || null)}
+                  className="flex-1 min-w-0 bg-transparent text-[12px] font-medium text-zinc-700 dark:text-zinc-300 focus:outline-none cursor-pointer"
+                >
+                  <option value="">Platform Default (Free · Groq llama-3.1-8b-instant)</option>
+                  {llmConfigs.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label} · {c.model}
+                    </option>
+                  ))}
+                </select>
+                {llmConfigs.length === 0 && (
+                  <a href="/settings/ai" className="text-[10px] font-semibold text-violet-500 hover:text-violet-600 whitespace-nowrap">
+                    + Add key
+                  </a>
+                )}
               </div>
               <div className="flex items-center gap-2 px-5 py-3 bg-zinc-50/50 dark:bg-zinc-900/40 border-t border-black/[0.04] dark:border-white/[0.04]">
                 <span className="text-[10px] text-zinc-400">
@@ -458,6 +518,30 @@ export default function NewStrategyPage() {
               </span>
             </div>
 
+            {/* Exchange / Asset class */}
+            <div className="mb-4">
+              <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-[0.12em] mb-2">
+                Exchange / Asset Class
+              </label>
+              <div className="flex gap-1.5 flex-wrap">
+                {(['NASDAQ', 'NYSE', 'NSE', 'BSE', 'CRYPTO'] as const).map(ex => (
+                  <button key={ex} type="button" onClick={() => setExchange(ex)}
+                    className={cn(
+                      'px-3 py-1.5 rounded-lg text-[11px] font-bold font-mono border transition-all',
+                      exchange === ex
+                        ? 'bg-violet-600 dark:bg-violet-500 border-violet-600 dark:border-violet-500 text-white'
+                        : 'bg-zinc-50 dark:bg-zinc-900/60 border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100',
+                    )}>
+                    {ex}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1.5 text-[10px] text-zinc-400">
+                Auto-detected from ticker search — override for manually typed symbols (e.g. NSE/BSE need
+                a <code className="font-mono">.NS</code> / <code className="font-mono">.BO</code> suffix, applied automatically).
+              </p>
+            </div>
+
             {/* Selected symbols */}
             {symbols.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5 mb-3">
@@ -508,7 +592,7 @@ export default function NewStrategyPage() {
                   border border-zinc-200 dark:border-zinc-700
                   rounded-xl shadow-xl dark:shadow-black/50 overflow-hidden">
                   {tickerResults.map((r, i) => (
-                    <button key={`${r.symbol}-${r.exchange}-${i}`} type="button" onClick={() => addSymbol(r.symbol)}
+                    <button key={`${r.symbol}-${r.exchange}-${i}`} type="button" onClick={() => addSymbol(r.symbol, r.exchange)}
                       className={cn(
                         'w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors',
                         i === dropdownIdx
@@ -537,7 +621,7 @@ export default function NewStrategyPage() {
               {['SPY', 'QQQ', 'AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMZN', 'META', 'JPM', 'GS']
                 .filter(s => !symbols.includes(s))
                 .map(sym => (
-                  <button key={sym} type="button" onClick={() => addSymbol(sym)}
+                  <button key={sym} type="button" onClick={() => addSymbol(sym, 'NASDAQ')}
                     className="text-[11px] font-bold font-mono px-2.5 py-1 rounded-md
                       bg-zinc-100 dark:bg-zinc-800/60 text-zinc-500
                       hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-zinc-900 dark:hover:text-zinc-100
@@ -560,7 +644,7 @@ export default function NewStrategyPage() {
               <FieldInput
                 label="Position Cap" helper="Max total exposure per instrument" prefix="$"
                 value={maxPositionNotional} onChange={setMaxPositionNotional}
-                min={100} max={10_000_000} step={500}
+                min={500} max={10_000_000} step={500}
               />
               <FieldInput
                 label="Max Positions" helper="Concurrent open positions across the universe"
@@ -577,7 +661,7 @@ export default function NewStrategyPage() {
               <FieldInput
                 label="Daily Turnover Cap" helper="Gross buy+sell notional per session" prefix="$"
                 value={maxDailyNotional} onChange={setMaxDailyNotional}
-                min={500} max={100_000_000} step={1000}
+                min={1000} max={100_000_000} step={1000}
               />
               <FieldInput
                 label="Stop-Loss" helper="Hard stop per position — blank to disable" suffix="%"

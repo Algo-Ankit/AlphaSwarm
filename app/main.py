@@ -13,6 +13,7 @@ from slowapi.errors import RateLimitExceeded
 from app.api.auth import router as auth_router
 from app.api.backtest import router as backtest_router
 from app.api.brokers import router as broker_router
+from app.api.llm_configs import router as llm_configs_router
 from app.api.market import router as market_router
 from app.api.routes import router as strategy_router
 from app.api.ws import router as ws_router
@@ -101,6 +102,7 @@ app.add_middleware(
 # ── Routes ────────────────────────────────────────────────────
 app.include_router(auth_router)
 app.include_router(broker_router)
+app.include_router(llm_configs_router)
 app.include_router(market_router)
 app.include_router(ws_router)
 app.include_router(strategy_router)

@@ -12,8 +12,6 @@ if TYPE_CHECKING:
 
 
 class ReadOnlyIloc:
-    # BUG FIX #1: lazy — never materialise all records upfront.
-    # Backtest loop created a full to_dict("records") copy on every bar = O(N×window) allocations.
     def __init__(self, df: pd.DataFrame):
         self._df = df
     def __getitem__(self, idx: int) -> dict:
@@ -91,7 +89,7 @@ class BaseStrategy(ABC):
     # ── Convenience properties ────────────────────────────────────────────────
 
     @property
-    def bars(self) -> pd.DataFrame:
+    def bars(self) -> ReadOnlyDataFrame:
         """Full OHLCV history up to and including the current bar."""
         return self.ctx.bars
 

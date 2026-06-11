@@ -9,6 +9,7 @@ from app.db.repositories.runs import RunRepo
 from app.db.repositories.strategies import StrategyRepo
 from app.domain.models import (
     RunStatus,
+    StrategyCodeUpdateRequest,
     StrategyCreateRequest,
     StrategyResponse,
     StrategyRiskConfig,
@@ -27,8 +28,20 @@ def _record_to_response(record: asyncpg.Record) -> StrategyResponse:
     import json as _json
     risk_raw = record["risk_config"]
     if isinstance(risk_raw, str):
-        risk_raw = _json.loads(risk_raw)
-    risk = StrategyRiskConfig.model_validate(risk_raw if isinstance(risk_raw, dict) else {})
+        try:
+            risk_raw = _json.loads(risk_raw)
+        except Exception:
+            risk_raw = {}
+    try:
+        risk = StrategyRiskConfig.model_validate(risk_raw if isinstance(risk_raw, dict) else {})
+    except Exception:
+        risk = StrategyRiskConfig()
+        
+    try:
+        status_val = StrategyStatus(record["status"])
+    except Exception:
+        status_val = StrategyStatus.draft
+
     return StrategyResponse(
         id=str(record["id"]),
         tenant_id=str(record["tenant_id"]),
@@ -36,8 +49,9 @@ def _record_to_response(record: asyncpg.Record) -> StrategyResponse:
         name=record["name"],
         prompt=record["prompt"],
         symbols=list(record["symbols"]),
+        exchange=record["exchange"],
         timeframe=record["timeframe"],
-        status=StrategyStatus(record["status"]),
+        status=status_val,
         generated_logic=record["generated_logic"] or "",
         risk=risk,
         created_at=record["created_at"],
@@ -60,18 +74,46 @@ async def create_strategy(
         if not request.code_source or len(request.code_source.strip()) < 20:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                                 detail="code_source is required for quant strategies")
-        generated_logic = request.code_source
+        from app.services.strategy_sandbox import SandboxError, compile_strategy_code, normalize_strategy_code
+        normalized = normalize_strategy_code(request.code_source)
+        try:
+            compile_strategy_code(normalized)
+        except SandboxError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Strategy code failed sandbox validation: {exc}",
+            ) from exc
+        generated_logic = normalized
         prompt_text = f"[quant] {request.name}"
     else:
-        generated_logic = await compile_strategy_prompt(request)
+        try:
+            generated_logic = await compile_strategy_prompt(request, pool=pool)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            )
         prompt_text = request.prompt
+
+    if request.exchange:
+        inferred_exchange = request.exchange.upper()
+    else:
+        primary_symbol = request.symbols[0].upper() if request.symbols else "SPY"
+        if "-" in primary_symbol or "/" in primary_symbol:
+            inferred_exchange = "CRYPTO"
+        elif primary_symbol.endswith(".NS"):
+            inferred_exchange = "NSE"
+        elif primary_symbol.endswith(".BO"):
+            inferred_exchange = "BSE"
+        else:
+            inferred_exchange = "NASDAQ"
 
     record = await repo.create(
         owner_user_id=current_user.user_id,
         name=request.name,
         prompt=prompt_text,
         symbols=[s.upper() for s in request.symbols],
-        exchange="NASDAQ",
+        exchange=inferred_exchange,
         timeframe=request.timeframe,
         creation_mode=request.creation_mode,
         risk_config=request.risk.model_dump(mode="json"),
@@ -98,6 +140,34 @@ async def get_strategy(
 ) -> StrategyResponse:
     repo = StrategyRepo(pool, current_user.tenant_id)
     record = await repo.get_by_id(strategy_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
+    return _record_to_response(record)
+
+
+@router.patch(
+    "/strategies/{strategy_id}/code",
+    response_model=StrategyResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def update_strategy_code(
+    strategy_id: UUID,
+    request: StrategyCodeUpdateRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> StrategyResponse:
+    from app.services.strategy_sandbox import SandboxError, compile_strategy_code, normalize_strategy_code
+    normalized = normalize_strategy_code(request.code_source)
+    try:
+        compile_strategy_code(normalized)
+    except SandboxError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Strategy code failed sandbox validation: {exc}",
+        ) from exc
+
+    repo = StrategyRepo(pool, current_user.tenant_id)
+    record = await repo.update_logic(strategy_id, normalized, current_user.user_id)
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
     return _record_to_response(record)
@@ -134,6 +204,12 @@ async def run_strategy(
             _rc = {}
     risk_cfg_dict = _rc if isinstance(_rc, dict) else {}
 
+    if risk_cfg_dict.get("paper_trading_only", True) and not request.dry_run:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This strategy is restricted to paper trading only by its risk configuration.",
+        )
+
     try:
         task = execute_trading_strategy.apply_async(
             args=[
@@ -149,7 +225,10 @@ async def run_strategy(
             queue="trading_tasks",
         )
     except Exception as exc:
-        await run_repo.mark_failed(run["id"], str(exc))
+        try:
+            await run_repo.mark_failed(run["id"], str(exc))
+        except Exception:
+            pass
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Could not dispatch strategy run to Celery",

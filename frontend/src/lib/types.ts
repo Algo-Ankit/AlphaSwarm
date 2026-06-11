@@ -28,6 +28,7 @@ export interface Strategy {
   name: string
   prompt: string
   symbols: string[]
+  exchange: string
   timeframe: string
   status: StrategyStatus
   generated_logic: string
@@ -40,6 +41,7 @@ export interface StrategyCreateRequest {
   name: string
   prompt: string
   symbols: string[]
+  exchange?: string
   timeframe: string
   risk?: Partial<StrategyRiskConfig>
   creation_mode?: 'nl' | 'quant'
@@ -69,6 +71,16 @@ export interface TokenResponse {
   tenant_id: string
   email: string
   role: string
+  display_name: string
+  tenant_name: string
+  plan: string
+}
+
+export interface UserProfile {
+  display_name: string
+  tenant_name: string
+  plan: string
+  email: string
 }
 
 export interface BrokerConnection {
@@ -96,6 +108,26 @@ export interface TestConnectionResponse {
   account_id: string | null
 }
 
+// ── LLM Configs (BYOAK) ───────────────────────────────────────────────────
+
+export interface LLMConfig {
+  id:          string
+  label:       string
+  provider:    'groq' | 'openai' | 'together' | 'anthropic' | 'custom'
+  base_url:    string
+  model:       string
+  key_preview: string
+  created_at:  string
+}
+
+export interface LLMConfigCreate {
+  label:    string
+  provider: LLMConfig['provider']
+  base_url: string
+  api_key:  string
+  model:    string
+}
+
 // ── Phase 5: Backtesting ───────────────────────────────────────────────────
 
 export interface BacktestMetrics {
@@ -118,12 +150,23 @@ export interface BacktestTrade {
   price: number
 }
 
+export interface BacktestBar {
+  timestamp: string
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+}
+
 export interface BacktestRequest {
   symbol: string
   exchange?: string
   timeframe?: string
   limit?: number
   initial_equity?: number
+  start_date?: string
+  end_date?: string
 }
 
 export interface BacktestResult {
@@ -131,9 +174,21 @@ export interface BacktestResult {
   symbol: string
   timeframe: string
   bars_processed: number
+  bars: BacktestBar[]
   trades: BacktestTrade[]
   equity_curve: number[]
   metrics: BacktestMetrics
   started_at: string
   completed_at: string
+}
+
+export interface BacktestSummary {
+  ran_at: string
+  symbol: string
+  exchange: string
+  timeframe: string
+  total_return_pct: number
+  sharpe_ratio: number
+  max_drawdown_pct: number
+  total_trades: number
 }

@@ -2,7 +2,7 @@
 import { usePathname, useRouter } from 'next/navigation'
 import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { useEffect, useState } from 'react'
-import { api, clearTokens, getRefreshToken } from '@/lib/api'
+import { api, clearTokens, clearUserProfile, getRefreshToken } from '@/lib/api'
 import { LogOut, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -64,6 +64,7 @@ export function TopBar() {
       try { await api.logout(refresh) } catch { /* ignore */ }
     }
     clearTokens()
+    clearUserProfile()
     router.replace('/login')
   }
 

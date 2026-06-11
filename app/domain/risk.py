@@ -71,8 +71,27 @@ def verify_order_intent(
         )
 
     # ── Check 4a: Per-symbol position notional cap ────────────────────────────
-    if current_position_value is not None and order.side == OrderSide.buy:
-        projected_position = Decimal(str(current_position_value)) + notional
+    pos = current_position or 0.0
+    
+    side_sign = Decimal("1") if order.side == OrderSide.buy else Decimal("-1")
+    delta = order.quantity * side_sign
+    projected_position_qty = Decimal(str(pos)) + delta
+    
+    is_increasing_exposure = False
+    if pos >= 0 and order.side == OrderSide.buy:
+        is_increasing_exposure = True
+    elif pos <= 0 and order.side == OrderSide.sell:
+        is_increasing_exposure = True
+    elif abs(projected_position_qty) > abs(Decimal(str(pos))):
+        is_increasing_exposure = True  # Stop-and-reverse overshoot
+        
+    if current_position_value is not None and is_increasing_exposure:
+        # If it was a stop-and-reverse, the new risk exposure is the absolute size of the new position.
+        # If just adding to a position, it's the current value + new order value.
+        if (pos > 0 and order.side == OrderSide.sell) or (pos < 0 and order.side == OrderSide.buy):
+            projected_position = abs(projected_position_qty) * order.estimated_price
+        else:
+            projected_position = Decimal(str(current_position_value)) + notional
         if projected_position > strategy_risk.max_position_notional:
             return RiskCheckResult(
                 approved=False,
@@ -84,7 +103,7 @@ def verify_order_intent(
             )
 
     # ── Check 4b: Max concurrent open positions ───────────────────────────────
-    if (current_position is None or current_position == 0.0) and order.side == OrderSide.buy:
+    if pos == 0.0 and is_increasing_exposure:
         if open_positions_count >= strategy_risk.max_open_positions:
             return RiskCheckResult(
                 approved=False,
@@ -101,13 +120,26 @@ def verify_order_intent(
     # A BUY when flat is a new long — subject to the cap.
     # Exempting all SELLs (old behaviour) allowed unbounded short selling and
     # then trapped the strategy: the buy-to-cover would be blocked by the daily cap.
-    pos = current_position or 0.0
-    is_risk_reducing = (
-        (order.side == OrderSide.sell and pos > 0) or   # closing a long
-        (order.side == OrderSide.buy  and pos < 0)       # covering a short
-    )
-    if market_state is not None and not is_risk_reducing:
-        projected_daily = market_state.today_executed_notional + notional
+    closing_qty = Decimal("0")
+    # Float precision fix: safely round tiny leftovers to 0
+    clean_pos = Decimal(str(pos))
+    if abs(clean_pos) < Decimal("0.0000001"):
+        clean_pos = Decimal("0")
+        
+    if order.side == OrderSide.sell and clean_pos > 0:
+        closing_qty = min(order.quantity, clean_pos)
+    elif order.side == OrderSide.buy and clean_pos < 0:
+        closing_qty = min(order.quantity, abs(clean_pos))
+
+    # Daily cap evaluates purely the new risk added to the market today.
+    # We must use order.estimated_price consistently for both sides of the equation
+    # to prevent Limit Order manipulation where a limit price creates negative daily usage.
+    closing_notional = closing_qty * order.estimated_price
+    notional_at_market = order.quantity * order.estimated_price
+    increasing_notional = notional_at_market - closing_notional
+
+    if market_state is not None and increasing_notional > 0:
+        projected_daily = market_state.today_executed_notional + increasing_notional
         if projected_daily > strategy_risk.max_daily_notional:
             return RiskCheckResult(
                 approved=False,

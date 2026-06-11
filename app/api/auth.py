@@ -40,6 +40,9 @@ class TokenResponse(BaseModel):
     tenant_id: str
     email: str
     role: str
+    display_name: str
+    tenant_name: str
+    plan: str
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
@@ -79,6 +82,9 @@ async def register(
         tenant_id=str(tenant["id"]),
         email=body.email,
         role="owner",
+        display_name=user["display_name"],
+        tenant_name=tenant["name"],
+        plan=tenant["plan"],
     )
 
 
@@ -88,11 +94,14 @@ async def login(
     pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> TokenResponse:
     user_repo = AuthUserRepo(pool)
+    tenant_repo = TenantRepo(pool)
     token_repo = RefreshTokenRepo(pool)
 
     user = await user_repo.get_by_email(body.email)
     if not user or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
+    tenant = await tenant_repo.get_by_id(user["tenant_id"])
 
     access_token = create_access_token(
         user_id=str(user["id"]),
@@ -110,6 +119,9 @@ async def login(
         tenant_id=str(user["tenant_id"]),
         email=body.email,
         role=user["role"],
+        display_name=user["display_name"],
+        tenant_name=tenant["name"],
+        plan=tenant["plan"],
     )
 
 
@@ -146,6 +158,9 @@ async def refresh_token(
             tenant_id=str(record["tenant_id"]),
             email=record["email"],
             role=record["role"],
+            display_name=record["display_name"],
+            tenant_name=record["tenant_name"],
+            plan=record["plan"],
         )
 
     # Normal rotation path: mark old token with grace period, issue new token
@@ -169,6 +184,9 @@ async def refresh_token(
         tenant_id=str(record["tenant_id"]),
         email=record["email"],
         role=record["role"],
+        display_name=record["display_name"],
+        tenant_name=record["tenant_name"],
+        plan=record["plan"],
     )
 
 

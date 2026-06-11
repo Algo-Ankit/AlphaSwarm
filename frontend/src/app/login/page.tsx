@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { api, setTokens, getAccessToken } from '@/lib/api'
+import { api, setTokens, setUserProfile, getAccessToken } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { Zap } from 'lucide-react'
 
@@ -30,6 +30,12 @@ export default function LoginPage() {
         ? await api.login(email, password)
         : await api.register({ email, password, display_name: displayName, tenant_name: tenantName })
       setTokens(tokens.access_token, tokens.refresh_token)
+      setUserProfile({
+        display_name: tokens.display_name,
+        tenant_name: tokens.tenant_name,
+        plan: tokens.plan,
+        email: tokens.email,
+      })
       router.replace('/')
     } catch (err: unknown) {
       const raw = err instanceof Error ? err.message : 'Something went wrong'

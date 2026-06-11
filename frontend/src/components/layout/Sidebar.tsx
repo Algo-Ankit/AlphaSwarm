@@ -4,9 +4,18 @@ import { usePathname } from 'next/navigation'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import {
-  LayoutDashboard, Zap, Activity, Settings, TrendingUp, ChevronRight,
+  LayoutDashboard, Zap, Activity, Settings, TrendingUp, ChevronRight, Brain,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getUserProfile } from '@/lib/api'
+import type { UserProfile } from '@/lib/types'
+
+function formatPlan(plan: string): string {
+  return plan
+    .split('_')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+}
 
 const NAV_SECTIONS = [
   {
@@ -22,7 +31,8 @@ const NAV_SECTIONS = [
     id: 'account',
     label: 'Account',
     items: [
-      { href: '/settings/brokers', icon: Settings, label: 'Settings' },
+      { href: '/settings/brokers', icon: Settings, label: 'Brokers' },
+      { href: '/settings/ai',      icon: Brain,    label: 'AI Models' },
     ],
   },
 ]
@@ -120,6 +130,11 @@ function LiquidPill({ top, height }: { top: number; height: number }) {
 /* ── Sidebar ─────────────────────────────────────────────────────────────── */
 export function Sidebar() {
   const pathname = usePathname()
+  const [profile, setProfile] = useState<UserProfile | null>(null)
+
+  useEffect(() => {
+    setProfile(getUserProfile())
+  }, [])
 
   /* One container ref per section — pill is local to each group */
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -150,7 +165,7 @@ export function Sidebar() {
 
   function isActive(href: string) {
     if (href === '/') return pathname === '/'
-    return pathname.startsWith(href.replace('/new', ''))
+    return pathname === href || pathname.startsWith(href + '/')
   }
 
   return (
@@ -225,14 +240,14 @@ export function Sidebar() {
             shadow-[0_2px_10px_rgba(124,58,237,0.35)]
             group-hover:shadow-[0_2px_16px_rgba(124,58,237,0.55)]
             transition-shadow">
-            A
+            {profile?.display_name ? profile.display_name.charAt(0).toUpperCase() : '?'}
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 truncate leading-none">
-              Ankit Singh
+              {profile?.display_name ?? 'Loading…'}
             </p>
             <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5 leading-none">
-              Starter Plan
+              {profile?.plan ? formatPlan(profile.plan) : profile?.tenant_name ?? ''}
             </p>
           </div>
         </div>

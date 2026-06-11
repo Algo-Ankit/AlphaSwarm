@@ -172,11 +172,20 @@ async def _fetch_alpaca(
             for b in raw
         ]
 
-    try:
-        return await asyncio.to_thread(_sync)
-    except Exception as exc:
-        logger.warning("Alpaca fetch failed for %s %s %s: %s", symbol, exchange, timeframe, exc)
-        return []
+    import time
+    for attempt in range(3):
+        try:
+            return await asyncio.to_thread(_sync)
+        except Exception as exc:
+            err_str = str(exc).lower()
+            if "401" in err_str or "auth" in err_str or "unauthorized" in err_str:
+                logger.warning("Alpaca auth failed for %s. Bypassing retries and falling back to yfinance.", symbol)
+                return []
+            if attempt == 2:
+                logger.warning("Alpaca fetch failed for %s %s %s: %s", symbol, exchange, timeframe, exc)
+            else:
+                time.sleep(1)
+    return []
 
 
 async def _fetch_yfinance(
@@ -197,14 +206,22 @@ async def _fetch_yfinance(
         import yfinance as yf
 
         ticker = yf.Ticker(yf_symbol)
+        df = None
         if start:
-            df = ticker.history(start=start, end=end, interval=yf_interval)
-        else:
+            try:
+                df = ticker.history(start=start, end=end, interval=yf_interval)
+            except Exception as e:
+                logger.debug("yfinance history with start/end failed: %s. Falling back to period.", e)
+
+        if df is None or df.empty:
+            # Robust fallback: fetch default period if start fails or yields nothing
             df = ticker.history(period=yf_period, interval=yf_interval)
 
         if df is None or df.empty:
             return []
 
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.droplevel(1)
         df = df.rename(columns=str.lower)
         df.index = pd.to_datetime(df.index, utc=True)
 
@@ -227,11 +244,16 @@ async def _fetch_yfinance(
 
         return bars
 
-    try:
-        return await asyncio.to_thread(_sync)
-    except Exception as exc:
-        logger.warning("yfinance fetch failed for %s %s %s: %s", symbol, exchange, timeframe, exc)
-        return []
+    import time
+    for attempt in range(3):
+        try:
+            return await asyncio.to_thread(_sync)
+        except Exception as exc:
+            if attempt == 2:
+                logger.warning("yfinance fetch failed for %s %s %s: %s", symbol, exchange, timeframe, exc)
+            else:
+                time.sleep(1)
+    return []
 
 
 async def get_bars(

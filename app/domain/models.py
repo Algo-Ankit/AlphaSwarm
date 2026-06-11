@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer
@@ -64,7 +64,7 @@ class StrategyRiskConfig(BaseModel):
     commission_per_share: JsonDecimal = Field(default=Decimal("0.005"), ge=0)
 
     # ── Session gate ──────────────────────────────────────────────────────────
-    trade_session: str = Field(default="regular")  # "regular" | "extended"
+    trade_session: Literal["regular", "extended"] = Field(default="regular")
 
     # ── Existing ──────────────────────────────────────────────────────────────
     allowed_symbols: list[str] = Field(default_factory=lambda: ["SPY"])
@@ -74,11 +74,13 @@ class StrategyRiskConfig(BaseModel):
 class StrategyCreateRequest(BaseModel):
     name: str = Field(min_length=3, max_length=120)
     prompt: str = Field(min_length=10, max_length=4_000)
-    symbols: list[str] = Field(default_factory=lambda: ["SPY"])
+    symbols: list[str] = Field(default_factory=lambda: ["SPY"], min_length=1)
+    exchange: str | None = Field(default=None, max_length=20)
     timeframe: str = Field(default="1Min", max_length=20)
     risk: StrategyRiskConfig = Field(default_factory=StrategyRiskConfig)
     creation_mode: str = Field(default="nl", pattern="^(nl|quant)$")
     code_source: str | None = Field(default=None, max_length=50_000)
+    llm_config_id: str | None = Field(default=None)
 
 
 class StrategyResponse(BaseModel):
@@ -88,12 +90,17 @@ class StrategyResponse(BaseModel):
     name: str
     prompt: str
     symbols: list[str]
+    exchange: str = "NASDAQ"
     timeframe: str
     status: StrategyStatus = StrategyStatus.draft
     generated_logic: str
     risk: StrategyRiskConfig
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+class StrategyCodeUpdateRequest(BaseModel):
+    code_source: str = Field(min_length=20, max_length=50_000)
 
 
 class StrategyRunRequest(BaseModel):
@@ -107,19 +114,6 @@ class StrategyRunResponse(BaseModel):
     status: RunStatus
     dry_run: bool
     message: str
-
-
-class StrategyRunRecord(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid4()))
-    tenant_id: str
-    strategy_id: str
-    task_id: str | None = None
-    status: RunStatus = RunStatus.queued
-    dry_run: bool = True
-    error: str | None = None
-    result: dict | None = None
-    created_at: datetime = Field(default_factory=utc_now)
-    updated_at: datetime = Field(default_factory=utc_now)
 
 
 class OrderIntent(BaseModel):
@@ -176,6 +170,8 @@ class BacktestRequest(BaseModel):
     timeframe: str = "1d"
     limit: int = Field(default=252, ge=20, le=1000)
     initial_equity: float = Field(default=10_000.0, gt=0)
+    start_date: datetime | None = None
+    end_date: datetime | None = None
 
 
 class BacktestTradeRecord(BaseModel):
@@ -185,6 +181,15 @@ class BacktestTradeRecord(BaseModel):
     side: str
     quantity: JsonDecimal
     price: JsonDecimal
+
+
+class BacktestBarRecord(BaseModel):
+    timestamp: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int
 
 
 class BacktestMetricsModel(BaseModel):
@@ -203,8 +208,20 @@ class BacktestResponse(BaseModel):
     symbol: str
     timeframe: str
     bars_processed: int
+    bars: list[BacktestBarRecord]
     trades: list[BacktestTradeRecord]
     equity_curve: list[float]
     metrics: BacktestMetricsModel
     started_at: datetime
     completed_at: datetime
+
+
+class BacktestSummary(BaseModel):
+    ran_at: datetime
+    symbol: str
+    exchange: str
+    timeframe: str
+    total_return_pct: float
+    sharpe_ratio: float
+    max_drawdown_pct: float
+    total_trades: int

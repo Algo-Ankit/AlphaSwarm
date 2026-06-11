@@ -74,7 +74,9 @@ EXCHANGE_YFINANCE_SUFFIX: dict[str, str] = {
 }
 
 def to_yfinance_symbol(symbol: str, exchange: str) -> str:
-    """Convert 'RELIANCE' + 'NSE' → 'RELIANCE.NS'"""
+    """Convert 'RELIANCE' + 'NSE' → 'RELIANCE.NS'; 'BTC/USD' + 'CRYPTO' → 'BTC-USD'"""
+    if exchange.upper() == "CRYPTO":
+        return symbol.replace("/", "-")
     suffix = EXCHANGE_YFINANCE_SUFFIX.get(exchange, "")
     if suffix and not symbol.endswith(suffix):
         return f"{symbol}{suffix}"

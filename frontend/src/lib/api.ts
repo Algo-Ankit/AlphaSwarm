@@ -1,8 +1,11 @@
 import type {
   BacktestRequest,
   BacktestResult,
+  BacktestSummary,
   BrokerConnectRequest,
   BrokerConnection,
+  LLMConfig,
+  LLMConfigCreate,
   Strategy,
   StrategyCreateRequest,
   StrategyRunResponse,
@@ -10,12 +13,14 @@ import type {
   TestConnectionResponse,
   TickerSearchResult,
   TokenResponse,
+  UserProfile,
 } from './types'
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
 const ACCESS_KEY  = 'alphaswarm_access_token'
 const REFRESH_KEY = 'alphaswarm_refresh_token'
+const PROFILE_KEY = 'alphaswarm_user_profile'
 
 export function getAccessToken(): string | null {
   if (typeof window === 'undefined') return null
@@ -37,6 +42,25 @@ export function clearTokens(): void {
   localStorage.removeItem(REFRESH_KEY)
 }
 
+export function getUserProfile(): UserProfile | null {
+  if (typeof window === 'undefined') return null
+  const raw = localStorage.getItem(PROFILE_KEY)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as UserProfile
+  } catch {
+    return null
+  }
+}
+
+export function setUserProfile(profile: UserProfile): void {
+  localStorage.setItem(PROFILE_KEY, JSON.stringify(profile))
+}
+
+export function clearUserProfile(): void {
+  localStorage.removeItem(PROFILE_KEY)
+}
+
 function authHeaders(): Record<string, string> {
   const token = getAccessToken()
   return {
@@ -50,6 +74,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     if (res.status === 401 && typeof window !== 'undefined' && !path.includes('/auth/')) {
       clearTokens()
+      clearUserProfile()
       window.location.href = '/login'
       return new Promise(() => {})
     }
@@ -108,6 +133,13 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  updateStrategyCode: (id: string, code_source: string) =>
+    req<Strategy>(`/v1/strategies/${id}/code`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ code_source }),
+    }),
+
   runStrategy: (id: string, dryRun = true) =>
     req<StrategyRunResponse>(`/v1/strategies/${id}/runs`, {
       method: 'POST',
@@ -143,6 +175,25 @@ export const api = {
       headers: authHeaders(),
     }),
 
+  // ── LLM Configs (BYOAK) ──────────────────────────────────
+  listLLMConfigs: () =>
+    req<LLMConfig[]>('/v1/llm-configs', { headers: authHeaders() }),
+
+  addLLMConfig: (data: LLMConfigCreate) =>
+    req<LLMConfig>('/v1/llm-configs', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    }),
+
+  deleteLLMConfig: (id: string) =>
+    fetch(`${BASE}/v1/llm-configs/${id}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    }).then((r) => {
+      if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`)
+    }),
+
   // ── Search ────────────────────────────────────────────────
   searchTickers: (q: string, limit = 8) =>
     req<TickerSearchResult[]>(
@@ -156,5 +207,10 @@ export const api = {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify(params),
+    }),
+
+  getLatestBacktest: (strategyId: string) =>
+    req<BacktestSummary>(`/v1/strategies/${strategyId}/backtests/latest`, {
+      headers: authHeaders(),
     }),
 }

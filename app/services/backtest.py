@@ -4,7 +4,7 @@ BacktestRunner — industry-standard bar-by-bar simulation.
 Design invariants:
   - Cash/position tracked separately; equity = cash + position × close (mark-to-market)
   - Signal generated on bar[i]; filled at bar[i+1].open (no lookahead bias)
-  - estimated_price hard-overridden to actual fill before verify_order_intent
+  - Risk evaluated at signal-time estimated_price (no lookahead); fill executed at bar[i+1].open
   - Indicators precomputed O(n) on full dataset; strategy receives a bounded VIEW (no copy)
   - Bankruptcy halts the simulation immediately
   - Sharpe annualization factor derived from timeframe, not hardcoded to sqrt(252)
@@ -21,9 +21,9 @@ from typing import TYPE_CHECKING
 import pandas as pd
 import pandas_ta as ta
 
-from app.domain.base_strategy import BaseStrategy, StrategyContext
-from app.domain.market_data import Bar
-from app.domain.models import OrderIntent, OrderSide, StrategyRiskConfig
+from app.domain.base_strategy import BaseStrategy, ReadOnlyDataFrame, StrategyContext
+from app.domain.market_data import Bar, MarketState
+from app.domain.models import OrderIntent, OrderSide, OrderType, StrategyRiskConfig
 from app.domain.risk import verify_order_intent
 from app.services.strategy_sandbox import SandboxError, compile_strategy_code
 
@@ -47,6 +47,16 @@ _BARS_PER_YEAR: dict[str, float] = {
     "1w":   52.0,
     "1W":   52.0,
 }
+
+
+@dataclass
+class BacktestBar:
+    timestamp: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int
 
 
 @dataclass
@@ -77,6 +87,7 @@ class BacktestResult:
     symbol: str
     timeframe: str
     bars_processed: int
+    bars: list[BacktestBar]
     trades: list[BacktestTrade]
     equity_curve: list[float]
     metrics: BacktestMetrics
@@ -123,9 +134,15 @@ def run_backtest(
     avg_cost: float | None = None
     equity_curve: list[float] = []
     trades: list[BacktestTrade] = []
+    last_date = None
+    today_notional = 0.0
+
+    strategy_instance = None
 
     for i in range(len(bars)):
         close_price = float(bars[i].close)
+        if math.isnan(close_price):
+            continue
 
         # 1. Mark-to-market at close of bar i
         equity = cash + float(position) * close_price
@@ -147,10 +164,7 @@ def run_backtest(
 
         # 4. Build bounded context view — wrapped safely
         window_start = max(0, i + 1 - _CONTEXT_WINDOW)
-        ctx_bars_raw = full_df.iloc[window_start : i + 1]
-        
-        from app.domain.base_strategy import ReadOnlyDataFrame
-        ctx_bars = ReadOnlyDataFrame(ctx_bars_raw)
+        ctx_bars = ReadOnlyDataFrame(full_df.iloc[window_start : i + 1])
 
         ctx = StrategyContext(
             strategy_id=strategy_id,
@@ -164,34 +178,34 @@ def run_backtest(
             risk=risk_profile,
         )
 
+        if strategy_instance is None:
+            strategy_instance = strategy_class(ctx)
+        else:
+            strategy_instance.ctx = ctx
+
         # 5. Strategy signal evaluated on bar i's state
-        signal: OrderIntent | None = strategy_class(ctx).on_bar()
+        signal: OrderIntent | None = strategy_instance.on_bar()
         if signal is None:
             continue
 
         # 6. Fill price = NEXT bar's open — eliminates lookahead bias
-        next_open = Decimal(str(float(bars[i + 1].open)))
-
-        # 7. Hard-override estimated_price so risk engine sees the true fill price
-        signal = signal.model_copy(update={"estimated_price": next_open})
+        next_open_val = float(bars[i + 1].open)
+        if math.isnan(next_open_val):
+            continue
+        next_open = Decimal(str(next_open_val))
 
         current_pos = float(position) if position else None
 
-        # Track simulated daily notional for Risk Check 5 (resets each new calendar day)
-        from app.domain.market_data import MarketState
         current_date = bars[i].timestamp.date()
-        if 'last_date' not in locals() or last_date != current_date:  # type: ignore[name-defined]
+        if last_date != current_date:
             today_notional = 0.0
             last_date = current_date
 
         mock_state = MarketState(
-            symbol=symbol,
             exchange=exchange,
-            timestamp=bars[i].timestamp,
             is_open=True,
             session_status="open",
-            price=close_price,
-            today_executed_notional=Decimal(str(today_notional))
+            today_executed_notional=Decimal(str(today_notional)),
         )
 
         risk_result = verify_order_intent(
@@ -207,12 +221,21 @@ def run_backtest(
         # 8. Execute fill with slippage and commission
         qty = signal.quantity
         slippage_bps = float(rc.get("slippage_bps", 5.0))
-        commission = float(rc.get("commission_per_trade", 0.0))
+        commission = float(rc.get("commission_per_share", 0.005)) * float(qty)
+
+        if signal.order_type == OrderType.limit and signal.limit_price is not None:
+            if signal.side == OrderSide.buy and float(bars[i + 1].low) > float(signal.limit_price):
+                continue
+            if signal.side == OrderSide.sell and float(bars[i + 1].high) < float(signal.limit_price):
+                continue
+            base_fill = signal.limit_price
+        else:
+            base_fill = next_open
 
         if signal.side == OrderSide.buy:
-            fill_price = next_open * Decimal(str(1 + slippage_bps / 10000.0))
+            fill_price = base_fill * Decimal(str(1 + slippage_bps / 10000.0))
         else:
-            fill_price = next_open * Decimal(str(1 - slippage_bps / 10000.0))
+            fill_price = base_fill * Decimal(str(1 - slippage_bps / 10000.0))
             
         notional = float(qty * fill_price)
 
@@ -260,11 +283,24 @@ def run_backtest(
     final_equity = round(cash, 2)
     metrics = _compute_metrics(equity_curve, trades, initial_equity, final_equity, timeframe)
 
+    bar_records = [
+        BacktestBar(
+            timestamp=b.timestamp,
+            open=float(b.open),
+            high=float(b.high),
+            low=float(b.low),
+            close=float(b.close),
+            volume=b.volume,
+        )
+        for b in bars
+    ]
+
     return BacktestResult(
         strategy_id=strategy_id,
         symbol=symbol,
         timeframe=timeframe,
         bars_processed=len(bars),
+        bars=bar_records,
         trades=trades,
         equity_curve=equity_curve,
         metrics=metrics,
@@ -338,9 +374,6 @@ def _compute_metrics(
         eq = np.array(equity_curve, dtype=np.float64)
         denom = np.where(eq[:-1] != 0, eq[:-1], 1.0)
         returns = np.diff(eq) / denom
-        # BUG FIX #8: was dividing returns.mean() (all bars) by active_returns.std()
-        # (bars with trades only) — mixing populations produces impossible Sharpe values.
-        # Both mean and std must use the same population.
         if len(returns) > 1:
             std = float(returns.std(ddof=1))
             sharpe = float(returns.mean() / std * ann_factor) if std > 0 else 0.0

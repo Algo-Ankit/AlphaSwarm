@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { AppShell }       from '@/components/layout/AppShell'
@@ -7,58 +8,19 @@ import { GlassCard }      from '@/components/ui/GlassCard'
 import { Button }         from '@/components/ui/Button'
 import { Badge }          from '@/components/ui/Badge'
 import { ExecutionLog }   from '@/components/terminal/ExecutionLog'
+import { BacktestChart }  from '@/components/charts/BacktestChart'
 import { api }            from '@/lib/api'
-import type { Strategy, StrategyRunResponse, BacktestResult } from '@/lib/types'
+import type { Strategy, StrategyRunResponse, BacktestResult, BacktestSummary } from '@/lib/types'
 import { fmtDate, fmtCurrency, cn } from '@/lib/utils'
 import { normalizeTimeframe } from '@/lib/constants'
 import {
   Play, Activity, ArrowLeft, Clock,
   History, Database, ShieldAlert, CheckCircle2, Terminal,
   FlaskConical, TrendingUp, TrendingDown, BarChart3, Zap,
+  Pencil, Save, X,
 } from 'lucide-react'
 
-// ── Equity curve SVG sparkline ────────────────────────────────────────────────
-function EquityCurve({ data, initial }: { data: number[]; initial: number }) {
-  if (data.length < 2) return null
-  const W = 600, H = 120
-  const min = Math.min(...data) * 0.998
-  const max = Math.max(...data) * 1.002
-  const range = max - min || 1
-
-  const pts = data.map((v, i) => {
-    const x = (i / (data.length - 1)) * W
-    const y = H - ((v - min) / range) * (H - 4) - 2
-    return `${x.toFixed(1)},${y.toFixed(1)}`
-  })
-
-  const isGain = data[data.length - 1] >= initial
-  const stroke = isGain ? '#10b981' : '#ef4444'
-  const fill   = isGain ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)'
-  const lastX  = ((data.length - 1) / (data.length - 1)) * W
-
-  const polyline = pts.join(' ')
-  const area = `${pts[0]} ${polyline} ${lastX},${H} 0,${H}`
-
-  return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="none"
-      className="w-full"
-      style={{ height: 100 }}
-    >
-      {/* baseline */}
-      <line
-        x1="0" y1={H - ((initial - min) / range) * (H - 4) - 2}
-        x2={W} y2={H - ((initial - min) / range) * (H - 4) - 2}
-        stroke="rgba(255,255,255,0.08)" strokeWidth="1" strokeDasharray="4,4"
-      />
-      {/* fill area */}
-      <polygon points={area} fill={fill} />
-      {/* line */}
-      <polyline points={polyline} fill="none" stroke={stroke} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-    </svg>
-  )
-}
+const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false })
 
 // ── Metric card ───────────────────────────────────────────────────────────────
 function MetricTile({
@@ -85,18 +47,39 @@ export default function StrategyDetailPage() {
   const router  = useRouter()
   const id      = params.id as string
 
-  const [strategy,  setStrategy]  = useState<Strategy | null>(null)
-  const [loading,   setLoading]   = useState(true)
-  const [running,   setRunning]   = useState(false)
-  const [lastRun,   setLastRun]   = useState<StrategyRunResponse | null>(null)
+  const [strategy,       setStrategy]       = useState<Strategy | null>(null)
+  const [loading,        setLoading]        = useState(true)
+  const [dispatching,    setDispatching]    = useState(false)
+  const [lastRun,        setLastRun]        = useState<StrategyRunResponse | null>(null)
+  const [agentConnected, setAgentConnected] = useState(false)
+  const [agentStatus,    setAgentStatus]    = useState<string | null>(null)
 
   // backtest state
   const [btSymbol,    setBtSymbol]    = useState('')
   const [btTimeframe, setBtTimeframe] = useState('1d')
   const [btLimit,     setBtLimit]     = useState(252)
+  const [btCapital,   setBtCapital]   = useState(10_000)
+  const [btStartDate, setBtStartDate] = useState('')
+  const [btEndDate,   setBtEndDate]   = useState('')
   const [btLoading,   setBtLoading]   = useState(false)
   const [btResult,    setBtResult]    = useState<BacktestResult | null>(null)
   const [btError,     setBtError]     = useState<string | null>(null)
+  const [btSummary,   setBtSummary]   = useState<BacktestSummary | null>(null)
+
+  // code edit state
+  const [editMode,    setEditMode]    = useState(false)
+  const [editCode,    setEditCode]    = useState('')
+  const [saveLoading, setSaveLoading] = useState(false)
+  const [saveError,   setSaveError]   = useState<string | null>(null)
+  const [editorTheme, setEditorTheme] = useState('vs-dark')
+
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    setEditorTheme(mq.matches ? 'vs-dark' : 'light')
+    const h = (e: MediaQueryListEvent) => setEditorTheme(e.matches ? 'vs-dark' : 'light')
+    mq.addEventListener('change', h)
+    return () => mq.removeEventListener('change', h)
+  }, [])
 
   useEffect(() => {
     api.getStrategy(id)
@@ -107,18 +90,26 @@ export default function StrategyDetailPage() {
       })
       .catch(() => router.push('/'))
       .finally(() => setLoading(false))
+
+    api.getLatestBacktest(id)
+      .then(setBtSummary)
+      .catch(() => setBtSummary(null))
   }, [id, router])
+
+  const agentIsLive = agentConnected && agentStatus === 'running'
 
   async function handleRun() {
     if (!strategy) return
-    setRunning(true)
+    setDispatching(true)
+    setAgentConnected(false)
+    setAgentStatus(null)
     try {
       const run = await api.runStrategy(strategy.id, true)
       setLastRun(run)
-      setTimeout(() => setRunning(false), 30_000)
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : 'Run failed')
-      setRunning(false)
+    } finally {
+      setDispatching(false)
     }
   }
 
@@ -130,16 +121,50 @@ export default function StrategyDetailPage() {
     try {
       const result = await api.runBacktest(strategy.id, {
         symbol: btSymbol.toUpperCase(),
-        exchange: 'NASDAQ',
+        exchange: strategy.exchange,
         timeframe: btTimeframe,
         limit: btLimit,
-        initial_equity: 10_000,
+        initial_equity: btCapital,
+        ...(btStartDate ? { start_date: new Date(btStartDate).toISOString() } : {}),
+        ...(btEndDate ? { end_date: new Date(btEndDate).toISOString() } : {}),
       })
       setBtResult(result)
+      setBtSummary({
+        ran_at: result.completed_at,
+        symbol: result.symbol,
+        exchange: strategy.exchange,
+        timeframe: result.timeframe,
+        total_return_pct: result.metrics.total_return_pct,
+        sharpe_ratio: result.metrics.sharpe_ratio,
+        max_drawdown_pct: result.metrics.max_drawdown_pct,
+        total_trades: result.metrics.total_trades,
+      })
     } catch (e: unknown) {
       setBtError(e instanceof Error ? e.message : 'Backtest failed')
     } finally {
       setBtLoading(false)
+    }
+  }
+
+  function handleStartEdit() {
+    setEditCode(strategy?.generated_logic ?? '')
+    setSaveError(null)
+    setEditMode(true)
+  }
+
+  async function handleSaveCode() {
+    if (!strategy) return
+    setSaveLoading(true)
+    setSaveError(null)
+    try {
+      const updated = await api.updateStrategyCode(strategy.id, editCode)
+      setStrategy(updated)
+      setBtResult(null) // invalidate stale backtest results
+      setEditMode(false)
+    } catch (e: unknown) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed')
+    } finally {
+      setSaveLoading(false)
     }
   }
 
@@ -199,26 +224,59 @@ export default function StrategyDetailPage() {
                   {s}
                 </span>
               ))}
+              <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-lg uppercase tracking-widest
+                bg-violet-50 dark:bg-violet-500/15 text-violet-600 dark:text-violet-300 font-mono">
+                {strategy.exchange}
+              </span>
               <span className="text-sm text-zinc-400 flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5" />{strategy.timeframe}
               </span>
             </div>
           </div>
 
-          <Button
-            size="lg"
-            variant={running ? 'secondary' : 'primary'}
-            onClick={handleRun}
-            disabled={running}
-            className={cn(
-              'flex-shrink-0',
-              !running && 'shadow-[0_4px_20px_rgba(109,40,217,0.35)] hover:shadow-[0_6px_28px_rgba(109,40,217,0.5)]',
+          <div className="flex flex-col items-end gap-2 flex-shrink-0">
+            {/* Live agent status pill */}
+            {lastRun && (
+              <div className={cn(
+                'flex items-center gap-1.5 px-3 py-1 rounded-full border text-[11px] font-bold uppercase tracking-widest transition-all',
+                agentIsLive
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                  : agentConnected
+                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                    : 'bg-zinc-800/60 border-zinc-700 text-zinc-500',
+              )}>
+                <span className={cn(
+                  'w-1.5 h-1.5 rounded-full flex-shrink-0',
+                  agentIsLive
+                    ? 'bg-emerald-400 shadow-[0_0_5px_rgba(52,211,153,0.8)] animate-pulse'
+                    : agentConnected
+                      ? 'bg-amber-400'
+                      : 'bg-zinc-600',
+                )} />
+                {agentIsLive
+                  ? 'Agent Running'
+                  : agentConnected
+                    ? agentStatus ?? 'Connecting…'
+                    : 'Agent Offline'}
+              </div>
             )}
-          >
-            {running
-              ? <><Activity className="w-4 h-4 mr-2 animate-spin" /> Running…</>
-              : <><Play className="w-4 h-4 mr-2" /> Run Agent</>}
-          </Button>
+
+            <Button
+              size="lg"
+              variant={(dispatching || agentIsLive) ? 'secondary' : 'primary'}
+              onClick={handleRun}
+              disabled={dispatching || agentIsLive}
+              className={cn(
+                !(dispatching || agentIsLive) && 'shadow-[0_4px_20px_rgba(109,40,217,0.35)] hover:shadow-[0_6px_28px_rgba(109,40,217,0.5)]',
+              )}
+            >
+              {dispatching
+                ? <><Activity className="w-4 h-4 mr-2 animate-spin" /> Dispatching…</>
+                : agentIsLive
+                  ? <><Activity className="w-4 h-4 mr-2 animate-pulse" /> Agent Running…</>
+                  : <><Play className="w-4 h-4 mr-2" /> Run Agent</>}
+            </Button>
+          </div>
         </div>
 
         {/* ── Body ────────────────────────────────────────────────────── */}
@@ -227,21 +285,92 @@ export default function StrategyDetailPage() {
           {/* Left — code + terminal + backtest */}
           <div className="lg:col-span-2 space-y-6">
 
-            {/* Generated logic */}
-            <GlassCard padding="md">
-              <h3 className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest
-                text-zinc-500 dark:text-zinc-500 mb-4">
-                <Database className="w-3.5 h-3.5 text-violet-500" />
-                {isQuant ? 'Strategy Code' : 'Compiled Logic'}
-              </h3>
-              <div className={cn(
-                'p-4 rounded-xl border font-mono text-[12px] leading-relaxed',
-                'whitespace-pre-wrap overflow-x-auto',
-                'bg-zinc-50 border-zinc-200 text-zinc-700',
-                'dark:bg-zinc-900/70 dark:border-zinc-800 dark:text-zinc-300',
-              )}>
-                {strategy.generated_logic || '— logic not yet compiled —'}
+            {/* Generated logic — view or edit */}
+            <GlassCard padding="none" className="overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-3 border-b border-zinc-100 dark:border-white/[0.05]">
+                <Database className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" />
+                <span className="text-[11px] font-bold uppercase tracking-widest text-zinc-500 dark:text-zinc-500">
+                  {isQuant ? 'Strategy Code' : 'Compiled Logic'}
+                </span>
+                {!editMode && (
+                  <button
+                    onClick={handleStartEdit}
+                    className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg
+                      text-[11px] font-semibold
+                      bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400
+                      hover:bg-violet-100 dark:hover:bg-violet-500/20
+                      hover:text-violet-700 dark:hover:text-violet-300
+                      border border-zinc-200 dark:border-zinc-700
+                      hover:border-violet-300 dark:hover:border-violet-500/40
+                      transition-all"
+                  >
+                    <Pencil className="w-3 h-3" /> Edit
+                  </button>
+                )}
               </div>
+
+              {editMode ? (
+                <div>
+                  <div style={{ height: 420 }}>
+                    <MonacoEditor
+                      height="420px"
+                      language="python"
+                      theme={editorTheme}
+                      value={editCode}
+                      onChange={val => setEditCode(val ?? '')}
+                      options={{
+                        fontSize: 13,
+                        fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                        minimap: { enabled: false },
+                        lineNumbers: 'on',
+                        scrollBeyondLastLine: false,
+                        wordWrap: 'on',
+                        padding: { top: 14, bottom: 14 },
+                        tabSize: 4,
+                        renderLineHighlight: 'gutter',
+                        scrollbar: { vertical: 'auto', horizontal: 'hidden' },
+                      }}
+                    />
+                  </div>
+                  {saveError && (
+                    <div className="mx-4 mb-3 px-3 py-2 rounded-lg
+                      bg-rose-50 dark:bg-rose-500/10
+                      border border-rose-200 dark:border-rose-500/20
+                      text-[12px] font-medium text-rose-600 dark:text-rose-400">
+                      {saveError}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2 px-4 py-3
+                    border-t border-zinc-100 dark:border-white/[0.05]
+                    bg-zinc-50/40 dark:bg-zinc-900/40">
+                    <Button size="sm" onClick={handleSaveCode} loading={saveLoading} disabled={saveLoading}>
+                      {!saveLoading && <Save className="w-3.5 h-3.5 mr-1.5" />}
+                      Save & Recompile
+                    </Button>
+                    <button
+                      onClick={() => { setEditMode(false); setSaveError(null) }}
+                      disabled={saveLoading}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg
+                        text-[12px] font-medium text-zinc-500 hover:text-zinc-800
+                        dark:hover:text-zinc-200 transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" /> Cancel
+                    </button>
+                    <span className="ml-auto text-[10px] text-zinc-400">
+                      Validated in RestrictedPython sandbox before saving
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className={cn(
+                  'p-4 font-mono text-[12px] leading-relaxed',
+                  'whitespace-pre-wrap overflow-x-auto max-h-[420px] overflow-y-auto',
+                  'text-zinc-700 dark:text-zinc-300',
+                )}
+                style={{ scrollbarWidth: 'thin', scrollbarColor: '#27272a transparent' }}>
+                  {strategy.generated_logic || '— logic not yet compiled —'}
+                </div>
+              )}
             </GlassCard>
 
             {/* Original prompt */}
@@ -314,6 +443,43 @@ export default function StrategyDetailPage() {
                       ))}
                     </select>
                   </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Start Capital</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={btCapital}
+                      onChange={(e) => setBtCapital(Number(e.target.value))}
+                      className="w-28 px-3 py-2 rounded-xl text-sm font-mono font-bold
+                        bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800
+                        text-zinc-900 dark:text-zinc-100 focus:outline-none
+                        focus:ring-2 focus:ring-amber-400/40 transition"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Start Date</label>
+                    <input
+                      type="date"
+                      value={btStartDate}
+                      onChange={(e) => setBtStartDate(e.target.value)}
+                      className="px-3 py-2 rounded-xl text-sm font-medium
+                        bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800
+                        text-zinc-900 dark:text-zinc-100 focus:outline-none
+                        focus:ring-2 focus:ring-amber-400/40 transition"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">End Date</label>
+                    <input
+                      type="date"
+                      value={btEndDate}
+                      onChange={(e) => setBtEndDate(e.target.value)}
+                      className="px-3 py-2 rounded-xl text-sm font-medium
+                        bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800
+                        text-zinc-900 dark:text-zinc-100 focus:outline-none
+                        focus:ring-2 focus:ring-amber-400/40 transition"
+                    />
+                  </div>
                   <Button
                     onClick={handleBacktest}
                     loading={btLoading}
@@ -325,6 +491,11 @@ export default function StrategyDetailPage() {
                     {btLoading ? 'Running…' : 'Run Backtest'}
                   </Button>
                 </div>
+                {(btStartDate || btEndDate) && (
+                  <p className="text-[10px] text-zinc-400 -mt-2">
+                    Date range overrides "Bars" — fetches all bars within range (up to the limit).
+                  </p>
+                )}
 
                 {!strategy.generated_logic || strategy.generated_logic.trim().length < 30 ? (
                   <p className="text-xs text-zinc-400 italic">
@@ -371,10 +542,15 @@ export default function StrategyDetailPage() {
                       />
                     </div>
 
-                    {/* Equity curve */}
+                    {/* Candlestick + trade markers + equity curve */}
                     <div className="rounded-xl overflow-hidden border border-zinc-100 dark:border-zinc-800
-                      bg-zinc-950/5 dark:bg-zinc-900/40">
-                      <EquityCurve data={btResult.equity_curve} initial={m.initial_equity} />
+                      bg-zinc-950/5 dark:bg-zinc-900/40 p-2">
+                      <BacktestChart
+                        bars={btResult.bars}
+                        trades={btResult.trades}
+                        equityCurve={btResult.equity_curve}
+                        theme={editorTheme as 'vs-dark' | 'light'}
+                      />
                     </div>
 
                     {/* Footer */}
@@ -411,7 +587,13 @@ export default function StrategyDetailPage() {
               </h3>
 
               {lastRun ? (
-                <ExecutionLog runId={lastRun.run_id} />
+                <ExecutionLog
+                  runId={lastRun.run_id}
+                  onStatusChange={(conn, status) => {
+                    setAgentConnected(conn)
+                    setAgentStatus(status)
+                  }}
+                />
               ) : (
                 <div className="rounded-xl overflow-hidden border border-zinc-800">
                   <div className="flex items-center gap-1.5 px-4 py-2.5 bg-[#1a1a2e] border-b border-zinc-800">
@@ -438,6 +620,25 @@ export default function StrategyDetailPage() {
                 <ShieldAlert className="w-3.5 h-3.5 text-rose-500" />
                 Risk Settings
               </h3>
+
+              {/* Green-flag gate — backtest must be run before live execution makes sense */}
+              <div className={cn(
+                'flex items-center gap-2 px-3 py-2 rounded-xl mb-4 text-[11px] font-bold uppercase tracking-widest',
+                btSummary
+                  ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20'
+                  : 'bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-500/20',
+              )}>
+                {btSummary
+                  ? <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+                  : <ShieldAlert className="w-3.5 h-3.5 flex-shrink-0" />}
+                <span>{btSummary ? 'Backtest Verified' : 'Not Yet Backtested'}</span>
+                {btSummary && (
+                  <span className="ml-auto normal-case tracking-normal font-mono text-[10px] text-emerald-600/70 dark:text-emerald-400/70">
+                    {btSummary.total_return_pct >= 0 ? '+' : ''}{btSummary.total_return_pct.toFixed(2)}%
+                  </span>
+                )}
+              </div>
+
               <div className="space-y-0">
                 {[
                   { label: 'Max Order',    value: fmtCurrency(strategy.risk.max_order_notional),   color: 'text-zinc-900 dark:text-zinc-100' },

@@ -1,44 +1,69 @@
 """
 Strategy compiler — converts NL prompt to Python BaseStrategy subclass via AutoGen.
-Sync fallback used when API key is not configured (returns placeholder comment).
 """
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import asyncpg
 
 from app.domain.models import StrategyCreateRequest
 
 logger = logging.getLogger(__name__)
 
-_PLACEHOLDER = """\
-# AutoGen strategy generation requires ANTHROPIC_API_KEY in your .env
-# This placeholder will use the default RSI(14) momentum strategy at runtime.
-# Set ANTHROPIC_API_KEY and recreate this strategy to generate real code.
-"""
 
-
-async def compile_strategy_prompt(request: StrategyCreateRequest) -> str:
+async def compile_strategy_prompt(
+    request: StrategyCreateRequest,
+    pool: "asyncpg.Pool | None" = None,
+) -> str:
     """
     Generate Python strategy code from NL prompt using AutoGen StrategyBuilderAgent.
-    Falls back to a placeholder comment if ANTHROPIC_API_KEY is not set.
+
+    If request.llm_config_id is set, decrypts and uses that user-supplied key.
+    Otherwise falls back to the platform-level key from server .env.
+
+    Always raises ValueError on failure — never silently substitutes a placeholder.
     """
     from app.core.config import get_settings
-    settings = get_settings()
-
-    if not settings.anthropic_api_key:
-        logger.warning("ANTHROPIC_API_KEY not set — returning placeholder strategy code")
-        return _PLACEHOLDER
-
     from app.services.strategy_builder import build_strategy_async
+
+    settings = get_settings()
+    api_key  = settings.llm_api_key
+    base_url = settings.llm_base_url
+    model    = settings.llm_model
+
+    if request.llm_config_id and pool is not None:
+        from uuid import UUID
+        from app.db.repositories.llm_configs import LLMConfigRepo
+        from app.services.broker_crypto import decrypt_key
+        # tenant_id not available here — repo fetch by id only; route already validated ownership
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM llm_configs WHERE id = $1 AND is_active = TRUE",
+                UUID(request.llm_config_id),
+            )
+        if row:
+            try:
+                api_key  = decrypt_key(row["key_encrypted"])
+                base_url = row["base_url"]
+                model    = row["model"]
+            except ValueError:
+                logger.warning("LLM config %s key decryption failed — using platform default", request.llm_config_id)
+
     try:
         code = await build_strategy_async(
             prompt=request.prompt,
             symbols=request.symbols,
             timeframe=request.timeframe,
-            api_key=settings.anthropic_api_key,
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
         )
-        logger.info("StrategyBuilderAgent generated code for strategy '%s'", request.name)
-        return code
     except Exception as exc:
         logger.error("StrategyBuilderAgent failed for '%s': %s", request.name, exc)
-        return _PLACEHOLDER
+        raise ValueError(f"Failed to generate strategy: {exc}") from exc
+
+    logger.info("StrategyBuilderAgent generated code for strategy '%s' via model %s", request.name, model)
+    return code

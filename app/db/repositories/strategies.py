@@ -105,3 +105,46 @@ class StrategyRepo(BaseRepo):
             "SELECT current_version_id FROM strategies WHERE id = $1 AND tenant_id = $2",
             strategy_id, self.tenant_id,
         )
+
+    async def update_logic(
+        self,
+        strategy_id: UUID,
+        new_logic: str,
+        updated_by: UUID,
+    ) -> asyncpg.Record | None:
+        """Create a new strategy_version and point current_version_id at it."""
+        async with self.acquire() as conn:
+            async with conn.transaction():
+                current = await conn.fetchrow(
+                    """
+                    SELECT sv.version_number
+                    FROM strategies s
+                    JOIN strategy_versions sv ON sv.id = s.current_version_id
+                    WHERE s.id = $1 AND s.tenant_id = $2
+                    """,
+                    strategy_id, self.tenant_id,
+                )
+                if not current:
+                    return None
+                version = await conn.fetchrow(
+                    """
+                    INSERT INTO strategy_versions
+                        (strategy_id, version_number, generated_logic, prompt_snapshot, created_by)
+                    VALUES ($1, $2, $3, '[edited]', $4)
+                    RETURNING *
+                    """,
+                    strategy_id, current["version_number"] + 1, new_logic, updated_by,
+                )
+                await conn.execute(
+                    "UPDATE strategies SET current_version_id = $1, updated_at = now() WHERE id = $2",
+                    version["id"], strategy_id,
+                )
+                return await conn.fetchrow(
+                    """
+                    SELECT s.*, sv.generated_logic, sv.version_number
+                    FROM strategies s
+                    JOIN strategy_versions sv ON sv.id = s.current_version_id
+                    WHERE s.id = $1
+                    """,
+                    strategy_id,
+                )

@@ -44,6 +44,11 @@ def _to_df(bars: list[Bar]) -> pd.DataFrame:
         "volume": [float(b.volume) for b in bars],
     })
     df.index = pd.DatetimeIndex([b.timestamp for b in bars])
+    if df.index.tz is None:
+        df.index = df.index.tz_localize("UTC").tz_convert("America/New_York")
+    else:
+        df.index = df.index.tz_convert("America/New_York")
+    df.ffill(inplace=True)
     return df
 
 
@@ -120,7 +125,7 @@ def _compute(df: pd.DataFrame, name: str, args: list[float], out: dict) -> None:
             out[f"ROC_{n}"] = _last(result)
 
 
-def _compute_indicators_sync(bars: list[Bar], specs: list[str] | str) -> dict[str, float | None]:
+def compute_indicators_sync(bars: list[Bar], specs: list[str] | str) -> dict[str, float | None]:
     if not bars:
         return {}
     if isinstance(specs, str):
@@ -146,4 +151,4 @@ async def compute_indicators(bars: list[Bar], specs: list[str] | str) -> dict[st
     """Async wrapper — runs sync CPU-bound pandas-ta logic in a thread pool."""
     if not bars:
         return {}
-    return await asyncio.to_thread(_compute_indicators_sync, bars, specs)
+    return await asyncio.to_thread(compute_indicators_sync, bars, specs)
