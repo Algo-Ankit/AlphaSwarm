@@ -30,8 +30,23 @@ class SandboxError(Exception):
 _ALLOWED_IMPORTS = frozenset({"math", "datetime"})
 
 
+import types as _types
+
+
 def _write_guard(ob):
-    """Allow attribute and item writes on any object (strategies need self.x = val)."""
+    """
+    Gate attribute/item writes. Returning `ob` permits the write; raising forbids it.
+
+    Strategies legitimately need instance writes (`self.x = val`) and container
+    writes, so those pass. But the sandbox injects *process-shared* singletons —
+    the real `math`/`datetime` modules and type objects — and returning them
+    unguarded let a strategy do `math.pi = 3`, polluting global state for every
+    other strategy in the worker. Writes to modules and type objects are refused.
+    """
+    if isinstance(ob, (_types.ModuleType, type)):
+        raise SandboxError(
+            "writing attributes on modules or type objects is forbidden in strategy code"
+        )
     return ob
 
 
@@ -45,9 +60,24 @@ def _write_guard(ob):
 # so the builtins cannot be used to reach dunders the syntax path already blocks.
 _NO_DEFAULT = object()
 
+# str.format / str.format_map resolve attributes via CPython's format machinery,
+# completely outside the sandbox's _getattr_ guard ("{0.__globals__}".format(fn)),
+# so they're a graph-traversal escape. safer_getattr blocks them on the syntax
+# path; we mirror that denylist here for the builtin getattr path.
+_BLOCKED_ATTR_NAMES = frozenset({"format", "format_map"})
+
+
+def _is_blocked_attr(name) -> bool:
+    # Enforce `type(name) is str`: a str *subclass* can override startswith() to
+    # return False and smuggle "__class__" past the guard, so anything that is not
+    # exactly the built-in str is rejected outright (treated as blocked).
+    if type(name) is not str:
+        return True
+    return name.startswith("_") or name in _BLOCKED_ATTR_NAMES
+
 
 def _guarded_getattr(obj, name, default=_NO_DEFAULT):
-    if isinstance(name, str) and name.startswith("_"):
+    if _is_blocked_attr(name):
         raise AttributeError(f"access to attribute '{name}' is blocked in strategy code")
     if default is _NO_DEFAULT:
         return getattr(obj, name)
@@ -55,13 +85,13 @@ def _guarded_getattr(obj, name, default=_NO_DEFAULT):
 
 
 def _guarded_setattr(obj, name, value):
-    if isinstance(name, str) and name.startswith("_"):
+    if _is_blocked_attr(name):
         raise AttributeError(f"setting attribute '{name}' is blocked in strategy code")
     return setattr(obj, name, value)
 
 
 def _guarded_hasattr(obj, name):
-    if isinstance(name, str) and name.startswith("_"):
+    if _is_blocked_attr(name):
         return False
     return hasattr(obj, name)
 
@@ -199,7 +229,10 @@ def compile_strategy_code(source: str) -> Type[BaseStrategy]:
         "getattr": _guarded_getattr, "hasattr": _guarded_hasattr, "setattr": _guarded_setattr,
         "abs": abs, "round": round, "len": len, "range": range,
         "int": int, "float": float, "str": str, "bool": bool,
-        "iter": iter, "next": next,
+        # NOTE: iter/next are deliberately NOT exposed. The 2-arg form
+        # `iter(int, 1)` is an infinite loop the AST prescan can't catch
+        # (int() never reaches the sentinel). for-loops over real iterables
+        # still work via the internal `_getiter_` protocol below.
     })
     restricted_builtins["__import__"] = _blocked_import
 

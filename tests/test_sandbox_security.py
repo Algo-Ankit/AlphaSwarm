@@ -155,6 +155,49 @@ def test_no_class_in_subclasses_reachable():
     assert cls(_ctx()).on_bar() == "blocked"
 
 
+# ── Runtime: str-subclass startswith override (guard bypass) ─────────────────
+def test_str_subclass_startswith_override_blocked():
+    # A str subclass that lies in startswith() must NOT smuggle "__class__"
+    # past the getattr guard. _is_blocked_attr uses unbound str.startswith.
+    _assert_blocked_at_runtime(
+        'class Evil(str):\n'
+        '    def startswith(self, *a):\n'
+        '        return False\n'
+        'return getattr((), Evil("__class__"))'
+    )
+
+
+# ── Runtime: .format graph-traversal escape ──────────────────────────────────
+def test_format_via_guarded_getattr_blocked():
+    _assert_blocked_at_runtime('return getattr("{0}", "format")(self)')
+
+
+def test_format_map_via_guarded_getattr_blocked():
+    _assert_blocked_at_runtime('return getattr("{0}", "format_map")({})')
+
+
+# ── Runtime: iter(int, 1) infinite-loop vector removed ───────────────────────
+def test_iter_builtin_not_exposed():
+    # iter/next are no longer in builtins → NameError, so iter(int, 1) can't hang.
+    _assert_blocked_at_runtime('return iter(int, 1)')
+
+
+# ── Runtime: global-state pollution via module attribute write ───────────────
+def test_module_attribute_write_blocked():
+    # Writing to the shared `math` module would pollute every other strategy in
+    # the worker process. _write_guard must refuse it.
+    _assert_blocked_at_runtime('math.pi = 3\nreturn None')
+    # Sanity: the real math.pi is untouched.
+    import math as _m
+    assert _m.pi > 3.14
+
+
+def test_instance_attribute_write_still_allowed():
+    # The guard must NOT break legitimate per-instance state.
+    cls = compile_strategy_code(_strategy("self.counter = 5\nreturn self.counter"))
+    assert cls(_ctx()).on_bar() == 5
+
+
 # ── Legitimate code must still work ──────────────────────────────────────────
 def test_guarded_getattr_allows_non_dunder():
     cls = compile_strategy_code(_strategy('return getattr(self, "position", None) is None'))
