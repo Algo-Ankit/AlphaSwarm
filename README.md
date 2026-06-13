@@ -26,8 +26,8 @@
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
-[![Build Status](https://img.shields.io/badge/Backend-Phase_4_Complete-success?style=flat-square)](https://github.com/Algo-Ankit/AlphaSwarm)
-[![Phase](https://img.shields.io/badge/Current_Phase-5_(Strategy_Builder)-blue?style=flat-square)](https://github.com/Algo-Ankit/AlphaSwarm)
+[![Build Status](https://img.shields.io/badge/System-Production_Ready-success?style=flat-square)](https://github.com/Algo-Ankit/AlphaSwarm)
+[![Phase](https://img.shields.io/badge/Current_Phase-7_(Production_Hardened)-blue?style=flat-square)](https://github.com/Algo-Ankit/AlphaSwarm)
 [![Founding Members](https://img.shields.io/badge/Founding_Members-500_spots-gold?style=flat-square)](https://github.com/Algo-Ankit/AlphaSwarm)
 
 </div>
@@ -415,24 +415,25 @@ Real problems that came up during development and how they were fixed.
 
 ## Build Status & Roadmap
 
-```
+```text
 Phase 0  [██████████] System Design v2.0 — complete, all gaps resolved
 Phase 1  [██████████] Backend Foundation — FastAPI, Celery, Docker, Nginx, Pydantic models
 Phase 2  [██████████] DB Layer + Auth — asyncpg pool, Alembic, repositories, JWT RS256/HS256
 Phase 3  [██████████] Market Data & Intelligence — Alpaca/yfinance feeds, pandas-ta, AI forecasting
 Phase 4  [██████████] Execution Engine — Live Alpaca broker, position tracking, strict risk engine
-Phase 5  [░░░░░░░░░░] Strategy Builder & Backtesting — NEXT
-Phase 6  [░░░░░░░░░░] Frontend — TradingView terminal, auth pages, dual-path builder
-Phase 7  [░░░░░░░░░░] Production Hardening — rate limiting, Sentry, billing, live gate
+Phase 5  [██████████] Strategy Builder & Backtesting — AutoGen NL -> Python, Sandbox
+Phase 6  [██████████] Frontend UI — TradingView terminal, WebSockets, Live P&L Dashboard
+Phase 7  [██████████] Production Hardening — Security audits, cryptography, connection pooling
 ```
 
-### Phase 5 — What's next
+### AlphaSwarm is Production-Ready (Seed Stage)
 
-- `app/services/strategy_builder_agent.py` — AutoGen `StrategyBuilderAgent` (Natural Language → Python)
-- `app/services/backtester.py` — `BacktestRunner` strictly enforcing risk parity with live mode
-- `app/domain/sandbox.py` — `RestrictedPython` execution environment for user-submitted code
-- Strategy versioning in PostgreSQL (immutable historic runs)
-- WebSockets for streaming backtest progression and performance metrics
+The system has successfully completed rigorous Phase 7 production hardening, ensuring institutional-grade security and stability:
+- **Zero-Bypass Risk Engine:** Transactional 64-bit advisory locks eliminate TOCTOU race conditions.
+- **Bulletproof Sandbox:** Hardened RestrictedPython environment safely executes user-generated code with protection against RCE and DoS.
+- **Enterprise Cryptography:** HKDF/Fernet envelope encryption for broker keys.
+- **Global Market Support:** Dynamic timezone execution for US (NYSE/NASDAQ) and Indian (NSE/BSE) markets.
+- **High-Performance Architecture:** Pooled Redis connections, asyncpg, and ASGI loops optimized for real-time WebSocket fan-outs.
 
 ---
 
@@ -583,6 +584,6 @@ Star the repo to follow the journey from infrastructure to a full trading termin
 
 [![GitHub Stars](https://img.shields.io/github/stars/Algo-Ankit/AlphaSwarm?style=social)](https://github.com/Algo-Ankit/AlphaSwarm)
 
-*Phase 4 complete. Phase 5 (Strategy Builder & Backtesting) in progress.*
+*Phase 7 complete. AlphaSwarm is officially production-hardened and ready for live trading.*
 
 </div>
