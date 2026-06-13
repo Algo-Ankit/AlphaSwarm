@@ -200,3 +200,115 @@ export interface BacktestSummary {
   max_drawdown_pct: number
   total_trades: number
 }
+
+// ── Phase 6: Trading Terminal ──────────────────────────────────────────────
+
+export interface Bar {
+  symbol: string
+  exchange: string
+  timeframe: string
+  timestamp: string
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+}
+
+/** Live bar pushed over the WS bars channel. */
+export interface BarTick extends Bar {
+  type: 'bar'
+}
+
+/**
+ * Indicator snapshot. `indicators` keys are the requested specs
+ * (e.g. "rsi_14", "macd_12_26_9", "ema_50"); values are the latest float
+ * or null when not enough history.
+ */
+export interface IndicatorSnapshot {
+  symbol: string
+  exchange: string
+  timeframe: string
+  timestamp: string
+  close: number
+  indicators: Record<string, number | null>
+}
+
+export interface ForecastPoint {
+  date: string
+  yhat: number
+  yhat_lower: number
+  yhat_upper: number
+}
+
+export interface Forecast {
+  symbol: string
+  exchange: string
+  generated_at: string
+  horizon_days: number
+  model: string
+  mae: number | null
+  mape: number | null
+  forecast: ForecastPoint[]
+  disclaimer: string
+}
+
+export type NewsSentiment = 'positive' | 'negative' | 'neutral'
+
+export interface NewsItem {
+  symbol: string
+  headline: string
+  summary: string
+  source: string
+  url: string
+  sentiment: NewsSentiment
+  category: string
+  published_at: string
+}
+
+// ── Phase 6: Portfolio + Notifications ─────────────────────────────────────
+
+export interface PortfolioSummary {
+  snapshot_time: string | null
+  total_equity: number
+  open_pnl: number
+  realized_pnl_today: number
+  active_strategies: number
+  has_data: boolean
+}
+
+export interface PortfolioSnapshot {
+  snapshot_time: string
+  total_equity: number
+  open_pnl: number
+  realized_pnl_today: number
+  active_strategies: number
+}
+
+/** Live portfolio update pushed over /v1/ws/portfolio. */
+export interface PortfolioTick extends PortfolioSnapshot {
+  type: 'portfolio'
+}
+
+export type NotificationType =
+  | 'trade_executed' | 'bot_error' | 'pnl_threshold' | 'news' | 'system'
+
+export interface AppNotification {
+  id: string
+  type: NotificationType
+  title: string
+  body: string
+  entity_type: string | null
+  entity_id: string | null
+  is_read: boolean
+  created_at: string
+}
+
+/** Live notification pushed over /v1/ws/portfolio. */
+export interface NotificationTick {
+  type: 'notification'
+  ts: string
+  notification: AppNotification
+}
+
+export type PortfolioWsMessage = PortfolioTick | NotificationTick | { type: 'pong' }

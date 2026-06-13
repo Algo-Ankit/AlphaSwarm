@@ -4,9 +4,10 @@ import { useRouter } from 'next/navigation'
 import { AppShell } from '@/components/layout/AppShell'
 import { StrategyCard } from '@/components/dashboard/StrategyCard'
 import { StatsBar } from '@/components/dashboard/StatsBar'
+import { PortfolioOverview } from '@/components/dashboard/PortfolioOverview'
 import { Button } from '@/components/ui/Button'
 import { GlassCard } from '@/components/ui/GlassCard'
-import { api, getAccessToken } from '@/lib/api'
+import { api, getAccessToken, getUserProfile } from '@/lib/api'
 import type { Strategy } from '@/lib/types'
 import { Plus, Zap, Activity } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -61,17 +62,30 @@ function Empty({ onBuild }: { onBuild: () => void }) {
   )
 }
 
+function greetingFor(date: Date): string {
+  const h = date.getHours()
+  if (h < 12) return 'Good morning'
+  if (h < 18) return 'Good afternoon'
+  return 'Good evening'
+}
+
 export default function DashboardPage() {
   const router = useRouter()
   const [strategies, setStrategies] = useState<Strategy[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Resolved from the authenticated user profile, not hardcoded. Set on mount
+  // (client-only) to avoid an SSR/client hydration mismatch on the name + clock.
+  const [greeting, setGreeting] = useState<string>('Welcome')
 
   useEffect(() => {
     if (!getAccessToken()) {
       router.replace('/login')
       return
     }
+    const profile = getUserProfile()
+    const firstName = profile?.display_name?.trim().split(/\s+/)[0]
+    setGreeting(`${greetingFor(new Date())}${firstName ? `, ${firstName}` : ''}`)
     api.listStrategies()
       .then(setStrategies)
       .catch((e: Error) => setError(e.message))
@@ -97,7 +111,7 @@ export default function DashboardPage() {
               System Active
             </div>
             <h1 className="text-4xl font-extrabold text-zinc-900 dark:text-zinc-50 tracking-tight">
-              Good morning, Trader
+              {greeting}
             </h1>
             <p className="text-base text-zinc-500 dark:text-zinc-400 mt-1.5 font-medium">
               {strategies.length > 0
@@ -119,6 +133,9 @@ export default function DashboardPage() {
 
         {/* Stats */}
         {strategies.length > 0 && <StatsBar strategies={strategies} />}
+
+        {/* Live portfolio (WS equity curve + P&L) */}
+        {strategies.length > 0 && <PortfolioOverview />}
 
         {/* Content */}
         {loading ? (

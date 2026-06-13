@@ -2,10 +2,17 @@ import type {
   BacktestRequest,
   BacktestResult,
   BacktestSummary,
+  AppNotification,
+  Bar,
   BrokerConnectRequest,
   BrokerConnection,
+  Forecast,
+  IndicatorSnapshot,
   LLMConfig,
   LLMConfigCreate,
+  NewsItem,
+  PortfolioSnapshot,
+  PortfolioSummary,
   Strategy,
   StrategyCreateRequest,
   StrategyRunResponse,
@@ -17,6 +24,31 @@ import type {
 } from './types'
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+
+/** WS base derived from the HTTP base (http→ws, https→wss). */
+export function wsBase(): string {
+  return BASE.replace(/^http/, 'ws')
+}
+
+/**
+ * URL for the live-bars WebSocket channel. JWT is passed as ?token= because
+ * browsers can't set headers on a WebSocket handshake (matches app/api/ws.py).
+ */
+export function barsSocketUrl(
+  symbol: string,
+  exchange: string,
+  timeframe: string,
+): string {
+  const token = getAccessToken() ?? ''
+  const qs = new URLSearchParams({ exchange, timeframe, token })
+  return `${wsBase()}/v1/ws/bars/${encodeURIComponent(symbol.toUpperCase())}?${qs}`
+}
+
+/** URL for the portfolio WS channel (live P&L snapshots + notifications). */
+export function portfolioSocketUrl(): string {
+  const token = getAccessToken() ?? ''
+  return `${wsBase()}/v1/ws/portfolio?${new URLSearchParams({ token })}`
+}
 
 const ACCESS_KEY  = 'alphaswarm_access_token'
 const REFRESH_KEY = 'alphaswarm_refresh_token'
@@ -200,6 +232,94 @@ export const api = {
       `/v1/market/search?q=${encodeURIComponent(q)}&limit=${limit}`,
       { headers: authHeaders() },
     ),
+
+  // ── Market data (Phase 6) ─────────────────────────────────
+  getBars: (
+    symbol: string,
+    opts: { exchange?: string; timeframe?: string; limit?: number; start?: string; end?: string } = {},
+  ) => {
+    const qs = new URLSearchParams({
+      exchange: opts.exchange ?? 'NASDAQ',
+      timeframe: opts.timeframe ?? '1d',
+      limit: String(opts.limit ?? 500),
+      ...(opts.start ? { start: opts.start } : {}),
+      ...(opts.end ? { end: opts.end } : {}),
+    })
+    return req<Bar[]>(`/v1/market/bars/${encodeURIComponent(symbol)}?${qs}`, {
+      headers: authHeaders(),
+    })
+  },
+
+  getIndicators: (
+    symbol: string,
+    opts: { exchange?: string; timeframe?: string; indicators?: string } = {},
+  ) => {
+    const qs = new URLSearchParams({
+      exchange: opts.exchange ?? 'NASDAQ',
+      timeframe: opts.timeframe ?? '1d',
+      ...(opts.indicators ? { indicators: opts.indicators } : {}),
+    })
+    return req<IndicatorSnapshot>(
+      `/v1/market/indicators/${encodeURIComponent(symbol)}?${qs}`,
+      { headers: authHeaders() },
+    )
+  },
+
+  getForecast: (
+    symbol: string,
+    opts: { exchange?: string; horizon?: number } = {},
+  ) => {
+    const qs = new URLSearchParams({
+      exchange: opts.exchange ?? 'NASDAQ',
+      horizon: String(opts.horizon ?? 5),
+    })
+    return req<Forecast>(`/v1/market/forecast/${encodeURIComponent(symbol)}?${qs}`, {
+      headers: authHeaders(),
+    })
+  },
+
+  getNews: (
+    symbol: string,
+    opts: { exchange?: string; days?: number; limit?: number } = {},
+  ) => {
+    const qs = new URLSearchParams({
+      exchange: opts.exchange ?? 'NASDAQ',
+      days: String(opts.days ?? 7),
+      limit: String(opts.limit ?? 20),
+    })
+    return req<NewsItem[]>(`/v1/market/news/${encodeURIComponent(symbol)}?${qs}`, {
+      headers: authHeaders(),
+    })
+  },
+
+  // ── Portfolio (Phase 6) ───────────────────────────────────
+  getPortfolioSummary: () =>
+    req<PortfolioSummary>('/v1/portfolio/summary', { headers: authHeaders() }),
+
+  getPortfolioSnapshots: (limit = 200) =>
+    req<PortfolioSnapshot[]>(`/v1/portfolio/snapshots?limit=${limit}`, {
+      headers: authHeaders(),
+    }),
+
+  // ── Notifications (Phase 6) ───────────────────────────────
+  listNotifications: (opts: { unreadOnly?: boolean; limit?: number } = {}) => {
+    const qs = new URLSearchParams({
+      unread_only: String(opts.unreadOnly ?? false),
+      limit: String(opts.limit ?? 50),
+    })
+    return req<AppNotification[]>(`/v1/notifications?${qs}`, { headers: authHeaders() })
+  },
+
+  unreadNotificationCount: () =>
+    req<{ count: number }>('/v1/notifications/unread-count', { headers: authHeaders() }),
+
+  markNotificationRead: (id: string) =>
+    fetch(`${BASE}/v1/notifications/${id}/read`, { method: 'POST', headers: authHeaders() })
+      .then((r) => { if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`) }),
+
+  markAllNotificationsRead: () =>
+    fetch(`${BASE}/v1/notifications/read-all`, { method: 'POST', headers: authHeaders() })
+      .then((r) => { if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`) }),
 
   // ── Backtest ──────────────────────────────────────────────
   runBacktest: (strategyId: string, params: BacktestRequest) =>
