@@ -66,6 +66,12 @@ class StrategyRiskConfig(BaseModel):
     # ── Session gate ──────────────────────────────────────────────────────────
     trade_session: Literal["regular", "extended"] = Field(default="regular")
 
+    # ── Settlement currency ───────────────────────────────────────────────────
+    # Notional limits above are denominated in this currency. Derived from the
+    # strategy's exchange at creation (USD for US/crypto, INR for NSE/BSE) so a
+    # ₹1000 limit is never confused with a $1000 limit. See app/domain/broker_routing.py.
+    currency: str = Field(default="USD", max_length=8)
+
     # ── Existing ──────────────────────────────────────────────────────────────
     allowed_symbols: list[str] = Field(default_factory=lambda: ["SPY"])
     paper_trading_only: bool = True
@@ -94,6 +100,7 @@ class StrategyResponse(BaseModel):
     timeframe: str
     status: StrategyStatus = StrategyStatus.draft
     generated_logic: str
+    explanation: str = ""  # plain-English summary (NL strategies); empty for quant/hand-written
     risk: StrategyRiskConfig
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
@@ -125,6 +132,8 @@ class OrderIntent(BaseModel):
     order_type: OrderType = OrderType.market
     estimated_price: JsonDecimal = Field(gt=0)
     limit_price: JsonDecimal | None = None
+    stop_loss_price: JsonDecimal | None = None
+    take_profit_price: JsonDecimal | None = None
     is_paper: bool = True  # Must be explicitly False to attempt live order
 
     @property
@@ -201,6 +210,13 @@ class BacktestMetricsModel(BaseModel):
     profitable_trades: int
     initial_equity: float
     final_equity: float
+    # Extended risk-adjusted + benchmark metrics (default-safe for older persisted rows)
+    sortino_ratio: float = 0.0
+    cagr_pct: float = 0.0
+    calmar_ratio: float = 0.0
+    profit_factor: float = 0.0
+    benchmark_return_pct: float = 0.0
+    alpha_vs_benchmark_pct: float = 0.0
 
 
 class BacktestResponse(BaseModel):

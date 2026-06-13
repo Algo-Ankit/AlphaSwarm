@@ -19,7 +19,8 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import pandas as pd
-import pandas_ta as ta
+# pandas_ta is imported lazily inside _precompute_indicators so the pure-math
+# parts of this module (e.g. _compute_metrics) can be imported/tested without it.
 
 from app.domain.base_strategy import BaseStrategy, ReadOnlyDataFrame, StrategyContext
 from app.domain.market_data import Bar, MarketState
@@ -79,6 +80,13 @@ class BacktestMetrics:
     profitable_trades: int
     initial_equity: float
     final_equity: float
+    # Extended risk-adjusted + benchmark metrics (additive; default 0.0 keeps old callers safe)
+    sortino_ratio: float = 0.0
+    cagr_pct: float = 0.0
+    calmar_ratio: float = 0.0
+    profit_factor: float = 0.0
+    benchmark_return_pct: float = 0.0
+    alpha_vs_benchmark_pct: float = 0.0
 
 
 @dataclass
@@ -137,12 +145,52 @@ def run_backtest(
     last_date = None
     today_notional = 0.0
 
+    # Execution-cost params (hoisted so both entry fills and bracket exits use them)
+    slippage_bps = float(rc.get("slippage_bps", 5.0))
+    commission_per_share = float(rc.get("commission_per_share", 0.005))
+
+    # Broker-enforced bracket exit levels for the currently open position.
+    # Set only on a clean entry from flat (non-crypto) — mirrors the live worker.
+    exit_stop_price: float | None = None
+    exit_take_price: float | None = None
+
     strategy_instance = None
 
     for i in range(len(bars)):
         close_price = float(bars[i].close)
         if math.isnan(close_price):
             continue
+
+        # 0. Broker-enforced bracket exits (stop-loss / take-profit). The live worker
+        #    attaches these legs to the entry order; here we trigger them intrabar
+        #    against this bar's high/low BEFORE any new signal so paper matches live.
+        if position != 0:
+            exit_fill = _bracket_exit_fill(
+                position, exit_stop_price, exit_take_price,
+                float(bars[i].high), float(bars[i].low), slippage_bps,
+            )
+            if exit_fill is not None:
+                exit_side, exit_px = exit_fill
+                qty = abs(position)
+                fill_price = Decimal(str(exit_px))
+                commission = commission_per_share * float(qty)
+                notional = float(qty) * float(fill_price)
+                if exit_side == OrderSide.sell:   # close long
+                    cash += (notional - commission)
+                else:                             # cover short
+                    cash -= (notional + commission)
+                trades.append(BacktestTrade(
+                    bar_index=i,
+                    timestamp=bars[i].timestamp,
+                    symbol=symbol,
+                    side=exit_side.value,
+                    quantity=qty,
+                    price=fill_price,
+                ))
+                position = Decimal("0")
+                avg_cost = None
+                exit_stop_price = None
+                exit_take_price = None
 
         # 1. Mark-to-market at close of bar i
         equity = cash + float(position) * close_price
@@ -220,8 +268,8 @@ def run_backtest(
 
         # 8. Execute fill with slippage and commission
         qty = signal.quantity
-        slippage_bps = float(rc.get("slippage_bps", 5.0))
-        commission = float(rc.get("commission_per_share", 0.005)) * float(qty)
+        commission = commission_per_share * float(qty)
+        prev_pos = position
 
         if signal.order_type == OrderType.limit and signal.limit_price is not None:
             if signal.side == OrderSide.buy and float(bars[i + 1].low) > float(signal.limit_price):
@@ -266,6 +314,23 @@ def run_backtest(
                     avg_cost = None
                 position = new_qty
 
+        # Maintain bracket exit levels, mirroring the live worker: attach legs only on a
+        # clean entry from flat (non-crypto); a flip or full close cancels them; a same-side
+        # add keeps the original legs.
+        flat_entry = prev_pos == 0
+        flipped = (prev_pos > 0 and position < 0) or (prev_pos < 0 and position > 0)
+        if position == 0:
+            exit_stop_price = exit_take_price = None
+        elif flat_entry and exchange.upper() != "CRYPTO" and (
+            risk_profile.stop_loss_pct is not None or risk_profile.take_profit_pct is not None
+        ):
+            exit_stop_price, exit_take_price = _bracket_exit_levels(
+                position > 0, float(signal.estimated_price),
+                risk_profile.stop_loss_pct, risk_profile.take_profit_pct,
+            )
+        elif flipped:
+            exit_stop_price = exit_take_price = None
+
         trades.append(BacktestTrade(
             bar_index=i,
             timestamp=bars[i].timestamp,
@@ -281,7 +346,7 @@ def run_backtest(
         cash += float(position) * float(bars[-1].close)
 
     final_equity = round(cash, 2)
-    metrics = _compute_metrics(equity_curve, trades, initial_equity, final_equity, timeframe)
+    metrics = _compute_metrics(equity_curve, trades, initial_equity, final_equity, timeframe, bars)
 
     bar_records = [
         BacktestBar(
@@ -311,6 +376,67 @@ def run_backtest(
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _bracket_exit_levels(
+    is_long: bool,
+    ref_price: float,
+    stop_loss_pct: float | None,
+    take_profit_pct: float | None,
+) -> tuple[float | None, float | None]:
+    """
+    Compute (stop_loss_price, take_profit_price) for a bracket attached on entry.
+    Mirrors the live worker (app/worker/tasks.py): for a long, the stop sits below
+    and the take above the reference price; inverted for a short.
+    """
+    stop = take = None
+    if is_long:
+        if stop_loss_pct is not None:
+            stop = ref_price * (1 - stop_loss_pct / 100.0)
+        if take_profit_pct is not None:
+            take = ref_price * (1 + take_profit_pct / 100.0)
+    else:
+        if stop_loss_pct is not None:
+            stop = ref_price * (1 + stop_loss_pct / 100.0)
+        if take_profit_pct is not None:
+            take = ref_price * (1 - take_profit_pct / 100.0)
+    return stop, take
+
+
+def _bracket_exit_fill(
+    position: Decimal,
+    stop_price: float | None,
+    take_price: float | None,
+    bar_high: float,
+    bar_low: float,
+    slippage_bps: float,
+) -> tuple[OrderSide, float] | None:
+    """
+    If this bar's range touches a stop/take leg, return (exit_side, fill_price); else None.
+
+    Conventions matching the live bracket model:
+      - Pessimistic: if both legs are touched in one bar, the stop fills first.
+      - Stop legs convert to market orders → adverse slippage applied.
+      - Take legs are limit orders → fill at the exact limit price (no slippage).
+    """
+    if position == 0:
+        return None
+    slip = slippage_bps / 10000.0
+    if position > 0:  # long: stop below entry, take above
+        stop_hit = stop_price is not None and not math.isnan(bar_low) and bar_low <= stop_price
+        take_hit = take_price is not None and not math.isnan(bar_high) and bar_high >= take_price
+        if stop_hit:
+            return OrderSide.sell, stop_price * (1 - slip)
+        if take_hit:
+            return OrderSide.sell, take_price
+    else:             # short: stop above entry, take below
+        stop_hit = stop_price is not None and not math.isnan(bar_high) and bar_high >= stop_price
+        take_hit = take_price is not None and not math.isnan(bar_low) and bar_low <= take_price
+        if stop_hit:
+            return OrderSide.buy, stop_price * (1 + slip)
+        if take_hit:
+            return OrderSide.buy, take_price
+    return None
+
+
 def _bars_to_df(bars: list[Bar]) -> pd.DataFrame:
     df = pd.DataFrame({
         "open":   [float(b.open)   for b in bars],
@@ -325,6 +451,8 @@ def _bars_to_df(bars: list[Bar]) -> pd.DataFrame:
 
 def _precompute_indicators(df: pd.DataFrame) -> list[dict]:
     """Compute full indicator time series once; return one dict per bar."""
+    import pandas_ta as ta
+
     n = len(df)
     rows: list[dict] = [{} for _ in range(n)]
 
@@ -358,6 +486,7 @@ def _compute_metrics(
     initial_equity: float,
     final_equity: float,
     timeframe: str,
+    bars: list[Bar] | None = None,
 ) -> BacktestMetrics:
     import numpy as np
 
@@ -370,6 +499,8 @@ def _compute_metrics(
     bars_per_year = _BARS_PER_YEAR.get(timeframe, _BARS_PER_YEAR.get(timeframe.lower(), 252.0))
     ann_factor = math.sqrt(bars_per_year)
 
+    sharpe = 0.0
+    sortino = 0.0
     if len(equity_curve) > 1:
         eq = np.array(equity_curve, dtype=np.float64)
         denom = np.where(eq[:-1] != 0, eq[:-1], 1.0)
@@ -377,10 +508,10 @@ def _compute_metrics(
         if len(returns) > 1:
             std = float(returns.std(ddof=1))
             sharpe = float(returns.mean() / std * ann_factor) if std > 0 else 0.0
-        else:
-            sharpe = 0.0
-    else:
-        sharpe = 0.0
+            # Sortino: penalise only downside volatility (returns below 0).
+            downside = returns[returns < 0]
+            dstd = float(downside.std(ddof=1)) if len(downside) > 1 else 0.0
+            sortino = float(returns.mean() / dstd * ann_factor) if dstd > 0 else 0.0
 
     # Max drawdown (peak-to-trough on equity curve)
     peak = initial_equity
@@ -393,9 +524,11 @@ def _compute_metrics(
             if dd > max_dd:
                 max_dd = dd
 
-    # Simple Win Rate: Track Realized P&L on closing trades
+    # Simple Win Rate + gross P&L: Track Realized P&L on closing trades
     profitable = 0
     closing_trades = 0
+    gross_profit = 0.0   # sum of positive realised P&L (for profit factor)
+    gross_loss = 0.0     # sum of |negative realised P&L|
     sim_pos = Decimal("0")
     sim_avg_cost = 0.0
     for t in trades:
@@ -403,8 +536,13 @@ def _compute_metrics(
         if t.side == "buy":
             if sim_pos < 0:
                 closing_trades += 1
-                if t.price < sim_avg_cost:
+                closed_qty = min(float(qty), float(abs(sim_pos)))
+                pnl = (sim_avg_cost - float(t.price)) * closed_qty  # short: profit when price falls
+                if pnl >= 0:
                     profitable += 1
+                    gross_profit += pnl
+                else:
+                    gross_loss += -pnl
                 sim_pos += qty
                 if sim_pos > 0:
                     sim_avg_cost = float(t.price)
@@ -417,8 +555,13 @@ def _compute_metrics(
         else:
             if sim_pos > 0:
                 closing_trades += 1
-                if t.price > sim_avg_cost:
+                closed_qty = min(float(qty), float(sim_pos))
+                pnl = (float(t.price) - sim_avg_cost) * closed_qty  # long: profit when price rises
+                if pnl >= 0:
                     profitable += 1
+                    gross_profit += pnl
+                else:
+                    gross_loss += -pnl
                 sim_pos -= qty
                 if sim_pos < 0:
                     sim_avg_cost = float(t.price)
@@ -431,13 +574,47 @@ def _compute_metrics(
 
     win_rate = (profitable / closing_trades * 100.0) if closing_trades > 0 else 0.0
 
+    # Profit factor: gross win / gross loss. 999.0 sentinel = profits with zero losing trades.
+    if gross_loss > 0:
+        profit_factor = gross_profit / gross_loss
+    else:
+        profit_factor = 999.0 if gross_profit > 0 else 0.0
+
+    # ── CAGR, Calmar, and buy-and-hold benchmark ─────────────────────────────
+    # Reality check: a strategy that can't beat passively holding the asset isn't alpha.
+    years = 0.0
+    benchmark_return_pct = 0.0
+    if bars:
+        span_days = (bars[-1].timestamp - bars[0].timestamp).total_seconds() / 86400.0
+        years = span_days / 365.25 if span_days > 0 else 0.0
+        first_close = float(bars[0].close)
+        last_close = float(bars[-1].close)
+        if first_close > 0:
+            benchmark_return_pct = (last_close - first_close) / first_close * 100.0
+    if years <= 0:
+        years = len(equity_curve) / bars_per_year if bars_per_year else 0.0
+
+    if years > 0 and initial_equity > 0 and final_equity > 0:
+        cagr_pct = ((final_equity / initial_equity) ** (1.0 / years) - 1.0) * 100.0
+    else:
+        cagr_pct = total_return_pct
+
+    calmar = (cagr_pct / max_dd) if max_dd > 0 else 0.0
+    alpha_vs_benchmark_pct = total_return_pct - benchmark_return_pct
+
     return BacktestMetrics(
         total_return_pct=round(total_return_pct, 2),
         sharpe_ratio=round(sharpe, 3),
+        sortino_ratio=round(sortino, 3),
         max_drawdown_pct=round(max_dd, 2),
         win_rate_pct=round(win_rate, 1),
         total_trades=len(trades),
         profitable_trades=profitable,
         initial_equity=round(initial_equity, 2),
         final_equity=final_equity,
+        cagr_pct=round(cagr_pct, 2),
+        calmar_ratio=round(calmar, 3),
+        profit_factor=round(profit_factor, 3),
+        benchmark_return_pct=round(benchmark_return_pct, 2),
+        alpha_vs_benchmark_pct=round(alpha_vs_benchmark_pct, 2),
     )

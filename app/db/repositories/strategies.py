@@ -19,6 +19,7 @@ class StrategyRepo(BaseRepo):
         creation_mode: str,
         risk_config: dict,
         generated_logic: str,
+        explanation: str = "",
     ) -> asyncpg.Record:
         async with self.acquire() as conn:
             async with conn.transaction():
@@ -37,11 +38,12 @@ class StrategyRepo(BaseRepo):
                 version = await conn.fetchrow(
                     """
                     INSERT INTO strategy_versions
-                        (strategy_id, version_number, generated_logic, prompt_snapshot, created_by)
-                    VALUES ($1, 1, $2, $3, $4)
+                        (strategy_id, version_number, generated_logic, explanation,
+                         prompt_snapshot, created_by)
+                    VALUES ($1, 1, $2, $3, $4, $5)
                     RETURNING *
                     """,
-                    strategy["id"], generated_logic, prompt, owner_user_id,
+                    strategy["id"], generated_logic, explanation, prompt, owner_user_id,
                 )
                 await conn.execute(
                     "UPDATE strategies SET current_version_id = $1 WHERE id = $2",
@@ -49,7 +51,7 @@ class StrategyRepo(BaseRepo):
                 )
                 return await conn.fetchrow(
                     """
-                    SELECT s.*, sv.generated_logic, sv.version_number
+                    SELECT s.*, sv.generated_logic, sv.explanation, sv.version_number
                     FROM strategies s
                     JOIN strategy_versions sv ON sv.id = s.current_version_id
                     WHERE s.id = $1
@@ -60,7 +62,7 @@ class StrategyRepo(BaseRepo):
     async def get_by_id(self, strategy_id: UUID) -> asyncpg.Record | None:
         return await self.fetchrow(
             """
-            SELECT s.*, sv.generated_logic, sv.version_number
+            SELECT s.*, sv.generated_logic, sv.explanation, sv.version_number
             FROM strategies s
             LEFT JOIN strategy_versions sv ON sv.id = s.current_version_id
             WHERE s.id = $1 AND s.tenant_id = $2
@@ -72,7 +74,7 @@ class StrategyRepo(BaseRepo):
         if status:
             return await self.fetch(
                 """
-                SELECT s.*, sv.generated_logic, sv.version_number
+                SELECT s.*, sv.generated_logic, sv.explanation, sv.version_number
                 FROM strategies s
                 LEFT JOIN strategy_versions sv ON sv.id = s.current_version_id
                 WHERE s.tenant_id = $1 AND s.status = $2
@@ -82,7 +84,7 @@ class StrategyRepo(BaseRepo):
             )
         return await self.fetch(
             """
-            SELECT s.*, sv.generated_logic, sv.version_number
+            SELECT s.*, sv.generated_logic, sv.explanation, sv.version_number
             FROM strategies s
             LEFT JOIN strategy_versions sv ON sv.id = s.current_version_id
             WHERE s.tenant_id = $1
@@ -141,7 +143,7 @@ class StrategyRepo(BaseRepo):
                 )
                 return await conn.fetchrow(
                     """
-                    SELECT s.*, sv.generated_logic, sv.version_number
+                    SELECT s.*, sv.generated_logic, sv.explanation, sv.version_number
                     FROM strategies s
                     JOIN strategy_versions sv ON sv.id = s.current_version_id
                     WHERE s.id = $1

@@ -87,6 +87,7 @@ CREATE TABLE strategy_versions (
     strategy_id     UUID NOT NULL REFERENCES strategies(id) ON DELETE CASCADE,
     version_number  INT  NOT NULL DEFAULT 1,
     generated_logic TEXT NOT NULL,   -- The actual Python code. IMMUTABLE after insert.
+    explanation     TEXT NOT NULL DEFAULT '', -- Plain-English summary of this version (NL strategies)
     prompt_snapshot TEXT NOT NULL DEFAULT '', -- NL prompt at time of this version
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by      UUID REFERENCES users(id),

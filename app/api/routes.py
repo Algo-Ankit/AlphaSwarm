@@ -53,6 +53,7 @@ def _record_to_response(record: asyncpg.Record) -> StrategyResponse:
         timeframe=record["timeframe"],
         status=status_val,
         generated_logic=record["generated_logic"] or "",
+        explanation=record.get("explanation") or "",
         risk=risk,
         created_at=record["created_at"],
         updated_at=record["updated_at"],
@@ -84,10 +85,11 @@ async def create_strategy(
                 detail=f"Strategy code failed sandbox validation: {exc}",
             ) from exc
         generated_logic = normalized
+        explanation = ""  # hand-written code needs no AI explanation
         prompt_text = f"[quant] {request.name}"
     else:
         try:
-            generated_logic = await compile_strategy_prompt(request, pool=pool)
+            generated_logic, explanation = await compile_strategy_prompt(request, pool=pool)
         except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -108,6 +110,12 @@ async def create_strategy(
         else:
             inferred_exchange = "NASDAQ"
 
+    # Currency is a property of the market, not a user choice — derive it from the
+    # exchange so notional limits are stored/displayed in ₹ for NSE/BSE, $ for US.
+    from app.domain.broker_routing import currency_for_exchange
+    risk_config = request.risk.model_dump(mode="json")
+    risk_config["currency"] = currency_for_exchange(inferred_exchange)
+
     record = await repo.create(
         owner_user_id=current_user.user_id,
         name=request.name,
@@ -116,8 +124,9 @@ async def create_strategy(
         exchange=inferred_exchange,
         timeframe=request.timeframe,
         creation_mode=request.creation_mode,
-        risk_config=request.risk.model_dump(mode="json"),
+        risk_config=risk_config,
         generated_logic=generated_logic,
+        explanation=explanation,
     )
     return _record_to_response(record)
 

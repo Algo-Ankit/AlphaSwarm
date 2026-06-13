@@ -32,6 +32,7 @@ export interface Strategy {
   timeframe: string
   status: StrategyStatus
   generated_logic: string
+  explanation: string
   risk: StrategyRiskConfig
   created_at: string
   updated_at: string
@@ -139,6 +140,13 @@ export interface BacktestMetrics {
   profitable_trades: number
   initial_equity: number
   final_equity: number
+  // Phase 5 extended metrics
+  sortino_ratio: number
+  cagr_pct: number
+  calmar_ratio: number
+  profit_factor: number
+  benchmark_return_pct: number
+  alpha_vs_benchmark_pct: number
 }
 
 export interface BacktestTrade {

@@ -11,6 +11,7 @@ import pandas as pd
 
 from app.core.celery_app import celery_app
 from app.domain.base_strategy import BaseStrategy, ReadOnlyDataFrame, StrategyContext
+from app.domain.broker_routing import broker_for_exchange, currency_symbol
 from app.domain.market_data import MarketState
 from app.domain.models import (
     OrderIntent, OrderResult, OrderSide, OrderType, StrategyRiskConfig,
@@ -188,9 +189,10 @@ async def _execute_async(
                 dry_run=dry_run,
                 mode="paper" if dry_run else "live",
             )
+            _cur = currency_symbol(risk_profile.currency)
             log.info(
-                f"Risk profile — max order ${risk_profile.max_order_notional:.0f}  "
-                f"daily ${risk_profile.max_daily_notional:.0f}"
+                f"Risk profile — max order {_cur}{risk_profile.max_order_notional:.0f}  "
+                f"daily {_cur}{risk_profile.max_daily_notional:.0f}"
             )
 
         broker_repo = BrokerRepo(pool, UUID(tenant_id))
@@ -198,23 +200,6 @@ async def _execute_async(
 
         if run_id:
             await run_repo.mark_running(UUID(run_id))
-
-        brokers = await broker_repo.get_all()
-        broker_row = next((b for b in brokers if b["broker"] == "alpaca"), None)
-
-        if not dry_run and broker_row is None:
-            raise RuntimeError(
-                "Live trading requested but no active Alpaca broker connection found. "
-                "Add credentials in Settings → Broker Connections."
-            )
-
-        broker_creds = None
-        if broker_row:
-            broker_creds = {
-                "api_key": decrypt_key(broker_row["key_encrypted"]),
-                "secret_key": decrypt_key(broker_row["secret_encrypted"]),
-                "paper": bool(broker_row["is_paper"]),
-            }
 
         strategy_row = await pool.fetchrow(
             """
@@ -227,6 +212,27 @@ async def _execute_async(
         )
         exchange = strategy_row["exchange"] if strategy_row else "NASDAQ"
         generated_logic = (strategy_row["generated_logic"] or "") if strategy_row else ""
+
+        # Broker is chosen by the strategy's exchange, NOT hardcoded — an NSE/BSE
+        # strategy must use an Indian broker, not be silently routed to a US one.
+        required_broker = broker_for_exchange(exchange)
+        brokers = await broker_repo.get_all()
+        broker_row = next((b for b in brokers if b["broker"] == required_broker), None)
+
+        if not dry_run and broker_row is None:
+            raise RuntimeError(
+                f"Live trading on {exchange} requires an active '{required_broker}' broker "
+                f"connection, but none was found. Add {required_broker} credentials in "
+                "Settings → Broker Connections (or run in paper mode)."
+            )
+
+        broker_creds = None
+        if broker_row:
+            broker_creds = {
+                "api_key": decrypt_key(broker_row["key_encrypted"]),
+                "secret_key": decrypt_key(broker_row["secret_encrypted"]),
+                "paper": bool(broker_row["is_paper"]),
+            }
 
         # Fetch bars + compute indicators per symbol
         bars_by_symbol: dict[str, list] = {}
@@ -270,14 +276,18 @@ async def _execute_async(
 
         executor = None
         if not dry_run and broker_creds:
-            from app.services.execution import AlpacaExecutor
-            executor = AlpacaExecutor(
+            from app.services.execution import get_executor
+            executor = get_executor(
+                required_broker,
                 api_key=broker_creds["api_key"],
                 secret_key=broker_creds["secret_key"],
                 paper=broker_creds["paper"],
             )
             if log:
-                log.info(f"Broker connected — paper={broker_creds['paper']}  positions={dict(positions)}")
+                log.info(
+                    f"Broker connected — {required_broker} paper={broker_creds['paper']}  "
+                    f"positions={dict(positions)}"
+                )
 
         # Load AI-generated strategy class; fall back to default RSI
         _strategy_class = None
@@ -351,7 +361,12 @@ async def _execute_async(
 
                 session = get_session_status(exchange)
                 
-                # Transactional advisory lock: serialize evaluation and placement across all distributed workers
+                # Transactional advisory lock held across the ENTIRE read→check→place→persist
+                # sequence. pg_advisory_xact_lock releases on COMMIT, so the daily-notional
+                # read, the risk check, the broker placement, and the order write must all
+                # live inside this one transaction — otherwise two workers for the same
+                # strategy can both pass the daily cap and double-place (TOCTOU), and `conn`
+                # would be dead by the time _write_order_async() runs.
                 async with pool.acquire() as conn:
                     async with conn.transaction():
                         await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1::text))", strategy_id)
@@ -372,80 +387,103 @@ async def _execute_async(
                         )
                         today_notional = Decimal(str(today_notional_row["total"])) if today_notional_row else Decimal("0")
                 
-                market_state = MarketState(
-                    exchange=exchange,
-                    is_open=session == "open",
-                    session_status=session,
-                    today_executed_notional=today_notional,
-                )
-                current_pos = float(position_qty) if position_qty is not None else None
-                current_pos_qty = positions.get(symbol) or Decimal("0")
-                current_pos_value = float(abs(current_pos_qty)) * close
-                open_pos_count = sum(1 for q in positions.values() if q and q != 0)
-                risk_result = verify_order_intent(
-                    signal, risk_profile, market_state, current_position=current_pos,
-                    current_position_value=current_pos_value,
-                    open_positions_count=open_pos_count,
-                )
-
-                if not risk_result.approved:
-                    if log:
-                        log.risk(f"REJECTED — {risk_result.reason}")
-                    results.append({"symbol": symbol, "action": "rejected", "reason": risk_result.reason})
-                    continue
-
-                if log:
-                    log.risk(f"PASSED — notional ${risk_result.order_notional:.2f}")
-
-                if dry_run:
-                    order_result = OrderResult(
-                        order_id=None,
-                        symbol=symbol,
-                        side=signal.side,
-                        quantity=signal.quantity,
-                        fill_price=None,
-                        estimated_price=signal.estimated_price,
-                        broker_status="dry_run",
-                        is_paper=True,
-                    )
-                    if log:
-                        log.order(
-                            f"[DRY RUN] {signal.side.value.upper()} {symbol} × {signal.quantity} "
-                            f"@ ~${signal.estimated_price}  (no real order placed)"
+                        # Paper/dry-run is a strategy testing sandbox, not live trading: the
+                        # market-hours gate (risk Check 1) must not block it, or users can only
+                        # test during NASDAQ/NSE hours. We still pass a MarketState (is_open=True)
+                        # so the daily-notional cap (Check 5) stays enforced. Live runs use the
+                        # real session status. Mirrors backtest.py's mock_state behaviour.
+                        market_state = MarketState(
+                            exchange=exchange,
+                            is_open=True if dry_run else session == "open",
+                            session_status="paper" if dry_run else session,
+                            today_executed_notional=today_notional,
                         )
-                else:
-                    client_order_id = (
-                        f"{str(run_id)[:8]}_{symbol}_{int(bars[-1].timestamp.timestamp())}"
-                        if run_id else None
-                    )
-                    order_result = executor.place_order(signal, client_order_id)
-                    if log:
-                        log.order(
-                            f"LIVE order: {signal.side.value.upper()} {symbol} × {signal.quantity} "
-                            f"— broker_status={order_result.broker_status}  id={order_result.order_id}"
+                        current_pos = float(position_qty) if position_qty is not None else None
+                        current_pos_qty = positions.get(symbol) or Decimal("0")
+                        current_pos_value = float(abs(current_pos_qty)) * close
+                        open_pos_count = sum(1 for q in positions.values() if q and q != 0)
+
+                        # Attach broker-enforced exit legs only on a clean entry from flat,
+                        # and not on crypto (Alpaca brackets don't support it — see executor).
+                        if (
+                            current_pos_qty == 0
+                            and exchange.upper() != "CRYPTO"
+                            and (risk_profile.stop_loss_pct is not None or risk_profile.take_profit_pct is not None)
+                        ):
+                            price_val = float(signal.estimated_price)
+                            if signal.side == OrderSide.buy:
+                                if risk_profile.stop_loss_pct is not None:
+                                    signal.stop_loss_price = Decimal(str(price_val * (1 - risk_profile.stop_loss_pct / 100.0)))
+                                if risk_profile.take_profit_pct is not None:
+                                    signal.take_profit_price = Decimal(str(price_val * (1 + risk_profile.take_profit_pct / 100.0)))
+                            else:
+                                if risk_profile.stop_loss_pct is not None:
+                                    signal.stop_loss_price = Decimal(str(price_val * (1 + risk_profile.stop_loss_pct / 100.0)))
+                                if risk_profile.take_profit_pct is not None:
+                                    signal.take_profit_price = Decimal(str(price_val * (1 - risk_profile.take_profit_pct / 100.0)))
+
+                        risk_result = verify_order_intent(
+                            signal, risk_profile, market_state, current_position=current_pos,
+                            current_position_value=current_pos_value,
+                            open_positions_count=open_pos_count,
                         )
 
-                today_notional += risk_result.order_notional
+                        if not risk_result.approved:
+                            if log:
+                                log.risk(f"REJECTED — {risk_result.reason}")
+                            results.append({"symbol": symbol, "action": "rejected", "reason": risk_result.reason})
+                            continue
 
-                # Keep local position state current so subsequent symbols see correct exposure
-                if order_result.broker_status in ("filled", "partially_filled", "pending", "accepted", "dry_run"):
-                    side_sign = Decimal("1") if signal.side == OrderSide.buy else Decimal("-1")
-                    positions[symbol] = current_pos_qty + (signal.quantity * side_sign)
+                        if log:
+                            log.risk(f"PASSED — notional {_cur}{risk_result.order_notional:.2f}")
 
-                if run_id:
-                    await _write_order_async(
-                        conn, tenant_id, strategy_id, run_id,
-                        signal, order_result, "approved", risk_result.reason,
-                    )
+                        if dry_run:
+                            order_result = OrderResult(
+                                order_id=None,
+                                symbol=symbol,
+                                side=signal.side,
+                                quantity=signal.quantity,
+                                fill_price=None,
+                                estimated_price=signal.estimated_price,
+                                broker_status="dry_run",
+                                is_paper=True,
+                            )
+                            if log:
+                                log.order(
+                                    f"[DRY RUN] {signal.side.value.upper()} {symbol} × {signal.quantity} "
+                                    f"@ ~${signal.estimated_price}  (no real order placed)"
+                                )
+                        else:
+                            client_order_id = (
+                                f"{str(run_id)[:8]}_{symbol}_{int(bars[-1].timestamp.timestamp())}"
+                                if run_id else None
+                            )
+                            order_result = executor.place_order(signal, client_order_id)
+                            if log:
+                                log.order(
+                                    f"LIVE order: {signal.side.value.upper()} {symbol} × {signal.quantity} "
+                                    f"— broker_status={order_result.broker_status}  id={order_result.order_id}"
+                                )
 
-                results.append({
-                    "symbol": symbol,
-                    "action": signal.side.value,
-                    "quantity": str(signal.quantity),
-                    "estimated_price": str(signal.estimated_price),
-                    "broker_status": order_result.broker_status,
-                    "order_id": order_result.order_id,
-                })
+                        # Keep local position state current so subsequent symbols see correct exposure
+                        if order_result.broker_status in ("filled", "partially_filled", "pending", "accepted", "dry_run"):
+                            side_sign = Decimal("1") if signal.side == OrderSide.buy else Decimal("-1")
+                            positions[symbol] = current_pos_qty + (signal.quantity * side_sign)
+
+                        if run_id:
+                            await _write_order_async(
+                                conn, tenant_id, strategy_id, run_id,
+                                signal, order_result, "approved", risk_result.reason,
+                            )
+
+                        results.append({
+                            "symbol": symbol,
+                            "action": signal.side.value,
+                            "quantity": str(signal.quantity),
+                            "estimated_price": str(signal.estimated_price),
+                            "broker_status": order_result.broker_status,
+                            "order_id": order_result.order_id,
+                        })
 
             except Exception as exc:
                 logger.exception("Symbol %s failed: %s", symbol, exc)

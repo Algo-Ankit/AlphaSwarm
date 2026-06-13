@@ -255,19 +255,24 @@ async def _reconcile_positions_async() -> None:
     pool = await _get_pool()
     try:
         brokers = await pool.fetch(
-            "SELECT * FROM broker_connections WHERE is_active = true AND broker = 'alpaca'"
+            "SELECT * FROM broker_connections WHERE is_active = true"
         )
         if not brokers:
-            logger.info("reconcile_positions: no active Alpaca connections")
+            logger.info("reconcile_positions: no active broker connections")
             return
 
         from app.services.broker_crypto import decrypt_key
-        from app.services.execution import AlpacaExecutor
+        from app.services.execution import get_executor
 
         for row in brokers:
             tenant_id = row["tenant_id"]
+            broker = row["broker"]
             try:
-                executor = AlpacaExecutor(
+                # Route to the connection's actual broker (alpaca / upstox / …),
+                # not a hardcoded Alpaca. Unsupported / not-yet-implemented brokers
+                # raise inside get_executor / get_positions and are logged below.
+                executor = get_executor(
+                    broker,
                     api_key=decrypt_key(row["key_encrypted"]),
                     secret_key=decrypt_key(row["secret_encrypted"]),
                     paper=bool(row["is_paper"]),
@@ -292,10 +297,13 @@ async def _reconcile_positions_async() -> None:
                         )
 
                 logger.info(
-                    "reconcile_positions: tenant=%s  broker_positions=%d  db_positions=%d",
-                    tenant_id, len(broker_positions), len(db_positions),
+                    "reconcile_positions: tenant=%s  broker=%s  broker_positions=%d  db_positions=%d",
+                    tenant_id, broker, len(broker_positions), len(db_positions),
                 )
             except Exception as exc:
-                logger.warning("reconcile_positions: tenant %s failed: %s", tenant_id, exc)
+                logger.warning(
+                    "reconcile_positions: tenant %s broker %s failed: %s",
+                    tenant_id, broker, exc,
+                )
     finally:
         await pool.close()

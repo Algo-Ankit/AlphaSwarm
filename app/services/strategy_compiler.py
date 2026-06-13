@@ -17,17 +17,19 @@ logger = logging.getLogger(__name__)
 async def compile_strategy_prompt(
     request: StrategyCreateRequest,
     pool: "asyncpg.Pool | None" = None,
-) -> str:
+) -> tuple[str, str]:
     """
-    Generate Python strategy code from NL prompt using AutoGen StrategyBuilderAgent.
+    Generate Python strategy code + a plain-English explanation from an NL prompt.
 
-    If request.llm_config_id is set, decrypts and uses that user-supplied key.
-    Otherwise falls back to the platform-level key from server .env.
+    Returns (generated_code, explanation). If request.llm_config_id is set, decrypts
+    and uses that user-supplied key. Otherwise falls back to the platform-level key
+    from server .env.
 
-    Always raises ValueError on failure — never silently substitutes a placeholder.
+    Always raises ValueError on code-generation failure — never silently substitutes a
+    placeholder. The explanation is best-effort and never blocks creation.
     """
     from app.core.config import get_settings
-    from app.services.strategy_builder import build_strategy_async
+    from app.services.strategy_builder import build_strategy_async, explain_strategy_async
 
     settings = get_settings()
     api_key  = settings.llm_api_key
@@ -66,4 +68,13 @@ async def compile_strategy_prompt(
         raise ValueError(f"Failed to generate strategy: {exc}") from exc
 
     logger.info("StrategyBuilderAgent generated code for strategy '%s' via model %s", request.name, model)
-    return code
+
+    # Separate pass: plain-English explanation (best-effort, never blocks creation).
+    explanation = await explain_strategy_async(
+        prompt=request.prompt,
+        code=code,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+    )
+    return code, explanation
