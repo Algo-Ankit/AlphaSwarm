@@ -120,9 +120,17 @@ async def ws_portfolio(
                     websocket.receive_text(), timeout=_HEARTBEAT_TIMEOUT
                 )
                 if msg == "ping":
-                    await websocket.send_json({"type": "pong"})
+                    # The socket may have closed between receive and send; a raw
+                    # send then raises ConnectionClosed and crashes the handler.
+                    try:
+                        await websocket.send_json({"type": "pong"})
+                    except Exception:
+                        break
             except asyncio.TimeoutError:
-                await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
+                try:
+                    await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
+                except Exception:
+                    pass
                 break
     except WebSocketDisconnect:
         pass

@@ -15,6 +15,8 @@ from app.api.backtest import router as backtest_router
 from app.api.brokers import router as broker_router
 from app.api.llm_configs import router as llm_configs_router
 from app.api.market import router as market_router
+from app.api.notifications import router as notifications_router
+from app.api.portfolio import router as portfolio_router
 from app.api.routes import router as strategy_router
 from app.api.ws import router as ws_router
 from app.core.config import get_settings
@@ -107,6 +109,8 @@ app.include_router(market_router)
 app.include_router(ws_router)
 app.include_router(strategy_router)
 app.include_router(backtest_router)
+app.include_router(portfolio_router)
+app.include_router(notifications_router)
 
 
 # ── Health checks ─────────────────────────────────────────────

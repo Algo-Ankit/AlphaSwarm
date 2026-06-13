@@ -3,8 +3,27 @@ import { usePathname, useRouter } from 'next/navigation'
 import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { useEffect, useState } from 'react'
 import { api, clearTokens, clearUserProfile, getRefreshToken } from '@/lib/api'
-import { LogOut, ChevronRight } from 'lucide-react'
+import { LogOut, ChevronRight, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { NotificationPanel } from '@/components/layout/NotificationPanel'
+import { sessionStatus, SESSION_LABEL, SESSION_VARIANT } from '@/lib/marketHours'
+import { Badge } from '@/components/ui/Badge'
+
+/** App-wide US-market session indicator (NASDAQ). Re-evaluates every minute. */
+function MarketClock() {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => tick((n) => n + 1), 60_000)
+    return () => clearInterval(id)
+  }, [])
+  const s = sessionStatus('NASDAQ')
+  return (
+    <Badge variant={SESSION_VARIANT[s]} dot pulse={s === 'open'} className="hidden md:inline-flex">
+      <Clock className="w-3 h-3" />
+      {SESSION_LABEL[s]}
+    </Badge>
+  )
+}
 
 const BREADCRUMBS: Record<string, string[]> = {
   '/':                  ['Dashboard'],
@@ -90,7 +109,9 @@ export function TopBar() {
 
       {/* Right controls */}
       <div className="flex items-center gap-2 flex-shrink-0">
+        <MarketClock />
         <ApiBadge />
+        <NotificationPanel />
         <ThemeToggle />
         <div className="w-px h-4 bg-zinc-200 dark:bg-zinc-800" />
         <button

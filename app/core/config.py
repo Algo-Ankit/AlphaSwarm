@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     sentry_dsn: str = ""
     sentry_environment: str = "development"
 
+    # Strategy sandbox — wall-clock budget for a single on_bar() / backtest loop.
+    # Backstops the RestrictedPython sandbox against CPU-exhaustion (e.g.
+    # `for i in range(10**18)`) that the AST prescan can't catch. POSIX workers
+    # only; Windows/eager mode falls back to Celery's task_time_limit.
+    strategy_exec_timeout_seconds: float = 30.0
+
     # Risk defaults
     default_max_order_notional: float = 1_000.0
     default_max_daily_notional: float = 5_000.0
