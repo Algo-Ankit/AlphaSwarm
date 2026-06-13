@@ -1,13 +1,44 @@
 """
-Alpaca execution service — synchronous, Celery-compatible.
-One AlpacaExecutor per strategy run. Do not share across threads.
+Execution services — synchronous, Celery-compatible.
+One executor per strategy run. Do not share across threads.
+
+Broker selection is exchange-driven (see app/domain/broker_routing.py). Use
+get_executor(broker, ...) rather than instantiating a concrete executor, so a
+strategy on NSE/BSE never silently routes to a US broker.
 """
 import logging
 from decimal import Decimal
+from typing import Protocol
 
 from app.domain.models import OrderIntent, OrderResult, OrderSide, OrderType
 
 logger = logging.getLogger(__name__)
+
+
+class BrokerExecutor(Protocol):
+    """Minimal contract every broker executor must satisfy."""
+
+    def place_order(self, order: OrderIntent, client_order_id: str | None = None) -> OrderResult: ...
+    def get_positions(self) -> dict[str, Decimal]: ...
+    def get_account(self) -> dict: ...
+    def cancel_order(self, order_id: str) -> None: ...
+
+
+def bracket_order_class(symbol: str, stop_loss_price, take_profit_price) -> str | None:
+    """
+    Decide the Alpaca order_class for broker-side exit legs (which survive a server
+    crash). Returns "bracket", "oto", or None to skip broker legs.
+
+    - None  → crypto (Alpaca has no bracket/OTO for crypto) or no legs requested.
+    - "oto" → exactly one leg (BRACKET requires BOTH; a single leg must be OTO).
+    - "bracket" → both stop-loss and take-profit legs.
+    """
+    is_crypto = "/" in symbol or "-" in symbol
+    has_sl = stop_loss_price is not None
+    has_tp = take_profit_price is not None
+    if is_crypto or not (has_sl or has_tp):
+        return None
+    return "bracket" if (has_sl and has_tp) else "oto"
 
 
 class AlpacaExecutor:
@@ -36,6 +67,24 @@ class AlpacaExecutor:
         }
         if client_order_id:
             req_kwargs["client_order_id"] = client_order_id[:48]
+
+        # Broker-side exit legs (bracket/OTO) so stop-loss / take-profit survive a
+        # server or worker crash. Skipped for crypto (unsupported by Alpaca).
+        leg_class = bracket_order_class(order.symbol, order.stop_loss_price, order.take_profit_price)
+        if leg_class is None and (order.stop_loss_price is not None or order.take_profit_price is not None):
+            logger.warning(
+                "Exit legs requested for %s but not supported (crypto) — placing plain order without "
+                "broker-side stop/take.", order.symbol,
+            )
+        if leg_class is not None:
+            from alpaca.trading.enums import OrderClass
+            from alpaca.trading.requests import TakeProfitRequest, StopLossRequest
+            req_kwargs["order_class"] = OrderClass.BRACKET if leg_class == "bracket" else OrderClass.OTO
+            # Round to the penny — Alpaca rejects sub-penny prices on US equities ≥ $1.
+            if order.take_profit_price is not None:
+                req_kwargs["take_profit"] = TakeProfitRequest(limit_price=str(round(float(order.take_profit_price), 2)))
+            if order.stop_loss_price is not None:
+                req_kwargs["stop_loss"] = StopLossRequest(stop_price=str(round(float(order.stop_loss_price), 2)))
 
         if order.order_type == OrderType.market:
             req = MarketOrderRequest(**req_kwargs)
@@ -99,3 +148,48 @@ class AlpacaExecutor:
 
     def cancel_order(self, order_id: str) -> None:
         self._client.cancel_order_by_id(order_id)
+
+
+class UpstoxExecutor:
+    """
+    Indian-market (NSE/BSE) executor — placeholder.
+
+    Live Indian execution requires the Upstox SDK + OAuth flow, which is not wired
+    yet. This class exists so exchange-driven routing fails LOUDLY and clearly for
+    NSE/BSE live trading instead of silently sending Indian orders to a US broker.
+    Paper/dry-run never reaches here (the worker builds no executor in dry_run).
+    """
+
+    def __init__(self, api_key: str, secret_key: str, paper: bool = True):
+        self._paper = paper
+
+    def _not_implemented(self):
+        raise NotImplementedError(
+            "Live trading on Indian markets (NSE/BSE) via Upstox is not yet available. "
+            "Paper-trade and backtest this strategy now; live Upstox execution is on the roadmap."
+        )
+
+    def place_order(self, order: OrderIntent, client_order_id: str | None = None) -> OrderResult:
+        self._not_implemented()
+
+    def get_positions(self) -> dict[str, Decimal]:
+        return {}
+
+    def get_account(self) -> dict:
+        self._not_implemented()
+
+    def cancel_order(self, order_id: str) -> None:
+        self._not_implemented()
+
+
+def get_executor(broker: str, *, api_key: str, secret_key: str, paper: bool = True) -> BrokerExecutor:
+    """
+    Factory: return the executor for a broker key (see broker_routing.broker_for_exchange).
+    Raises ValueError for an unknown broker so misconfiguration fails fast.
+    """
+    name = (broker or "alpaca").lower()
+    if name == "alpaca":
+        return AlpacaExecutor(api_key=api_key, secret_key=secret_key, paper=paper)
+    if name == "upstox":
+        return UpstoxExecutor(api_key=api_key, secret_key=secret_key, paper=paper)
+    raise ValueError(f"Unsupported broker '{broker}'. Supported: alpaca, upstox.")

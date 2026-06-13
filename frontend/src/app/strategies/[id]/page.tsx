@@ -17,7 +17,7 @@ import {
   Play, Activity, ArrowLeft, Clock,
   History, Database, ShieldAlert, CheckCircle2, Terminal,
   FlaskConical, TrendingUp, TrendingDown, BarChart3, Zap,
-  Pencil, Save, X,
+  Pencil, Save, X, Code2, FileText,
 } from 'lucide-react'
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false })
@@ -65,6 +65,9 @@ export default function StrategyDetailPage() {
   const [btResult,    setBtResult]    = useState<BacktestResult | null>(null)
   const [btError,     setBtError]     = useState<string | null>(null)
   const [btSummary,   setBtSummary]   = useState<BacktestSummary | null>(null)
+
+  // plain-English vs code view (README: explanation is the default, code behind a toggle)
+  const [showCode,    setShowCode]    = useState(false)
 
   // code edit state
   const [editMode,    setEditMode]    = useState(false)
@@ -182,6 +185,10 @@ export default function StrategyDetailPage() {
 
   const isQuant = (strategy as { creation_mode?: string }).creation_mode === 'quant'
   const m = btResult?.metrics
+  // Plain-English explanation is the default view; code is one toggle away.
+  // Quant / hand-written strategies have no explanation → always show code.
+  const hasExplanation = !!strategy.explanation?.trim()
+  const viewingCode = editMode || showCode || !hasExplanation
 
   return (
     <AppShell>
@@ -285,28 +292,50 @@ export default function StrategyDetailPage() {
           {/* Left — code + terminal + backtest */}
           <div className="lg:col-span-2 space-y-6">
 
-            {/* Generated logic — view or edit */}
+            {/* Strategy explanation (default) / code — view or edit */}
             <GlassCard padding="none" className="overflow-hidden">
               <div className="flex items-center gap-2 px-4 py-3 border-b border-zinc-100 dark:border-white/[0.05]">
-                <Database className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" />
+                {viewingCode
+                  ? <Database className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" />
+                  : <FileText className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" />}
                 <span className="text-[11px] font-bold uppercase tracking-widest text-zinc-500 dark:text-zinc-500">
-                  {isQuant ? 'Strategy Code' : 'Compiled Logic'}
+                  {viewingCode ? (isQuant ? 'Strategy Code' : 'Compiled Logic') : 'What This Strategy Does'}
                 </span>
-                {!editMode && (
-                  <button
-                    onClick={handleStartEdit}
-                    className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg
-                      text-[11px] font-semibold
-                      bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400
-                      hover:bg-violet-100 dark:hover:bg-violet-500/20
-                      hover:text-violet-700 dark:hover:text-violet-300
-                      border border-zinc-200 dark:border-zinc-700
-                      hover:border-violet-300 dark:hover:border-violet-500/40
-                      transition-all"
-                  >
-                    <Pencil className="w-3 h-3" /> Edit
-                  </button>
-                )}
+                <div className="ml-auto flex items-center gap-2">
+                  {/* Plain-English ↔ code toggle (only when an explanation exists) */}
+                  {!editMode && hasExplanation && (
+                    <button
+                      onClick={() => setShowCode((v) => !v)}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg
+                        text-[11px] font-semibold
+                        bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400
+                        hover:bg-violet-100 dark:hover:bg-violet-500/20
+                        hover:text-violet-700 dark:hover:text-violet-300
+                        border border-zinc-200 dark:border-zinc-700
+                        hover:border-violet-300 dark:hover:border-violet-500/40
+                        transition-all"
+                    >
+                      {showCode
+                        ? <><FileText className="w-3 h-3" /> Show Summary</>
+                        : <><Code2 className="w-3 h-3" /> Show Code</>}
+                    </button>
+                  )}
+                  {!editMode && viewingCode && (
+                    <button
+                      onClick={handleStartEdit}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg
+                        text-[11px] font-semibold
+                        bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400
+                        hover:bg-violet-100 dark:hover:bg-violet-500/20
+                        hover:text-violet-700 dark:hover:text-violet-300
+                        border border-zinc-200 dark:border-zinc-700
+                        hover:border-violet-300 dark:hover:border-violet-500/40
+                        transition-all"
+                    >
+                      <Pencil className="w-3 h-3" /> Edit
+                    </button>
+                  )}
+                </div>
               </div>
 
               {editMode ? (
@@ -361,7 +390,7 @@ export default function StrategyDetailPage() {
                     </span>
                   </div>
                 </div>
-              ) : (
+              ) : viewingCode ? (
                 <div className={cn(
                   'p-4 font-mono text-[12px] leading-relaxed',
                   'whitespace-pre-wrap overflow-x-auto max-h-[420px] overflow-y-auto',
@@ -369,6 +398,16 @@ export default function StrategyDetailPage() {
                 )}
                 style={{ scrollbarWidth: 'thin', scrollbarColor: '#27272a transparent' }}>
                   {strategy.generated_logic || '— logic not yet compiled —'}
+                </div>
+              ) : (
+                <div className="p-5 max-h-[420px] overflow-y-auto"
+                  style={{ scrollbarWidth: 'thin', scrollbarColor: '#27272a transparent' }}>
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap text-zinc-700 dark:text-zinc-300">
+                    {strategy.explanation}
+                  </p>
+                  <p className="mt-4 text-[10px] text-zinc-400 italic">
+                    Plain-English summary of the generated logic — toggle "Show Code" to see the Python.
+                  </p>
                 </div>
               )}
             </GlassCard>
@@ -539,6 +578,46 @@ export default function StrategyDetailPage() {
                         value={`${m.win_rate_pct.toFixed(1)}%`}
                         sub={`${m.profitable_trades}/${m.total_trades} trades`}
                         up={m.win_rate_pct >= 50}
+                      />
+                    </div>
+
+                    {/* Extended metrics (Phase 5) */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      <MetricTile
+                        label="Sortino"
+                        value={m.sortino_ratio.toFixed(3)}
+                        sub="downside-risk adj."
+                        up={m.sortino_ratio >= 1 ? true : m.sortino_ratio >= 0 ? undefined : false}
+                      />
+                      <MetricTile
+                        label="CAGR"
+                        value={`${m.cagr_pct >= 0 ? '+' : ''}${m.cagr_pct.toFixed(2)}%`}
+                        sub="annualized"
+                        up={m.cagr_pct >= 0}
+                      />
+                      <MetricTile
+                        label="Calmar"
+                        value={m.calmar_ratio.toFixed(3)}
+                        sub="return / max DD"
+                        up={m.calmar_ratio >= 1 ? true : m.calmar_ratio >= 0 ? undefined : false}
+                      />
+                      <MetricTile
+                        label="Profit Factor"
+                        value={m.profit_factor.toFixed(2)}
+                        sub="gross win / loss"
+                        up={m.profit_factor >= 1}
+                      />
+                      <MetricTile
+                        label="Benchmark"
+                        value={`${m.benchmark_return_pct >= 0 ? '+' : ''}${m.benchmark_return_pct.toFixed(2)}%`}
+                        sub="buy & hold"
+                        up={m.benchmark_return_pct >= 0}
+                      />
+                      <MetricTile
+                        label="Alpha vs B&H"
+                        value={`${m.alpha_vs_benchmark_pct >= 0 ? '+' : ''}${m.alpha_vs_benchmark_pct.toFixed(2)}%`}
+                        sub="excess return"
+                        up={m.alpha_vs_benchmark_pct >= 0}
                       />
                     </div>
 

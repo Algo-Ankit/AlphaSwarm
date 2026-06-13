@@ -6,6 +6,11 @@ Adding a new check: add it here, not in strategy code.
 from decimal import Decimal
 
 from app.core.config import Settings, get_settings
+from app.domain.broker_routing import (
+    PLATFORM_CAP_CURRENCY,
+    convert_amount,
+    currency_symbol,
+)
 from app.domain.market_data import MarketState
 from app.domain.market_hours import is_market_open
 from app.domain.models import OrderIntent, OrderSide, RiskCheckResult, StrategyRiskConfig
@@ -35,6 +40,7 @@ def verify_order_intent(
     settings = settings or get_settings()
     symbol = order.symbol.upper()
     notional = order.estimated_notional
+    cur = currency_symbol(strategy_risk.currency)  # $, ₹, … for user-facing amounts
 
     # ── Check 1: Market is open ───────────────────────────────────────────────
     if market_state is not None:
@@ -66,7 +72,7 @@ def verify_order_intent(
     if notional > strategy_risk.max_order_notional:
         return RiskCheckResult(
             approved=False,
-            reason=f"Order notional ${notional:.2f} exceeds strategy limit ${strategy_risk.max_order_notional:.2f}.",
+            reason=f"Order notional {cur}{notional:.2f} exceeds strategy limit {cur}{strategy_risk.max_order_notional:.2f}.",
             order_notional=notional,
         )
 
@@ -96,8 +102,8 @@ def verify_order_intent(
             return RiskCheckResult(
                 approved=False,
                 reason=(
-                    f"Order would bring {symbol} exposure to ${projected_position:.2f}, "
-                    f"exceeding the per-symbol position limit of ${strategy_risk.max_position_notional:.2f}."
+                    f"Order would bring {symbol} exposure to {cur}{projected_position:.2f}, "
+                    f"exceeding the per-symbol position limit of {cur}{strategy_risk.max_position_notional:.2f}."
                 ),
                 order_notional=notional,
             )
@@ -144,18 +150,25 @@ def verify_order_intent(
             return RiskCheckResult(
                 approved=False,
                 reason=(
-                    f"Order would bring today's total to ${projected_daily:.2f}, "
-                    f"exceeding the daily limit of ${strategy_risk.max_daily_notional:.2f}."
+                    f"Order would bring today's total to {cur}{projected_daily:.2f}, "
+                    f"exceeding the daily limit of {cur}{strategy_risk.max_daily_notional:.2f}."
                 ),
                 order_notional=notional,
             )
 
     # ── Check 6: Platform-level order notional cap ────────────────────────────
-    platform_cap = Decimal(str(settings.default_max_order_notional))
+    # The platform cap is denominated in PLATFORM_CAP_CURRENCY (USD); the order
+    # notional is in the strategy's currency (e.g. INR for NSE/BSE). Compare in a
+    # single currency — convert the cap into the order's currency so the failure
+    # message reads in the same units (₹ vs $) as the rest of the check.
+    platform_cap_usd = Decimal(str(settings.default_max_order_notional))
+    platform_cap = convert_amount(
+        platform_cap_usd, PLATFORM_CAP_CURRENCY, strategy_risk.currency
+    )
     if notional > platform_cap:
         return RiskCheckResult(
             approved=False,
-            reason=f"Order notional ${notional:.2f} exceeds platform-level cap ${platform_cap:.2f}.",
+            reason=f"Order notional {cur}{notional:.2f} exceeds platform-level cap {cur}{platform_cap:.2f}.",
             order_notional=notional,
         )
 

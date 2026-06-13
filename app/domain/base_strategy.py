@@ -12,18 +12,53 @@ if TYPE_CHECKING:
 
 
 class ReadOnlyIloc:
-    def __init__(self, df: pd.DataFrame):
-        self._df = df
+    def __init__(self, data: list[dict]):
+        self._data = data
+        
     def __getitem__(self, idx: int) -> dict:
-        return self._df.iloc[idx].to_dict()
+        # Return a fresh dict so mutation by strategy code doesn't corrupt state
+        return dict(self._data[idx])
+        
+    def __len__(self) -> int:
+        return len(self._data)
 
 class ReadOnlyDataFrame:
-    """Safe wrapper around pd.DataFrame that only exposes .iloc for read-only dictionary access."""
+    """
+    Safe wrapper around pd.DataFrame that completely seals the sandbox boundary.
+    No pandas or numpy objects are kept or returned. Data is converted to pure
+    Python native types upon initialization to prevent sandbox escapes.
+    """
     def __init__(self, df: pd.DataFrame):
-        self._df = df  # store ref; never copy
+        records = []
+        if not df.empty:
+            # Convert pandas index to native python datetime objects
+            timestamps = df.index.to_pydatetime() if hasattr(df.index, 'to_pydatetime') else df.index
+            
+            # Using tolist() on Series converts numpy scalars to pure Python float/int
+            opens = df['open'].tolist()
+            highs = df['high'].tolist()
+            lows = df['low'].tolist()
+            closes = df['close'].tolist()
+            volumes = df['volume'].tolist()
+            
+            for i in range(len(df)):
+                records.append({
+                    "timestamp": timestamps[i],
+                    "open": float(opens[i]),
+                    "high": float(highs[i]),
+                    "low": float(lows[i]),
+                    "close": float(closes[i]),
+                    "volume": int(volumes[i]),
+                })
+        self._data = records
+        self._iloc = ReadOnlyIloc(self._data)
+
     @property
     def iloc(self) -> ReadOnlyIloc:
-        return ReadOnlyIloc(self._df)
+        return self._iloc
+        
+    def __len__(self) -> int:
+        return len(self._data)
 
 
 @dataclass

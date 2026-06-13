@@ -85,9 +85,48 @@ class RSIMomentum(BaseStrategy):
 """
 
 
+_EXPLAINER_SYSTEM_PROMPT = """\
+You are StrategyExplainerAgent. You translate a validated Python trading strategy into
+a short, plain-English explanation for a non-programmer who is about to backtest it.
+
+RULES:
+- Write 2-4 short sentences (or up to 4 short bullet points). No more.
+- Describe, in plain language: when the strategy BUYS, when it SELLS/exits, and which
+  indicators or price conditions drive those decisions.
+- Translate indicator names to plain terms where natural (e.g. RSI = momentum,
+  EMA = moving-average trend, ATR = volatility, Bollinger Bands = price range).
+- Do NOT output any code, code fences, variable names, or Python syntax.
+- Do NOT invent behavior that is not in the code. If the code only buys, say it only buys.
+- Be neutral and factual. Do not promise profits or give financial advice.
+- Output ONLY the explanation prose — no preamble like "This strategy" headers, no markdown.
+"""
+
+
 def _extract_python_block(text: str) -> Optional[str]:
     match = re.search(r"```python\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
     return match.group(1).strip() if match else None
+
+
+def _build_explain_message(prompt: str, code: str) -> str:
+    return (
+        "Explain the following validated trading strategy in plain English.\n\n"
+        f"The user originally described it as:\n{prompt}\n\n"
+        "Here is the generated strategy code (for your reference only — do not echo it):\n"
+        f"{code}\n\n"
+        "Write the plain-English explanation now."
+    )
+
+
+def _fallback_explanation(prompt: str) -> str:
+    """Deterministic explanation used when the LLM explainer is unavailable.
+
+    The original NL prompt is itself a plain-English description, so echoing it back
+    is a safe, code-free fallback that never blocks strategy creation.
+    """
+    cleaned = " ".join(prompt.split()).strip()
+    if not cleaned:
+        return "Automated strategy generated from your description."
+    return f"This strategy implements your description: “{cleaned}”"
 
 
 def _build_user_message(prompt: str, symbols: list[str], timeframe: str) -> str:
@@ -210,3 +249,42 @@ async def build_strategy_async(
     raise ValueError(
         f"StrategyBuilderAgent failed after {max_retries} attempts. Last error: {last_error}"
     )
+
+
+async def explain_strategy_async(
+    prompt: str,
+    code: str,
+    api_key: str,
+    base_url: str,
+    model: str,
+) -> str:
+    """
+    Produce a plain-English explanation of an already-validated strategy.
+
+    This is a SEPARATE agent pass from build_strategy_async — it never touches the
+    Python-only sandbox path, so the strict code-generation contract stays intact.
+    Explanation is best-effort: any failure falls back to echoing the user's prompt
+    rather than blocking strategy creation.
+    """
+    import asyncio
+
+    from autogen_agentchat.agents import AssistantAgent
+    from autogen_agentchat.messages import TextMessage
+
+    model_client = _make_model_client(api_key, base_url, model)
+    explainer = AssistantAgent(
+        name="StrategyExplainer",
+        model_client=model_client,
+        system_message=_EXPLAINER_SYSTEM_PROMPT,
+    )
+    task = _build_explain_message(prompt, code)
+    try:
+        result = await asyncio.wait_for(explainer.run(task=task), timeout=30.0)
+        reply = result.messages[-1] if result.messages else None
+        content = reply.content.strip() if isinstance(reply, TextMessage) and reply.content else ""
+        return content or _fallback_explanation(prompt)
+    except Exception as exc:
+        logger.warning("StrategyExplainerAgent failed, using fallback: %s", exc)
+        return _fallback_explanation(prompt)
+    finally:
+        await model_client.close()
