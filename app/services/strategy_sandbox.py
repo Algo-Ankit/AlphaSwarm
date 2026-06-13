@@ -35,6 +35,37 @@ def _write_guard(ob):
     return ob
 
 
+# ── Guarded attribute builtins ───────────────────────────────────────────────
+# RestrictedPython routes attribute *syntax* (obj.attr) through safer_getattr,
+# which blocks dunders. But the builtin functions getattr/setattr/hasattr bypass
+# that guard, so exposing the real ones is a sandbox escape:
+#   getattr(getattr((), "__class__"), "__bases__")[0]  →  object
+#   getattr(object, "__subclasses__")()                →  every class incl. Popen
+# These wrappers reject underscore-prefixed names, matching safer_getattr's policy
+# so the builtins cannot be used to reach dunders the syntax path already blocks.
+_NO_DEFAULT = object()
+
+
+def _guarded_getattr(obj, name, default=_NO_DEFAULT):
+    if isinstance(name, str) and name.startswith("_"):
+        raise AttributeError(f"access to attribute '{name}' is blocked in strategy code")
+    if default is _NO_DEFAULT:
+        return getattr(obj, name)
+    return getattr(obj, name, default)
+
+
+def _guarded_setattr(obj, name, value):
+    if isinstance(name, str) and name.startswith("_"):
+        raise AttributeError(f"setting attribute '{name}' is blocked in strategy code")
+    return setattr(obj, name, value)
+
+
+def _guarded_hasattr(obj, name):
+    if isinstance(name, str) and name.startswith("_"):
+        return False
+    return hasattr(obj, name)
+
+
 def _inplacevar(op: str, x, y):
     """Support augmented assignment operators (+=, -= etc.) in strategy code."""
     _ops = {
@@ -164,7 +195,8 @@ def compile_strategy_code(source: str) -> Type[BaseStrategy]:
         "list": list, "dict": dict, "set": set, "frozenset": frozenset,
         "enumerate": enumerate, "map": map, "filter": filter, "reversed": reversed,
         "any": any, "all": all, "print": print,
-        "getattr": getattr, "hasattr": hasattr, "setattr": setattr,
+        # Dunder-guarded — the real getattr/setattr/hasattr are a sandbox escape.
+        "getattr": _guarded_getattr, "hasattr": _guarded_hasattr, "setattr": _guarded_setattr,
         "abs": abs, "round": round, "len": len, "range": range,
         "int": int, "float": float, "str": str, "bool": bool,
         "iter": iter, "next": next,
