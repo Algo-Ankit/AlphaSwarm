@@ -241,3 +241,8 @@ class BacktestSummary(BaseModel):
     sharpe_ratio: float
     max_drawdown_pct: float
     total_trades: int
+    # Extended risk-adjusted metrics (default-safe for older persisted rows).
+    cagr_pct: float = 0.0
+    sortino_ratio: float = 0.0
+    calmar_ratio: float = 0.0
+    profit_factor: float = 0.0

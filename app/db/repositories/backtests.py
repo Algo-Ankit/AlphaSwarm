@@ -28,6 +28,10 @@ class BacktestRepo(BaseRepo):
         losing_trades: int,
         equity_curve: list[float],
         trades: list[dict],
+        sortino_ratio: float = 0.0,
+        profit_factor: float = 0.0,
+        calmar_ratio: float = 0.0,
+        annualized_return_pct: float = 0.0,
     ) -> asyncpg.Record:
         import json as _json
 
@@ -38,9 +42,11 @@ class BacktestRepo(BaseRepo):
                  start_date, end_date, initial_capital, final_equity,
                  total_return_pct, sharpe_ratio, max_drawdown_pct, win_rate_pct,
                  total_trades, winning_trades, losing_trades,
+                 sortino_ratio, profit_factor, calmar_ratio, annualized_return_pct,
                  equity_curve_json, trades_json)
             SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                   $11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19::jsonb
+                   $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+                   $22::jsonb, $23::jsonb
             WHERE EXISTS (
                 SELECT 1 FROM strategies WHERE id = $1 AND tenant_id = $3
             )
@@ -50,6 +56,7 @@ class BacktestRepo(BaseRepo):
             start_date, end_date, initial_capital, final_equity,
             total_return_pct, sharpe_ratio, max_drawdown_pct, win_rate_pct,
             total_trades, winning_trades, losing_trades,
+            sortino_ratio, profit_factor, calmar_ratio, annualized_return_pct,
             _json.dumps(equity_curve), _json.dumps(trades),
         )
 

@@ -122,6 +122,10 @@ async def run_strategy_backtest(
             total_trades=result.metrics.total_trades,
             winning_trades=winning_trades,
             losing_trades=losing_trades,
+            sortino_ratio=result.metrics.sortino_ratio,
+            profit_factor=result.metrics.profit_factor,
+            calmar_ratio=result.metrics.calmar_ratio,
+            annualized_return_pct=result.metrics.cagr_pct,
             equity_curve=result.equity_curve,
             trades=[
                 {
@@ -216,4 +220,8 @@ async def get_latest_backtest(
         sharpe_ratio=latest["sharpe_ratio"],
         max_drawdown_pct=latest["max_drawdown_pct"],
         total_trades=latest["total_trades"],
+        cagr_pct=latest["annualized_return_pct"] or 0.0,
+        sortino_ratio=latest["sortino_ratio"] or 0.0,
+        calmar_ratio=latest["calmar_ratio"] or 0.0,
+        profit_factor=latest["profit_factor"] or 0.0,
     )

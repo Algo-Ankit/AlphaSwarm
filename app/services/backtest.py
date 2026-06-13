@@ -26,6 +26,8 @@ from app.domain.base_strategy import BaseStrategy, ReadOnlyDataFrame, StrategyCo
 from app.domain.market_data import Bar, MarketState
 from app.domain.models import OrderIntent, OrderSide, OrderType, StrategyRiskConfig
 from app.domain.risk import verify_order_intent
+from app.core.config import get_settings
+from app.services.exec_timeout import time_limit
 from app.services.strategy_sandbox import SandboxError, compile_strategy_code
 
 logger = logging.getLogger(__name__)
@@ -231,8 +233,10 @@ def run_backtest(
         else:
             strategy_instance.ctx = ctx
 
-        # 5. Strategy signal evaluated on bar i's state
-        signal: OrderIntent | None = strategy_instance.on_bar()
+        # 5. Strategy signal evaluated on bar i's state — bounded by a wall-clock
+        #    budget so a runaway loop (e.g. range(10**18)) can't hang the worker.
+        with time_limit(get_settings().strategy_exec_timeout_seconds):
+            signal: OrderIntent | None = strategy_instance.on_bar()
         if signal is None:
             continue
 
@@ -508,9 +512,13 @@ def _compute_metrics(
         if len(returns) > 1:
             std = float(returns.std(ddof=1))
             sharpe = float(returns.mean() / std * ann_factor) if std > 0 else 0.0
-            # Sortino: penalise only downside volatility (returns below 0).
-            downside = returns[returns < 0]
-            dstd = float(downside.std(ddof=1)) if len(downside) > 1 else 0.0
+            # Sortino downside deviation = RMS of below-target (MAR=0) returns over the
+            # WHOLE series — i.e. sqrt(mean(min(r,0)^2)). Using std(ddof=1) of only the
+            # negative subset is wrong: it removes the zero/positive days from the mean
+            # and applies a sample-variance correction, inflating Sortino on strategies
+            # with few losing days.
+            downside_sq = np.minimum(returns, 0.0) ** 2
+            dstd = float(np.sqrt(downside_sq.mean()))
             sortino = float(returns.mean() / dstd * ann_factor) if dstd > 0 else 0.0
 
     # Max drawdown (peak-to-trough on equity curve)
@@ -595,11 +603,19 @@ def _compute_metrics(
         years = len(equity_curve) / bars_per_year if bars_per_year else 0.0
 
     if years > 0 and initial_equity > 0 and final_equity > 0:
-        cagr_pct = ((final_equity / initial_equity) ** (1.0 / years) - 1.0) * 100.0
+        # On ultra-short backtests `years` → 0, so 1/years explodes and the power
+        # can overflow float64; fall back to the simple total return in that case.
+        try:
+            cagr_pct = ((final_equity / initial_equity) ** (1.0 / years) - 1.0) * 100.0
+        except OverflowError:
+            cagr_pct = total_return_pct
     else:
         cagr_pct = total_return_pct
 
-    calmar = (cagr_pct / max_dd) if max_dd > 0 else 0.0
+    # Calmar = CAGR / max drawdown. With zero drawdown the ratio is undefined; use a
+    # 999.0 sentinel (mirrors profit_factor) to mean "return with no drawdown" rather
+    # than 0.0, which would falsely read as a terrible risk-adjusted result.
+    calmar = (cagr_pct / max_dd) if max_dd > 0 else 999.0
     alpha_vs_benchmark_pct = total_return_pct - benchmark_return_pct
 
     return BacktestMetrics(
