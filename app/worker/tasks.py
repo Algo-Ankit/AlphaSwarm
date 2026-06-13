@@ -17,6 +17,8 @@ from app.domain.models import (
     OrderIntent, OrderResult, OrderSide, OrderType, StrategyRiskConfig,
 )
 from app.domain.risk import verify_order_intent
+from app.core.config import get_settings
+from app.services.exec_timeout import StrategyTimeout, time_limit
 from app.services.strategy_sandbox import SandboxError, compile_strategy_code
 from app.worker.run_logger import RunLogger
 
@@ -161,7 +163,7 @@ async def _execute_async(
     from app.core.config import get_settings
     from app.db.repositories.brokers import BrokerRepo
     from app.db.repositories.runs import RunRepo
-    from app.domain.market_hours import get_session_status
+    from app.domain.market_hours import exchange_timezone, get_session_status
     from app.services.broker_crypto import decrypt_key
     from app.services.indicators import compute_indicators_sync
     from app.services.market_data import get_bars
@@ -263,6 +265,9 @@ async def _execute_async(
 
         # Per-strategy positions from DB — never from the broker account, which is shared
         # across strategies; overwriting with broker positions would corrupt cross-strategy state.
+        # NOTE: this read feeds *signal generation* (on_bar's view of position) only. The
+        # authoritative snapshot for the RISK gate is re-read inside the advisory-locked
+        # transaction below — reading it here for the risk check would be a TOCTOU window.
         positions: dict[str, Decimal] = {}
         avg_costs: dict[str, float | None] = {}
         pos_rows = await pool.fetch(
@@ -304,6 +309,11 @@ async def _execute_async(
 
         for symbol in tradable_symbols:
             try:
+                # Heartbeat: bump updated_at each iteration so a slow multi-symbol pass
+                # (bar fetches, broker round-trips) isn't reaped as a "stale" run.
+                if run_id:
+                    await run_repo.touch(UUID(run_id))
+
                 bars = bars_by_symbol.get(symbol, [])
                 bars_df = dfs_by_symbol.get(symbol, pd.DataFrame())
                 ind = indicators_by_symbol.get(symbol, {})
@@ -336,7 +346,13 @@ async def _execute_async(
                 )
                 active_class = _strategy_class if _strategy_class is not None else _DefaultRSIStrategy
                 try:
-                    signal: OrderIntent | None = active_class(ctx).on_bar()
+                    with time_limit(get_settings().strategy_exec_timeout_seconds):
+                        signal: OrderIntent | None = active_class(ctx).on_bar()
+                except StrategyTimeout as exc:
+                    if log:
+                        log.error(f"{symbol}: strategy timed out: {exc}")
+                    results.append({"symbol": symbol, "action": "error", "reason": str(exc)})
+                    continue
                 except Exception as exc:
                     if log:
                         log.error(f"{symbol}: strategy crashed during on_bar: {exc}")
@@ -367,10 +383,32 @@ async def _execute_async(
                 # live inside this one transaction — otherwise two workers for the same
                 # strategy can both pass the daily cap and double-place (TOCTOU), and `conn`
                 # would be dead by the time _write_order_async() runs.
+                exchange_tz = exchange_timezone(exchange)
                 async with pool.acquire() as conn:
                     async with conn.transaction():
-                        await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1::text))", strategy_id)
-                        
+                        # 64-bit advisory lock keyed on the strategy id. hashtext() returns
+                        # only int4, so distinct strategies collide ~1/4B and would serialize
+                        # against each other; the first 64 bits of an md5 give a full bigint
+                        # key with negligible collision probability.
+                        await conn.execute(
+                            "SELECT pg_advisory_xact_lock(('x' || substr(md5($1::text), 1, 16))::bit(64)::bigint)",
+                            strategy_id,
+                        )
+
+                        # Authoritative position snapshot — read UNDER the lock so two
+                        # concurrent runs for this strategy can't both pass the position /
+                        # daily-notional caps on stale data (TOCTOU position-limit bypass).
+                        locked_pos_rows = await conn.fetch(
+                            "SELECT symbol, quantity FROM positions WHERE tenant_id = $1 AND strategy_id = $2",
+                            UUID(tenant_id), UUID(strategy_id),
+                        )
+                        locked_positions = {
+                            r["symbol"].upper(): Decimal(str(r["quantity"])) for r in locked_pos_rows
+                        }
+
+                        # Daily-notional window anchored to the EXCHANGE's local midnight,
+                        # not a hardcoded New York day — otherwise an NSE strategy's daily
+                        # cap resets at ~09:30/10:30 IST (US midnight) instead of IST midnight.
                         today_notional_row = await conn.fetchrow(
                             """
                             SELECT COALESCE(SUM(estimated_notional), 0) AS total
@@ -379,14 +417,14 @@ async def _execute_async(
                               AND strategy_id = $2
                               AND broker_status IN ('filled', 'open', 'pending', 'accepted', 'partially_filled', 'dry_run')
                               AND created_at >= (
-                                  date_trunc('day', now() AT TIME ZONE 'America/New_York')
-                                  AT TIME ZONE 'America/New_York'
+                                  date_trunc('day', now() AT TIME ZONE $3)
+                                  AT TIME ZONE $3
                               )
                             """,
-                            UUID(tenant_id), UUID(strategy_id),
+                            UUID(tenant_id), UUID(strategy_id), exchange_tz,
                         )
                         today_notional = Decimal(str(today_notional_row["total"])) if today_notional_row else Decimal("0")
-                
+
                         # Paper/dry-run is a strategy testing sandbox, not live trading: the
                         # market-hours gate (risk Check 1) must not block it, or users can only
                         # test during NASDAQ/NSE hours. We still pass a MarketState (is_open=True)
@@ -398,10 +436,11 @@ async def _execute_async(
                             session_status="paper" if dry_run else session,
                             today_executed_notional=today_notional,
                         )
-                        current_pos = float(position_qty) if position_qty is not None else None
-                        current_pos_qty = positions.get(symbol) or Decimal("0")
+                        # Derive every risk input from the lock-guarded snapshot.
+                        current_pos_qty = locked_positions.get(symbol) or Decimal("0")
+                        current_pos = float(current_pos_qty) if current_pos_qty != 0 else None
                         current_pos_value = float(abs(current_pos_qty)) * close
-                        open_pos_count = sum(1 for q in positions.values() if q and q != 0)
+                        open_pos_count = sum(1 for q in locked_positions.values() if q and q != 0)
 
                         # Attach broker-enforced exit legs only on a clean entry from flat,
                         # and not on crypto (Alpaca brackets don't support it — see executor).
@@ -475,6 +514,23 @@ async def _execute_async(
                                 conn, tenant_id, strategy_id, run_id,
                                 signal, order_result, "approved", risk_result.reason,
                             )
+                            # Surface the trade as a user notification (live fan-out
+                            # over /v1/ws/portfolio). Best-effort — never block the run.
+                            try:
+                                from app.services.notifications import create_notification
+                                _mode = "Dry run" if dry_run else "Live"
+                                await create_notification(
+                                    conn,
+                                    tenant_id=tenant_id,
+                                    user_id=user_id,
+                                    type="trade_executed",
+                                    title=f"{signal.side.value.upper()} {symbol} × {signal.quantity}",
+                                    body=f"{_mode} order {order_result.broker_status} @ ~{signal.estimated_price}",
+                                    entity_type="run",
+                                    entity_id=run_id,
+                                )
+                            except Exception as _nexc:
+                                logger.warning("trade notification failed: %s", _nexc)
 
                         results.append({
                             "symbol": symbol,
@@ -516,6 +572,20 @@ async def _execute_async(
             try:
                 from app.db.repositories.runs import RunRepo as _RunRepo
                 await _RunRepo(_pool, UUID(tenant_id)).mark_crashed(UUID(run_id), str(exc))
+            except Exception:
+                pass
+            try:
+                from app.services.notifications import create_notification
+                await create_notification(
+                    _pool,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    type="bot_error",
+                    title="Strategy run failed",
+                    body=str(exc)[:500],
+                    entity_type="run",
+                    entity_id=run_id,
+                )
             except Exception:
                 pass
         raise
