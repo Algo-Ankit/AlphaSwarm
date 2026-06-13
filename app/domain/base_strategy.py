@@ -95,7 +95,7 @@ class BaseStrategy(ABC):
                     return None
                 if rsi < 30 and self.position is None:
                     return OrderIntent(
-                        strategy_id=self.ctx.risk.strategy_id,
+                        strategy_id=self.ctx.strategy_id,
                         symbol=self.ctx.symbol,
                         side=OrderSide.buy,
                         quantity=1,

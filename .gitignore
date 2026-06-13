@@ -17,3 +17,7 @@ frontend/node_modules/
 frontend/next-env.d.ts
 frontend/tsconfig.tsbuildinfo
 frontend/package-lock.json
+
+# Celery Beat runtime schedule DB (not source)
+celerybeat-schedule
+celerybeat-schedule.*
