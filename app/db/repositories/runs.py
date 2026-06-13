@@ -81,6 +81,18 @@ class RunRepo(BaseRepo):
             run_id, self.tenant_id,
         )
 
+    async def touch(self, run_id: UUID) -> None:
+        """Heartbeat — bump updated_at so the stale-run reaper doesn't kill a
+        still-working run. Only affects rows currently in 'running' status."""
+        await self.execute(
+            """
+            UPDATE strategy_runs
+            SET updated_at = now()
+            WHERE id = $1 AND tenant_id = $2 AND status = 'running'
+            """,
+            run_id, self.tenant_id,
+        )
+
     async def mark_completed(self, run_id: UUID, result: dict) -> None:
         import json
         await self.execute(

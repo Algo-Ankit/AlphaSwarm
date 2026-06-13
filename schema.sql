@@ -81,6 +81,9 @@ CREATE TABLE strategies (
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_strategies_tenant_status ON strategies(tenant_id, status);
+-- FK indexes: owner_user_id + current_version_id (both REFERENCES, no covering index).
+CREATE INDEX idx_strategies_owner   ON strategies(owner_user_id);
+CREATE INDEX idx_strategies_current_version ON strategies(current_version_id);
 
 CREATE TABLE strategy_versions (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -94,6 +97,8 @@ CREATE TABLE strategy_versions (
     UNIQUE (strategy_id, version_number)
 );
 CREATE INDEX idx_strategy_versions_strategy ON strategy_versions(strategy_id, version_number DESC);
+-- FK index: created_by (REFERENCES users).
+CREATE INDEX idx_strategy_versions_created_by ON strategy_versions(created_by);
 
 -- Set the FK now that strategy_versions exists
 ALTER TABLE strategies
@@ -121,6 +126,11 @@ CREATE TABLE strategy_runs (
 );
 CREATE INDEX idx_strategy_runs_strategy ON strategy_runs(strategy_id, created_at DESC);
 CREATE INDEX idx_strategy_runs_status   ON strategy_runs(tenant_id, status);
+-- Stale-run reaper scans (status='running' AND updated_at < now()-90s) across all
+-- tenants; this index makes that a range scan instead of a seq scan.
+CREATE INDEX idx_strategy_runs_status_updated ON strategy_runs(status, updated_at);
+-- FK index: version_id (REFERENCES strategy_versions ON DELETE SET NULL).
+CREATE INDEX idx_strategy_runs_version ON strategy_runs(version_id);
 
 CREATE TABLE orders (
     id                   UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -147,6 +157,8 @@ CREATE TABLE orders (
 CREATE INDEX idx_orders_strategy    ON orders(strategy_id, created_at DESC);
 CREATE INDEX idx_orders_tenant_time ON orders(tenant_id, created_at DESC);
 CREATE INDEX idx_orders_symbol      ON orders(symbol, created_at DESC);
+-- FK index: run_id (REFERENCES strategy_runs ON DELETE SET NULL).
+CREATE INDEX idx_orders_run         ON orders(run_id);
 
 -- ============================================================
 -- POSITIONS
@@ -212,6 +224,7 @@ CREATE TABLE backtest_results (
     max_drawdown_end   TIMESTAMPTZ,
     win_rate_pct      NUMERIC(10, 4),
     profit_factor     NUMERIC(10, 4),
+    calmar_ratio      NUMERIC(10, 4),
     total_trades      INT,
     winning_trades    INT,
     losing_trades     INT,
@@ -223,6 +236,8 @@ CREATE TABLE backtest_results (
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_backtest_strategy ON backtest_results(strategy_id, created_at DESC);
+-- FK index: version_id (REFERENCES strategy_versions ON DELETE SET NULL).
+CREATE INDEX idx_backtest_version  ON backtest_results(version_id);
 
 -- ============================================================
 -- MARKET INTELLIGENCE
@@ -240,8 +255,9 @@ CREATE TABLE market_data_cache (
     volume    BIGINT,
     PRIMARY KEY (symbol, exchange, timeframe, bar_time)
 );
-CREATE INDEX idx_market_data_symbol_time
-    ON market_data_cache(symbol, exchange, timeframe, bar_time DESC);
+-- NOTE: idx_market_data_symbol_time was removed — it duplicated the PRIMARY KEY
+-- btree on (symbol, exchange, timeframe, bar_time). Postgres scans the PK index
+-- backward for `ORDER BY bar_time DESC`, so the extra index only cost write IO.
 
 CREATE TABLE news_items (
     id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -305,6 +321,8 @@ CREATE TABLE audit_events (
 );
 CREATE INDEX idx_audit_tenant_time ON audit_events(tenant_id, created_at DESC);
 CREATE INDEX idx_audit_entity      ON audit_events(entity_type, entity_id, created_at DESC);
+-- FK index: actor_user_id (REFERENCES users ON DELETE SET NULL).
+CREATE INDEX idx_audit_actor       ON audit_events(actor_user_id);
 
 -- ── LLM Configs (BYOAK — Bring Your Own API Key) ─────────────────────────────
 -- Users add their own LLM provider keys for NL strategy generation.
@@ -323,3 +341,5 @@ CREATE TABLE llm_configs (
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_llm_configs_tenant ON llm_configs(tenant_id, is_active);
+-- FK index: owner_user_id (REFERENCES users).
+CREATE INDEX idx_llm_configs_owner  ON llm_configs(owner_user_id);

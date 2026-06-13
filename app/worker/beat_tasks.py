@@ -23,6 +23,18 @@ def _get_pool():
     )
 
 
+def _publish_portfolio(tenant_id: str, payload: dict) -> None:
+    """Best-effort sync publish to the tenant portfolio channel (Celery-safe)."""
+    import json
+
+    from app.core.redis_pool import get_sync_redis
+    try:
+        # Shared process-wide client — reused across beats, never per-call created/closed.
+        get_sync_redis().publish(f"portfolio:{tenant_id}", json.dumps(payload))
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.warning("snapshot_portfolio publish failed for %s: %s", tenant_id, exc)
+
+
 @celery_app.task(name="app.worker.beat_tasks.snapshot_portfolio")
 def snapshot_portfolio():
     """Write a portfolio_snapshots row for every active tenant every 5 minutes."""
@@ -74,18 +86,29 @@ async def _snapshot_portfolio_async() -> None:
                 realized_today = Decimal(str(realized_row["realized"] or 0))
                 active = int(pnl_row["active_strategies"] or 0)
 
-                await pool.execute(
+                total_equity = float(open_pnl + realized_today)
+                snap = await pool.fetchrow(
                     """
                     INSERT INTO portfolio_snapshots
                         (tenant_id, total_equity, cash_balance, open_pnl, realized_pnl_today, active_strategies)
                     VALUES ($1, $2, NULL, $3, $4, $5)
+                    RETURNING snapshot_time
                     """,
                     tenant_id,
-                    float(open_pnl + realized_today),
+                    total_equity,
                     float(open_pnl),
                     float(realized_today),
                     active,
                 )
+                # Live fan-out to /v1/ws/portfolio subscribers for this tenant.
+                _publish_portfolio(str(tenant_id), {
+                    "type": "portfolio",
+                    "snapshot_time": snap["snapshot_time"].isoformat(),
+                    "total_equity": total_equity,
+                    "open_pnl": float(open_pnl),
+                    "realized_pnl_today": float(realized_today),
+                    "active_strategies": active,
+                })
             except Exception as exc:
                 logger.warning("snapshot_portfolio: tenant %s failed: %s", tenant_id, exc)
     finally:

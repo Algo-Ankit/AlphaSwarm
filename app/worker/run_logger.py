@@ -16,9 +16,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Literal
 
-import redis
-
-from app.core.config import get_settings
+from app.core.redis_pool import get_sync_redis
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +36,8 @@ class RunLogger:
     def __init__(self, run_id: str) -> None:
         self.run_id = run_id
         self.channel = f"run:{run_id}"
-        settings = get_settings()
-        self._r = redis.from_url(settings.redis_url, decode_responses=True)
+        # Shared process-wide client — NOT a per-run connection. Do not close it.
+        self._r = get_sync_redis()
 
     def _emit(self, level: LogLevel, msg: str, data: dict | None = None) -> None:
         payload: dict = {
@@ -100,7 +98,6 @@ class RunLogger:
             logger.warning("RunLogger status publish failed: %s", exc)
 
     def close(self) -> None:
-        try:
-            self._r.close()
-        except Exception:
-            pass
+        # No-op: the Redis client is shared process-wide and outlives this run.
+        # Closing it here would break every other run/task in the worker process.
+        pass

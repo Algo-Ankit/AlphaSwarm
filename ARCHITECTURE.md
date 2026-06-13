@@ -987,17 +987,17 @@ When paid tiers launch, founding members get 3 months free on the Trader plan.
   - [x] `app/api/backtest.py` — POST /v1/strategies/{id}/backtest
   - [x] Frontend: backtest panel on strategy detail page (metrics grid + SVG equity curve)
   - [x] Math & Security hardening (ReadOnlyDataFrame to prevent pandas RCE, bankruptcy liquidation fix, zero-crossing cost basis fix)
-- [ ] Phase 6 — Frontend
-  - [ ] Auth pages (login, register) + JWT token management
-  - [ ] Dashboard with real WebSocket equity curve + live P&L
-  - [ ] Trading terminal with TradingView candlestick + TA sub-charts
-  - [ ] Forecast tab + News tab + Performance tab + AI Analysis tab
-  - [ ] Dual-pathway strategy builder (NL form + Monaco code editor)
-  - [ ] Backtest results view (equity curve overlay + metrics card)
-  - [ ] Market intelligence page with ticker search
-  - [ ] Settings page (broker key management)
-  - [ ] Notification panel (real-time + history)
-  - [ ] Market hours status badge throughout
+- [x] Phase 6 — Frontend ✓ 2026-06-14
+  - [x] Auth pages (login + register mode toggle) + JWT token management
+  - [x] Dashboard with real WebSocket equity curve + live P&L (`PortfolioOverview` → `/v1/portfolio/*` + `/v1/ws/portfolio`)
+  - [x] Trading terminal with lightweight-charts candlestick + volume + EMA overlays + RSI sub-chart (`/terminal`); live bars over auto-reconnecting WS (exp. backoff, max 30s)
+  - [x] Forecast tab + News tab + Performance tab (client-computed stats) + AI Analysis tab (rule-based trend/momentum/forecast/sentiment synthesis)
+  - [x] Dual-pathway strategy builder (NL form + Monaco code editor) — Phase 5
+  - [x] Backtest results view (equity curve overlay + metrics card) — Phase 5
+  - [x] Market intelligence (ticker search + forecast + news) surfaced in terminal
+  - [x] Settings page (broker key management) — Phase 3A
+  - [x] Notification panel (real-time + history) — `/v1/notifications` API + `NotificationRepo`; worker emits trade_executed/bot_error; live fan-out over portfolio WS
+  - [x] Market hours status badge (TopBar app-wide via `MarketClock` + terminal, client-side `marketHours.ts` mirroring backend schedules)
 - [ ] Phase 7 — Production Hardening
   - [x] slowapi rate limiting on all market endpoints (60/min per JWT user) — done in Phase 3B
   - [ ] Sentry error + performance monitoring

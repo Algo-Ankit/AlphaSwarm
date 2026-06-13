@@ -1,10 +1,9 @@
 # Persistent Brain (AlphaSwarm)
 
 **STATE TRACKING:**
-- **Phases 0-4:** COMPLETE (Backend, DB, Market Data, Execution Engine).
-- **Current Phase:** PHASE 5 (Strategy Builder & Backtesting).
-- **Goal:** AutoGen `StrategyBuilderAgent`, `BacktestRunner`, `RestrictedPython` sandbox.
-- When Phase 5 is done, briefly edit the ROADMAP at the very bottom of `ARCHITECTURE.md`. Do not rewrite the whole file.
+- **Phases 0-6:** COMPLETE (Backend, DB, Market Data, Execution Engine, Strategy Builder & Backtesting, Frontend).
+- **Current Phase:** PHASE 7 (Production Hardening) — Sentry, live-trading gate, SendGrid email, Stripe billing, Zerodha intraday, load testing, CI/CD.
+- When a phase is done, briefly edit the ROADMAP at the very bottom of `ARCHITECTURE.md`. Do not rewrite the whole file.
 
 **HARD RULES (NON-NEGOTIABLE):**
 1. **NO LANGCHAIN:** Use Microsoft AutoGen exclusively.

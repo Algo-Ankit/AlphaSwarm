@@ -86,11 +86,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: celery -A app.core.celery_app.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule
+    command: celery -A app.core.celery_app.celery_app beat --loglevel=info --schedule /var/lib/celerybeat/celerybeat-schedule
     env_file: .env
     environment:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
+    volumes:
+      # Persist the beat schedule DB so the last-run-time of each periodic task
+      # survives container restarts — otherwise a restart re-fires every cron
+      # task (duplicate snapshots, double reconciliations) on the next tick.
+      - celerybeat_data:/var/lib/celerybeat
     healthcheck:
       disable: true
     depends_on:
@@ -141,3 +146,4 @@ volumes:
   postgres_data:
   redis_data:
   nginx_logs:
+  celerybeat_data:
