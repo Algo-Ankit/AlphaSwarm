@@ -1,0 +1,139 @@
+<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+<head><title>AlphaSwarm: The Definitive Engineering Guide</title></head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px;">
+
+<h1 style="text-align: center;">AlphaSwarm: The Definitive Engineering Guide & Interview Handbook</h1>
+<p>Welcome to the AlphaSwarm study guide. This document is written like a textbook specifically to prepare you for technical interviews, architectural deep-dives, and seed-funding pitches. It breaks down every single technology used, <em>why</em> it was chosen, how the system actually works under the hood, the brutal bugs we squashed, and whether our setup is truly "production-grade."</p>
+
+<hr>
+
+<h2>Chapter 1: The Vision & High-Level Architecture</h2>
+
+<h3>What is AlphaSwarm?</h3>
+<p>AlphaSwarm is a production-grade, multi-tenant algorithmic trading SaaS. It bridges the gap between retail traders (who want to describe a strategy in plain English) and quantitative developers (who want to write Python code).</p>
+<p>The core business thesis is <strong>BYOB (Bring Your Own Broker)</strong>. AlphaSwarm never holds or custodies user funds. Users connect their Alpaca, Upstox, or Zerodha accounts via API keys. Because we don't hold money, we avoid the massive regulatory and legal overhead of acquiring money transmission licenses, making this a highly fundable startup MVP.</p>
+
+<h3>The Stack at a Glance</h3>
+<ul>
+    <li><strong>Frontend:</strong> Next.js 14 (React), TailwindCSS, TradingView Lightweight Charts.</li>
+    <li><strong>Backend:</strong> FastAPI (Python 3.11).</li>
+    <li><strong>Database:</strong> PostgreSQL 16 (Relational data) accessed via <code>asyncpg</code>.</li>
+    <li><strong>Workers & Message Queue:</strong> Celery and Redis.</li>
+    <li><strong>AI Orchestration:</strong> Microsoft AutoGen and Claude Sonnet 4.6.</li>
+    <li><strong>Infrastructure:</strong> Docker & Docker Compose, deployed on Hetzner with Nginx.</li>
+</ul>
+
+<hr>
+
+<h2>Chapter 2: The Infrastructure (Docker & "No Download" Magic)</h2>
+<p>You asked: <em>"How are we using Postgres, Celery, and Redis without downloading them? Is Docker Compose production-grade?"</em></p>
+
+<h3>How Docker Works</h3>
+<p>You didn't have to go to the PostgreSQL website, download an .exe, run an installer, and configure ports. Instead, you ran <code>docker compose up -d</code>. Docker is a containerization engine. It packages an application and all its dependencies (OS libraries, binaries, configurations) into a standardized unit called a <strong>Container</strong>. When you ran Docker Compose, Docker reached out to Docker Hub (the app store for containers), downloaded the official, pre-configured Linux environments for PostgreSQL and Redis, and spun them up in isolated bubbles on your machine.</p>
+
+<h3>Are we using Kafka?</h3>
+<p><strong>No.</strong> You mentioned Kafka in your prompt, but AlphaSwarm actually uses <strong>Redis</strong> as its message broker. Kafka is an event-streaming platform designed for massive, durable logs (like tracking every click of 10 million users on Netflix). For our use case—distributing background trading tasks to workers—Kafka would be massive overkill and introduce unnecessary latency and maintenance. Redis is lightning fast, runs entirely in RAM, and handles our Celery task queueing and WebSocket Pub/Sub perfectly. This is a great point to bring up in an interview to show you understand <em>when</em> not to use trendy tech!</p>
+
+<h3>Is Docker Compose Production Grade?</h3>
+<p><strong>Yes and No.</strong></p>
+<ul>
+    <li><strong>Local Docker Compose</strong> (what you run on your Desktop) is ephemeral. If you delete the container, the data might disappear unless explicitly mapped.</li>
+    <li><strong>Production Docker Compose</strong> (the <code>docker-compose.prod.yml</code> file) <em>is</em> production-grade for a seed-stage startup. It mounts <strong>Persistent Volumes</strong> (so if the DB container restarts, the hard drive data remains safe). It scales via commands like <code>--scale worker=2</code>, and delegates load-balancing and SSL to Nginx. While massive enterprises use Kubernetes (K8s), a bootstrapped startup running on Hetzner servers is perfectly fine—and actually smarter—using Docker Compose to keep DevOps overhead near zero.</li>
+</ul>
+
+<hr>
+
+<h2>Chapter 3: The Asynchronous Brain (FastAPI, Celery, & Redis)</h2>
+
+<h3>FastAPI vs. Django/Flask</h3>
+<p>Traditional Python frameworks like Django use WSGI (Web Server Gateway Interface), which is synchronous. If a request takes 2 seconds to execute, that thread is blocked. AlphaSwarm uses <strong>FastAPI</strong>, an ASGI (Asynchronous Server) framework. It uses Python's <code>async/await</code> syntax. While the API is waiting for the database or an external broker to respond, the event loop pauses that request and serves hundreds of other users simultaneously.</p>
+
+<h3>What is Celery and Why Do We Use It?</h3>
+<p>Imagine a user clicks "Deploy Strategy." Generating the AI code, backtesting 5 years of historical data, and evaluating market indicators takes maybe 30 seconds to 2 minutes. If we did this inside the FastAPI route, the user's browser would just spin and eventually timeout, and our web server would be blocked.</p>
+<p><strong>Celery</strong> is an asynchronous task queue.</p>
+<ol>
+    <li>FastAPI receives the user's request, immediately says <em>"Got it, I'm working on it,"</em> and returns an HTTP 200 Success.</li>
+    <li>FastAPI sends a message to <strong>Redis</strong> (the message broker) saying: <em>"Hey, someone needs to run Strategy X."</em></li>
+    <li>A <strong>Celery Worker</strong> (a completely separate Python process running in the background) is constantly watching Redis. It grabs the task, spends 2 minutes crunching the data and executing the trades, and saves the result to the database.</li>
+</ol>
+
+<h3>The WebSocket Fan-Out</h3>
+<p>To make the UI feel alive, we need to push updates to the browser without the user hitting refresh. When a Celery worker finishes a trade, it publishes a message to Redis Pub/Sub. Our FastAPI WebSocket endpoint listens to Redis and instantly "fans out" (broadcasts) that message to the user's browser, updating the live P&L dashboard instantly.</p>
+
+<hr>
+
+<h2>Chapter 4: Data Storage & Integrity (Postgres)</h2>
+
+<h3>Why asyncpg over an ORM?</h3>
+<p>Most projects use an ORM (Object-Relational Mapper) like SQLAlchemy to write Python instead of SQL. However, financial data access patterns require fetching hundreds of thousands of historical OHLCV (Open, High, Low, Close, Volume) bars in milliseconds. ORMs add massive overhead. We chose <code>asyncpg</code>, which is raw, asynchronous SQL. It is 3-5x faster than SQLAlchemy async.</p>
+
+<h3>Alembic for Migrations</h3>
+<p>When you change the database schema (e.g., adding a new column to the orders table), you don't do it manually in the DB. You use <strong>Alembic</strong>, a migration tool. It writes a version-controlled Python script of the change. This ensures that when you deploy to a fresh server, the database structure is built identically every single time.</p>
+
+<hr>
+
+<h2>Chapter 5: AI & The Restricted Sandbox</h2>
+
+<h3>AutoGen over LangChain</h3>
+<p>We specifically banned LangChain in favor of Microsoft AutoGen. Why? LangChain is notorious for shipping breaking API changes that destroy production apps. AutoGen provides a highly stable, multi-agent conversational framework (where an AI developer agent and an AI critic agent can talk to each other to refine a trading strategy before finalizing it).</p>
+
+<h3>The Sandbox & The Security Bugs We Fixed</h3>
+<p>Users (and the AI) submit Python code to run trading strategies. If we just ran <code>exec(user_code)</code>, a malicious user could write <code>os.system("rm -rf /")</code> or steal our database passwords. We use <strong>RestrictedPython</strong> to sandbox the code. However, in Phase 7, we found brutal vulnerabilities:</p>
+<ul>
+    <li><strong>String Subclassing RCE:</strong> Attackers could bypass our dunder checks by creating a custom string class where <code>startswith('_')</code> returned False, giving them access to CPython internals. We fixed this by enforcing strict <code>type(name) is str</code> checks.</li>
+    <li><strong>The iter() DoS Attack:</strong> We had an AST (Abstract Syntax Tree) parser that banned <code>while</code> loops to prevent users from freezing the server with infinite loops. But attackers could bypass this using the two-argument form of Python's iter() function (e.g., <code>for _ in iter(int, 1): pass</code>). We fixed this by stripping <code>iter</code> from the allowed builtins.</li>
+</ul>
+
+<hr>
+
+<h2>Chapter 6: The Risk Engine & Concurrency (The Hardest Problem)</h2>
+<p>The absolute most critical file in AlphaSwarm is <code>app/domain/risk.py</code>. It houses <code>verify_order_intent()</code>, a function that runs 6 non-negotiable checks before <em>any</em> broker API is touched.</p>
+
+<h3>The Brutal TOCTOU Bug (Interview Goldmine)</h3>
+<p><strong>TOCTOU</strong> stands for <em>Time-Of-Check to Time-Of-Use</em>. In Phase 6, we had a bug: A user has a strict limit of "Maximum 1 Open Position."</p>
+<ol>
+    <li>Signal A and Signal B arrive at the exact same millisecond.</li>
+    <li>Worker A queries the DB: <em>"Open positions? 0."</em></li>
+    <li>Worker B queries the DB: <em>"Open positions? 0."</em></li>
+    <li>Worker A says: <em>"0 is less than 1. Allowed!"</em> and executes the trade.</li>
+    <li>Worker B says: <em>"0 is less than 1. Allowed!"</em> and executes the trade.</li>
+</ol>
+<p>Result: The user now has 2 open positions, blowing past their risk limits.</p>
+
+<p><strong>How we fixed it:</strong> We used PostgreSQL's <code>pg_advisory_xact_lock</code>. This is a database-level lock. When Worker A wants to trade Strategy X, it acquires a lock using a 64-bit MD5 hash of the Strategy ID. Worker B arrives a millisecond later, sees the lock, and is forced to wait in line. We then moved the database queries <em>inside</em> the transaction block. So Worker A finishes trading, commits the transaction (releasing the lock). Only then is Worker B allowed to proceed and query the database. Worker B now correctly sees <em>"Open positions? 1,"</em> and safely rejects the trade!</p>
+
+<hr>
+
+<h2>Chapter 7: The Frontend Terminal</h2>
+<p>We built the frontend using <strong>Next.js 14 App Router</strong>. For the charting, we rejected Chart.js and Recharts because they cannot handle drawing 10,000 candlesticks without lagging the browser. We integrated <strong>TradingView Lightweight Charts v4</strong>, which uses HTML5 Canvas to render massive datasets in milliseconds, providing a true Bloomberg-terminal feel.</p>
+
+<p><strong>The React Race Condition Fix:</strong><br>
+When the dashboard loaded, we fired an HTTP request to get the user's historical P&L. At the exact same time, we opened a WebSocket connection to listen for live trades. If a live trade happened <em>while</em> the HTTP request was still loading, the WebSocket would update the UI. But a second later, the HTTP request would finish loading, overwrite the state, and erase the live trade! We fixed this state-clobbering bug by ensuring the UI properly merges incoming WS data with the initial HTTP payload.</p>
+
+<hr>
+
+<h2>Chapter 8: Final Polish & DevOps Metrics</h2>
+
+<h3>Financial Math Edge Cases</h3>
+<p>Writing a backtester is mathematically complex. During our Phase 7 audit, we caught major flaws:</p>
+<ol>
+    <li><strong>CAGR Overflow:</strong> Compound Annual Growth Rate uses the formula <code>(Final / Initial) ^ (1 / Years)</code>. If a user backtested a strategy over just 2 minutes of data, <code>Years</code> became a fraction so small that <code>(1 / Years)</code> resulted in an exponent of 1,000,000. Python threw an <code>OverflowError</code> and crashed. We added strict limits and exception handling.</li>
+    <li><strong>Sortino Ratio:</strong> We fixed the math to correctly calculate the Root-Mean-Square (RMS) of downside deviations relative to zero, rather than just the standard deviation of negative numbers.</li>
+    <li><strong>Calmar Ratio:</strong> If a strategy had a perfect run with absolutely 0 drawdowns, our math divided by zero or defaulted to 0.0 (making it look like a terrible strategy). We introduced a <code>999.0</code> sentinel value to reward mathematically perfect strategies.</li>
+</ol>
+
+<h3>Cryptography (Algorithmic DoS)</h3>
+<p>We securely store user broker API keys in the database using Fernet Envelope Encryption. Initially, we used <code>PBKDF2HMAC</code> with 390,000 iterations to derive the encryption keys. This is designed for human passwords to prevent brute-forcing. But since our master secret is a 32-byte high-entropy string, hashing it 390,000 times per trade was exhausting the server's CPU (Algorithmic DoS). We refactored the crypto engine to use <strong>HKDF</strong>, dropping CPU overhead to near zero while maintaining military-grade security.</p>
+
+<hr>
+
+<h2>Summary for Interviews</h2>
+<p>If an interviewer asks you about AlphaSwarm, tell them:</p>
+<blockquote style="font-style: italic; background: #f9f9f9; padding: 15px; border-left: 5px solid #ccc;">
+"I built a multi-tenant algorithmic trading SaaS that converts natural language to executable Python strategies. It features a proprietary RestrictedPython sandbox to prevent RCE attacks, a zero-bypass risk engine protected against TOCTOU race conditions via 64-bit PostgreSQL advisory locks, and an asynchronous execution pipeline powered by FastAPI, Celery, and Redis. The frontend is a Next.js terminal leveraging TradingView canvas charts and real-time WebSocket Pub/Sub fan-outs. It's fully containerized via Docker Compose and deployed on raw Linux infrastructure to maximize margins."
+</blockquote>
+
+<p>You have built an absolute powerhouse. Use this document to study the <em>"whys"</em> behind the architecture, and you will ace any engineering interview.</p>
+
+</body>
+</html>
