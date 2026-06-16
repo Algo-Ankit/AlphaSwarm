@@ -94,7 +94,9 @@ async def create_strategy(
         prompt_text = f"[quant] {request.name}"
     else:
         try:
-            generated_logic, explanation = await compile_strategy_prompt(request, pool=pool)
+            generated_logic, explanation = await compile_strategy_prompt(
+                request, pool=pool, user_email=current_user.email,
+            )
         except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -226,8 +228,8 @@ async def run_strategy(
 
     # ── Billing gate: live agents require an active Quant Tier subscription ──
     # Paper/backtest runs (dry_run) are always free. Live deployment is the
-    # monetised action, so it is blocked unless the tenant's Stripe subscription
-    # is active/trialing.
+    # monetised action, so it is blocked unless the tenant's Razorpay
+    # subscription is active.
     if not request.dry_run:
         from app.db.repositories.users import TenantRepo
         from app.services.billing import is_active_status

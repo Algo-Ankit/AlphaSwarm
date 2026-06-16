@@ -1,14 +1,16 @@
 """
-Billing API — Stripe Checkout + webhook for the Quant Tier subscription.
+Billing API — Razorpay recurring subscriptions for the Quant Tier (UPI AutoPay /
+e-mandate). India-first; replaces the RBI-restricted Stripe flow.
 
-  POST /v1/billing/checkout  (auth)  → Stripe Checkout Session URL
-  POST /v1/billing/webhook   (public, signature-verified) → subscription lifecycle
+  POST /v1/billing/subscribe   (auth)  → Razorpay subscription + hosted auth URL
+  POST /v1/billing/webhook     (public, HMAC-verified) → subscription lifecycle
   GET  /v1/billing/subscription (auth) → current tenant subscription status
 
 Live agent deployment is gated on `subscription_status` (see app/api/routes.py).
 The webhook is the single source of truth that flips that status.
 """
 
+import json
 import logging
 from datetime import datetime, timezone
 from uuid import UUID
@@ -25,9 +27,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/billing", tags=["billing"])
 
 
-class CheckoutResponse(BaseModel):
-    checkout_url: str
-    session_id: str
+class SubscribeResponse(BaseModel):
+    subscription_id: str
+    # Razorpay hosted page where the user authorizes the UPI AutoPay mandate.
+    authorization_url: str | None
+    status: str | None
 
 
 class SubscriptionResponse(BaseModel):
@@ -37,33 +41,44 @@ class SubscriptionResponse(BaseModel):
     current_period_end: str | None
 
 
-@router.post("/checkout", response_model=CheckoutResponse)
-async def create_checkout(
+@router.post("/subscribe", response_model=SubscribeResponse)
+async def create_subscription(
     current_user: CurrentUser = Depends(get_current_user),
     pool: asyncpg.Pool = Depends(get_db_pool),
-) -> CheckoutResponse:
-    """Start a Quant Tier subscription checkout for the current tenant."""
+) -> SubscribeResponse:
+    """Start a Quant Tier recurring subscription for the current tenant."""
     repo = TenantRepo(pool)
     tenant = await repo.get_by_id(current_user.tenant_id)
     if not tenant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
 
     try:
-        result = billing.create_checkout_session(
+        result = billing.create_subscription(
             tenant_id=str(current_user.tenant_id),
             customer_email=current_user.email,
-            stripe_customer_id=tenant.get("stripe_customer_id"),
         )
     except billing.BillingNotConfigured as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
     except Exception as exc:
-        logger.exception("Stripe checkout session creation failed")
+        logger.exception("Razorpay subscription creation failed")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Could not create checkout session with Stripe",
+            detail="Could not create subscription with Razorpay",
         ) from exc
 
-    return CheckoutResponse(checkout_url=result["url"], session_id=result["id"])
+    # Persist the subscription id immediately so the webhook can map it back even
+    # before the user finishes authorizing the mandate.
+    await repo.update_subscription(
+        current_user.tenant_id,
+        status=result.get("status") or "created",
+        razorpay_subscription_id=result["id"],
+    )
+
+    return SubscribeResponse(
+        subscription_id=result["id"],
+        authorization_url=result.get("short_url"),
+        status=result.get("status"),
+    )
 
 
 @router.get("/subscription", response_model=SubscriptionResponse)
@@ -94,104 +109,128 @@ def _epoch_to_dt(value) -> datetime | None:
         return None
 
 
+def _subscription_entity(event: dict) -> dict:
+    """Pull the subscription entity out of a Razorpay webhook payload."""
+    return event.get("payload", {}).get("subscription", {}).get("entity", {})
+
+
 async def _resolve_tenant_id(
-    repo: TenantRepo, *, metadata_tenant: str | None, customer_id: str | None
+    repo: TenantRepo,
+    *,
+    notes_tenant: str | None,
+    subscription_id: str | None,
+    customer_id: str | None,
 ) -> UUID | None:
-    """Map a Stripe object back to a tenant via metadata first, then customer id."""
-    if metadata_tenant:
+    """Map a Razorpay subscription back to a tenant: notes → sub id → customer id."""
+    if notes_tenant:
         try:
-            return UUID(metadata_tenant)
+            return UUID(notes_tenant)
         except ValueError:
             pass
+    if subscription_id:
+        row = await repo.get_by_razorpay_subscription(subscription_id)
+        if row:
+            return row["id"]
     if customer_id:
-        row = await repo.get_by_stripe_customer(customer_id)
+        row = await repo.get_by_razorpay_customer(customer_id)
         if row:
             return row["id"]
     return None
 
 
 @router.post("/webhook", status_code=status.HTTP_200_OK)
-async def stripe_webhook(
+async def razorpay_webhook(
     request: Request,
     pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> dict:
     """
-    Handle Stripe subscription lifecycle events. Signature-verified; unverified
-    payloads are rejected with 400. Unknown event types are acknowledged (200)
-    and ignored so Stripe does not retry them.
+    Handle Razorpay subscription lifecycle events. The raw body is HMAC-verified
+    against X-Razorpay-Signature; forged/tampered payloads are rejected with 400.
+    Unknown event types are acknowledged (200) and ignored so Razorpay does not
+    retry them.
+
+    Handled events:
+      subscription.activated / .charged → active (unlocks live trading)
+      subscription.authenticated        → mandate set up (not yet charged)
+      subscription.pending              → a charge failed, retrying
+      subscription.halted               → retries exhausted → revoke live access
+      subscription.cancelled / .completed / .expired → end subscription
     """
     payload = await request.body()
-    signature = request.headers.get("stripe-signature", "")
+    signature = request.headers.get("x-razorpay-signature", "")
 
     try:
-        event = billing.parse_webhook_event(payload, signature)
+        billing.verify_webhook_signature(payload, signature)
     except billing.BillingNotConfigured as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
-    event_type = event["type"]
-    obj = event["data"]["object"]
+    try:
+        event = json.loads(payload)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed JSON body")
+
+    event_type = event.get("event", "")
+    entity = _subscription_entity(event)
+    if not entity:
+        return {"received": True}
+
     repo = TenantRepo(pool)
+    sub_id = entity.get("id")
+    customer_id = entity.get("customer_id")
+    notes_tenant = (entity.get("notes") or {}).get("tenant_id")
+    period_end = _epoch_to_dt(entity.get("current_end"))
 
-    if event_type == "checkout.session.completed":
-        tenant_id = await _resolve_tenant_id(
-            repo,
-            metadata_tenant=(
-                obj.get("client_reference_id") or (obj.get("metadata") or {}).get("tenant_id")
-            ),
-            customer_id=obj.get("customer"),
-        )
-        if tenant_id:
-            await repo.update_subscription(
-                tenant_id,
-                status="active",
-                plan=billing.QUANT_TIER_PLAN,
-                stripe_customer_id=obj.get("customer"),
-                stripe_subscription_id=obj.get("subscription"),
-            )
-            logger.info("Quant Tier activated for tenant %s", tenant_id)
+    tenant_id = await _resolve_tenant_id(
+        repo,
+        notes_tenant=notes_tenant,
+        subscription_id=sub_id,
+        customer_id=customer_id,
+    )
+    if not tenant_id:
+        logger.warning("Razorpay webhook %s: could not resolve tenant (sub=%s)", event_type, sub_id)
+        return {"received": True}
 
-    elif event_type in ("customer.subscription.updated", "customer.subscription.created"):
-        tenant_id = await _resolve_tenant_id(
-            repo,
-            metadata_tenant=(obj.get("metadata") or {}).get("tenant_id"),
-            customer_id=obj.get("customer"),
+    if event_type in ("subscription.activated", "subscription.charged"):
+        await repo.update_subscription(
+            tenant_id,
+            status="active",
+            plan=billing.QUANT_TIER_PLAN,
+            razorpay_subscription_id=sub_id,
+            razorpay_customer_id=customer_id,
+            current_period_end=period_end,
         )
-        if tenant_id:
-            sub_status = obj.get("status", "inactive")
-            plan = billing.QUANT_TIER_PLAN if billing.is_active_status(sub_status) else None
-            await repo.update_subscription(
-                tenant_id,
-                status=sub_status,
-                plan=plan,
-                stripe_customer_id=obj.get("customer"),
-                stripe_subscription_id=obj.get("id"),
-                current_period_end=_epoch_to_dt(obj.get("current_period_end")),
-            )
+        logger.info("Quant Tier active for tenant %s (%s)", tenant_id, event_type)
 
-    elif event_type == "customer.subscription.deleted":
-        tenant_id = await _resolve_tenant_id(
-            repo,
-            metadata_tenant=(obj.get("metadata") or {}).get("tenant_id"),
-            customer_id=obj.get("customer"),
+    elif event_type == "subscription.authenticated":
+        # Mandate authorized but not yet charged — record it, no live access yet.
+        await repo.update_subscription(
+            tenant_id,
+            status="authenticated",
+            razorpay_subscription_id=sub_id,
+            razorpay_customer_id=customer_id,
         )
-        if tenant_id:
-            # Subscription ended — revoke live access, drop back to free plan.
-            await repo.update_subscription(
-                tenant_id,
-                status="canceled",
-                plan="founding_member",
-            )
-            logger.info("Subscription canceled for tenant %s — reverted to paper-only", tenant_id)
 
-    elif event_type == "invoice.payment_failed":
-        tenant_id = await _resolve_tenant_id(
-            repo,
-            metadata_tenant=None,
-            customer_id=obj.get("customer"),
+    elif event_type == "subscription.pending":
+        await repo.update_subscription(tenant_id, status="pending")
+
+    elif event_type == "subscription.halted":
+        # Recurring charge retries exhausted — revoke live access immediately.
+        await repo.update_subscription(tenant_id, status="halted")
+        logger.info("Subscription halted for tenant %s — live access revoked", tenant_id)
+
+    elif event_type in (
+        "subscription.cancelled",
+        "subscription.completed",
+        "subscription.expired",
+    ):
+        new_status = event_type.split(".", 1)[1]  # cancelled | completed | expired
+        await repo.update_subscription(
+            tenant_id,
+            status=new_status,
+            plan="founding_member",
         )
-        if tenant_id:
-            await repo.update_subscription(tenant_id, status="past_due")
+        logger.info("Subscription %s for tenant %s — reverted to paper-only", new_status, tenant_id)
 
     return {"received": True}

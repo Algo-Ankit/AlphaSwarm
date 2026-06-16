@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     llm_api_key: str = "ollama"
     llm_model: str = "llama3.1"
 
+    # Strict-BYOK exemption. The ONLY account allowed to fall back to the platform
+    # llm_api_key when it hasn't added its own key. Sourced from .env (never
+    # hard-coded, never returned by any API endpoint, never logged). Empty = no
+    # exemption (strict BYOK applies to everyone, including the founder).
+    founder_email: str = ""
+
     # Alpaca
     alpaca_api_key: str = ""
     alpaca_secret_key: str = ""
@@ -80,15 +86,17 @@ class Settings(BaseSettings):
     sentry_environment: str = "development"
     sentry_traces_sample_rate: float = 0.1
 
-    # ── Billing (Stripe) ─────────────────────────────────────────────────────
+    # ── Billing (Razorpay) ───────────────────────────────────────────────────
+    # India-first billing: UPI AutoPay / e-mandate recurring subscriptions via
+    # Razorpay's Subscriptions API (Stripe is RBI-restricted for recurring INR).
     # Live agent deployment requires an active "Quant Tier" subscription. The
-    # checkout/webhook endpoints are no-ops until stripe_secret_key is set.
-    stripe_secret_key: str = ""
-    stripe_webhook_secret: str = ""        # whsec_... — verifies webhook signatures
-    stripe_price_quant: str = ""           # price_... for the Quant Tier subscription
-    # Where Stripe Checkout redirects after success/cancel (frontend routes).
-    stripe_success_url: str = "http://localhost:3000/billing/success?session_id={CHECKOUT_SESSION_ID}"
-    stripe_cancel_url: str = "http://localhost:3000/billing/cancel"
+    # subscribe/webhook endpoints are no-ops until razorpay_key_id is set.
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = ""
+    razorpay_plan_quant: str = ""          # plan_... for the Quant Tier recurring plan
+    razorpay_webhook_secret: str = ""      # dashboard webhook secret (HMAC-SHA256)
+    # Number of billing cycles a new subscription runs for (e.g. 12 monthly).
+    razorpay_subscription_total_count: int = 12
 
     # ── Transactional email (SendGrid) ───────────────────────────────────────
     # Falls back to console-print stubs when sendgrid_api_key is empty, so dev
