@@ -49,8 +49,11 @@ CREATE TABLE broker_connections (
     id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id        UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     broker           TEXT NOT NULL DEFAULT 'alpaca', -- alpaca | zerodha | angel_one
-    key_encrypted    TEXT NOT NULL,    -- Fernet-encrypted API key
-    secret_encrypted TEXT NOT NULL,   -- Fernet-encrypted API secret
+    key_encrypted    TEXT,             -- Fernet-encrypted API key (nullable for OAuth)
+    secret_encrypted TEXT,             -- Fernet-encrypted API secret (nullable for OAuth)
+    access_token     TEXT,
+    refresh_token    TEXT,
+    token_expires_at TIMESTAMPTZ,
     base_url         TEXT,
     is_paper         BOOLEAN NOT NULL DEFAULT true,
     is_active        BOOLEAN NOT NULL DEFAULT true,
@@ -143,6 +146,11 @@ CREATE TABLE orders (
     side                 TEXT NOT NULL,           -- buy | sell
     order_type           TEXT NOT NULL,           -- market | limit | stop
     quantity             NUMERIC(18, 8) NOT NULL,
+    -- Indian cash equity (NSE/BSE) forbids fractional shares. Enforce whole-share
+    -- quantities for those exchanges at the DB layer (defence-in-depth behind
+    -- verify_order_intent's Check 3a). US equity / crypto keep fractional support.
+    CONSTRAINT chk_orders_whole_shares
+        CHECK (exchange NOT IN ('NSE', 'BSE') OR quantity = trunc(quantity)),
     limit_price          NUMERIC(18, 8),
     estimated_price      NUMERIC(18, 8) NOT NULL,
     fill_price           NUMERIC(18, 8),          -- actual fill, populated after execution
@@ -171,6 +179,9 @@ CREATE TABLE positions (
     symbol         TEXT NOT NULL,
     exchange       TEXT NOT NULL DEFAULT 'NASDAQ',
     quantity       NUMERIC(18, 8) NOT NULL DEFAULT 0,  -- positive = long, negative = short
+    -- Whole-share enforcement for NSE/BSE equity (mirrors orders.quantity).
+    CONSTRAINT chk_positions_whole_shares
+        CHECK (exchange NOT IN ('NSE', 'BSE') OR quantity = trunc(quantity)),
     avg_cost       NUMERIC(18, 8) NOT NULL DEFAULT 0,
     current_price  NUMERIC(18, 8),
     unrealized_pnl NUMERIC(18, 8),
@@ -343,3 +354,122 @@ CREATE TABLE llm_configs (
 CREATE INDEX idx_llm_configs_tenant ON llm_configs(tenant_id, is_active);
 -- FK index: owner_user_id (REFERENCES users).
 CREATE INDEX idx_llm_configs_owner  ON llm_configs(owner_user_id);
+
+-- ============================================================
+-- WEALTH-TECH PIVOT — SIP ADVISOR (Phase 1/2)
+-- Foundational tables for the "Investment Advisor for Stock Portfolios & SIPs"
+-- model. Equivalent Alembic migration: alembic/versions/xxxx_sip_advisor.py.
+-- ============================================================
+
+-- ── User risk profiles (KYC + suitability) ───────────────────────────────────
+-- One active profile per user; drives which model portfolios a SIP may use.
+-- SEBI suitability requires a risk score + horizon on record before advising.
+CREATE TABLE user_risk_profiles (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id           UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- KYC
+    pan                 TEXT,                      -- Indian Permanent Account Number (store encrypted in app layer)
+    kyc_status          TEXT NOT NULL DEFAULT 'pending'   -- pending | verified | rejected
+                        CHECK (kyc_status IN ('pending', 'verified', 'rejected')),
+    kyc_verified_at     TIMESTAMPTZ,
+    date_of_birth       DATE,
+    annual_income_band  TEXT,                      -- e.g. '0-5L' | '5-10L' | '10-25L' | '25L+'
+    -- Suitability
+    risk_tolerance      TEXT NOT NULL DEFAULT 'moderate'  -- conservative | moderate | aggressive
+                        CHECK (risk_tolerance IN ('conservative', 'moderate', 'aggressive')),
+    risk_score          INT  NOT NULL DEFAULT 50   -- 0 (lowest) .. 100 (highest) from questionnaire
+                        CHECK (risk_score BETWEEN 0 AND 100),
+    investment_horizon_years INT NOT NULL DEFAULT 5
+                        CHECK (investment_horizon_years > 0),
+    is_active           BOOLEAN NOT NULL DEFAULT true,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- One active profile per user.
+CREATE UNIQUE INDEX idx_user_risk_profiles_active
+    ON user_risk_profiles(user_id) WHERE is_active;
+CREATE INDEX idx_user_risk_profiles_tenant ON user_risk_profiles(tenant_id);
+
+-- ── Model portfolios (target asset weights / constituents) ────────────────────
+-- A curated basket the advisor allocates SIP contributions into. Constituents +
+-- target weights live in JSONB so rebalancing the basket is a single versioned row.
+CREATE TABLE model_portfolios (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id           UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name                TEXT NOT NULL,
+    description         TEXT,
+    -- Suitability band this basket is appropriate for (matched against user_risk_profiles).
+    risk_band           TEXT NOT NULL DEFAULT 'moderate'
+                        CHECK (risk_band IN ('conservative', 'moderate', 'aggressive')),
+    currency            TEXT NOT NULL DEFAULT 'INR',
+    exchange            TEXT NOT NULL DEFAULT 'NSE',
+    -- [{symbol, exchange, target_weight}], target_weight as fraction summing to ~1.0.
+    -- Enforced in the app layer (weights sum, symbol validity); stored as JSONB here.
+    constituents        JSONB NOT NULL DEFAULT '[]'::jsonb,
+    version             INT  NOT NULL DEFAULT 1,    -- bumped on every rebalance
+    is_active           BOOLEAN NOT NULL DEFAULT true,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, name, version)
+);
+CREATE INDEX idx_model_portfolios_tenant ON model_portfolios(tenant_id, is_active);
+CREATE INDEX idx_model_portfolios_band   ON model_portfolios(risk_band) WHERE is_active;
+
+-- ── User Mandates (e-NACH / UPI AutoPay master limits) ────────────────────────
+CREATE TABLE user_mandates (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id           UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    mandate_ref         VARCHAR(255) UNIQUE NOT NULL,
+    max_amount          NUMERIC(18, 2) NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'active'
+                        CHECK (status IN ('active', 'revoked', 'expired')),
+    expiry_date         TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_user_mandates_tenant ON user_mandates(tenant_id, status);
+CREATE INDEX idx_user_mandates_user ON user_mandates(user_id);
+CREATE INDEX idx_user_mandates_expiry ON user_mandates(expiry_date);
+
+-- ── SIP mandates (recurring auto-invest instructions) ─────────────────────────
+-- Monthly contribution mapped to a model portfolio, executed on a chosen calendar
+-- day, gated by an auto-pay (e-NACH/UPI AutoPay) mandate.
+CREATE TABLE sip_mandates (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id           UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    model_portfolio_id  UUID NOT NULL REFERENCES model_portfolios(id) ON DELETE RESTRICT,
+    risk_profile_id     UUID REFERENCES user_risk_profiles(id) ON DELETE RESTRICT,
+    mandate_id          UUID REFERENCES user_mandates(id) ON DELETE RESTRICT,
+    -- Contribution
+    amount              NUMERIC(18, 2) NOT NULL CHECK (amount > 0),  -- INR, 2dp (no fractional paise)
+    rollover_cash       NUMERIC(18, 2) DEFAULT 0.0 CHECK (rollover_cash >= 0.0),
+    currency            TEXT NOT NULL DEFAULT 'INR',
+    frequency           TEXT NOT NULL DEFAULT 'monthly'
+                        CHECK (frequency IN ('weekly', 'monthly', 'quarterly')),
+    execution_day       INT  NOT NULL DEFAULT 1       -- day-of-month (1..28 keeps it valid every month)
+                        CHECK (execution_day BETWEEN 1 AND 28),
+    -- Auto-pay mandate (e-NACH / UPI AutoPay) lifecycle
+    autopay_status      TEXT NOT NULL DEFAULT 'pending'
+                        CHECK (autopay_status IN ('pending', 'active', 'paused', 'cancelled', 'failed')),
+    -- Scheduling
+    status              TEXT NOT NULL DEFAULT 'active'
+                        CHECK (status IN ('active', 'paused', 'cancelled')),
+    start_date          DATE NOT NULL DEFAULT CURRENT_DATE,
+    end_date            DATE,                        -- NULL = open-ended
+    next_execution_date DATE,
+    last_executed_at    TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_sip_mandates_user   ON sip_mandates(user_id);
+CREATE INDEX idx_sip_mandates_tenant ON sip_mandates(tenant_id, status);
+-- FK indexes for the references without a covering index.
+CREATE INDEX idx_sip_mandates_portfolio ON sip_mandates(model_portfolio_id);
+CREATE INDEX idx_sip_mandates_risk_profile ON sip_mandates(risk_profile_id);
+CREATE INDEX idx_sip_mandates_mandate ON sip_mandates(mandate_id);
+-- Daily scheduler scans for due mandates: (status='active' AND next_execution_date <= today).
+CREATE INDEX idx_sip_mandates_due
+    ON sip_mandates(next_execution_date) WHERE status = 'active';
