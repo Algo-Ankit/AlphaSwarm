@@ -65,3 +65,42 @@ export const SESSION_VARIANT: Record<SessionStatus, 'success' | 'warning' | 'mut
   after_hours: 'warning',
   closed: 'muted',
 }
+
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+/**
+ * Returns a human-readable "Opens at …" string, e.g. "Today 9:30 AM ET" or "Mon 9:15 AM IST".
+ * Returns null for CRYPTO (always open) or unknown exchanges.
+ */
+export function nextOpenLabel(exchange: string, now: Date = new Date()): string | null {
+  const s = SCHEDULES[exchange.toUpperCase()]
+  if (!s) return null
+  if (exchange.toUpperCase() === 'CRYPTO') return null   // 24/7
+
+  const openMinutes = s.open
+  const openH = Math.floor(openMinutes / 60)
+  const openM = openMinutes % 60
+
+  // Walk up to 7 days to find next weekday the exchange is open
+  for (let dayOffset = 0; dayOffset <= 7; dayOffset++) {
+    const candidate = new Date(now.getTime() + dayOffset * 86_400_000)
+    const { weekday } = localParts(s.tz, candidate)
+    if (!s.weekdays.includes(weekday)) continue
+
+    // Build a local-time Date at the open hour/minute for this candidate day
+    // Use Intl to figure out the UTC equivalent
+    const { minutes: currentMinutes } = localParts(s.tz, candidate)
+    if (dayOffset === 0 && currentMinutes >= openMinutes) continue  // already past open today
+
+    const tzAbbr = new Intl.DateTimeFormat('en-US', {
+      timeZone: s.tz, timeZoneName: 'short',
+    }).formatToParts(candidate).find((p) => p.type === 'timeZoneName')?.value ?? ''
+
+    const h12 = openH % 12 || 12
+    const ampm = openH < 12 ? 'AM' : 'PM'
+    const mStr = openM.toString().padStart(2, '0')
+    const label = dayOffset === 0 ? 'Today' : dayOffset === 1 ? 'Tomorrow' : DAY_NAMES[weekday]
+    return `${label} ${h12}:${mStr} ${ampm} ${tzAbbr}`.trim()
+  }
+  return null
+}

@@ -2,6 +2,7 @@ from uuid import UUID
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentUser, get_current_user, get_db_pool
 from app.core.celery_app import celery_app
@@ -42,6 +43,7 @@ def _record_to_response(record: asyncpg.Record) -> StrategyResponse:
     except Exception:
         status_val = StrategyStatus.draft
 
+    sip_amount = record.get("sip_monthly_amount")
     return StrategyResponse(
         id=str(record["id"]),
         tenant_id=str(record["tenant_id"]),
@@ -55,6 +57,9 @@ def _record_to_response(record: asyncpg.Record) -> StrategyResponse:
         generated_logic=record["generated_logic"] or "",
         explanation=record.get("explanation") or "",
         risk=risk,
+        sip_paused=bool(record.get("sip_paused", False)),
+        sip_monthly_amount=float(sip_amount) if sip_amount is not None else None,
+        sip_frequency=record.get("sip_frequency") or "monthly",
         created_at=record["created_at"],
         updated_at=record["updated_at"],
     )
@@ -252,6 +257,65 @@ async def run_strategy(
         dry_run=request.dry_run,
         message="Strategy run dispatched to isolated worker queue",
     )
+
+
+class SipUpdateRequest(BaseModel):
+    paused: bool
+
+
+class LumpSumRequest(BaseModel):
+    amount: float = Field(gt=0, description="Cash amount to inject (in the strategy's currency)")
+
+
+@router.patch("/strategies/{strategy_id}/sip", response_model=StrategyResponse)
+async def update_sip(
+    strategy_id: UUID,
+    body: SipUpdateRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> StrategyResponse:
+    """Pause or resume the Systematic Investment Plan for a strategy."""
+    repo = StrategyRepo(pool, current_user.tenant_id)
+    record = await repo.get_by_id(strategy_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
+
+    await repo.update_sip_paused(strategy_id, body.paused)
+    updated = await repo.get_by_id(strategy_id)
+    return _record_to_response(updated)
+
+
+@router.post("/strategies/{strategy_id}/lump-sum")
+async def lump_sum_boost(
+    strategy_id: UUID,
+    body: LumpSumRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> dict:
+    """
+    Request a one-off lump-sum cash injection for a strategy.
+    Creates a rebalance_approval notification — the AI will not rebalance
+    until the user explicitly clicks Approve in the notification center.
+    """
+    from app.db.repositories.notifications import NotificationRepo
+    repo = StrategyRepo(pool, current_user.tenant_id)
+    record = await repo.get_by_id(strategy_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
+
+    notif_repo = NotificationRepo(pool, current_user.tenant_id)
+    notif = await notif_repo.create(
+        user_id=current_user.user_id,
+        type="rebalance_approval",
+        title="Lump-Sum Rebalance Pending Approval",
+        body=(
+            f"A lump-sum boost of {body.amount:,.2f} has been queued for "
+            f"'{record['name']}'. Review and click Approve to execute the rebalance."
+        ),
+        entity_type="strategy",
+        entity_id=strategy_id,
+    )
+    return {"notification_id": str(notif["id"]), "status": "pending_approval"}
 
 
 @router.get("/tasks/{task_id}", response_model=TaskStatusResponse)

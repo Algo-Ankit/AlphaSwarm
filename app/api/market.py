@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.api.deps import CurrentUser, get_current_user, get_db_pool
 from app.core.rate_limit import limiter
+from app.domain.market_hours import _SCHEDULES, get_session_status, next_open_time
 from app.services import forecaster as fc_svc
 from app.services import indicators as ind_svc
 from app.services import market_data as md_svc
@@ -43,6 +44,28 @@ def _validate_exchange(ex: str) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid exchange '{ex}'. Valid: {sorted(_VALID_EXCHANGES)}",
         )
+
+
+@router.get("/hours/{exchange}")
+async def get_market_hours(
+    exchange: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Return current session status + next open time for an exchange."""
+    ex = exchange.upper()
+    if ex not in _SCHEDULES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown exchange '{exchange}'. Valid: {sorted(_SCHEDULES)}",
+        )
+    session = get_session_status(ex)
+    nxt = next_open_time(ex)
+    return {
+        "exchange": ex,
+        "status": session,
+        "next_open": nxt.isoformat() if nxt else None,
+        "timezone": _SCHEDULES[ex]["tz"],
+    }
 
 
 @router.get("/bars/{symbol}")

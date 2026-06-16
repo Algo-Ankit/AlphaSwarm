@@ -1,8 +1,9 @@
 import type {
+  AllocationSlice,
+  AppNotification,
   BacktestRequest,
   BacktestResult,
   BacktestSummary,
-  AppNotification,
   Bar,
   BrokerConnectRequest,
   BrokerConnection,
@@ -320,6 +321,59 @@ export const api = {
   markAllNotificationsRead: () =>
     fetch(`${BASE}/v1/notifications/read-all`, { method: 'POST', headers: authHeaders() })
       .then((r) => { if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`) }),
+
+  // ── Broker OAuth ──────────────────────────────────────────────
+  getBrokerOAuthLoginUrl: (broker: string) =>
+    req<{ login_url: string; state: string | null }>(`/v1/brokers/oauth/${broker}/login-url`, {
+      headers: authHeaders(),
+    }),
+
+  exchangeBrokerOAuthCode: (body: { broker: string; code?: string; request_token?: string; state?: string }) =>
+    req<BrokerConnection>('/v1/brokers/oauth/callback', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(body),
+    }),
+
+  angeloneLogin: (data: { client_id: string; password: string; totp: string }) =>
+    req<BrokerConnection>('/v1/brokers/oauth/angelone/login', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    }),
+
+  // ── Market hours ──────────────────────────────────────────────
+  getMarketHours: (exchange: string) =>
+    req<{ exchange: string; status: string; next_open: string | null; timezone: string }>(
+      `/v1/market/hours/${encodeURIComponent(exchange)}`,
+      { headers: authHeaders() },
+    ),
+
+  // ── Portfolio allocation ──────────────────────────────────────
+  getPortfolioAllocation: () =>
+    req<AllocationSlice[]>('/v1/portfolio/allocation', { headers: authHeaders() }),
+
+  // ── SIP controls ──────────────────────────────────────────────
+  updateSip: (strategyId: string, paused: boolean) =>
+    req<Strategy>(`/v1/strategies/${strategyId}/sip`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ paused }),
+    }),
+
+  lumpSumBoost: (strategyId: string, amount: number) =>
+    req<{ notification_id: string; status: string }>(`/v1/strategies/${strategyId}/lump-sum`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ amount }),
+    }),
+
+  // ── Rebalance approval ────────────────────────────────────────
+  approveRebalance: (notifId: string) =>
+    fetch(`${BASE}/v1/notifications/${notifId}/approve`, {
+      method: 'POST',
+      headers: authHeaders(),
+    }).then((r) => { if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`) }),
 
   // ── Backtest ──────────────────────────────────────────────
   runBacktest: (strategyId: string, params: BacktestRequest) =>

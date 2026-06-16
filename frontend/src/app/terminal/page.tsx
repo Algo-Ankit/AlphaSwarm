@@ -10,7 +10,7 @@ import { CandleChart } from '@/components/charts/CandleChart'
 import { RsiPane } from '@/components/charts/RsiPane'
 import { api, getAccessToken, barsSocketUrl } from '@/lib/api'
 import { openReconnectingSocket, type WsStatus } from '@/lib/ws'
-import { sessionStatus, SESSION_LABEL, SESSION_VARIANT } from '@/lib/marketHours'
+import { sessionStatus, SESSION_LABEL, SESSION_VARIANT, nextOpenLabel } from '@/lib/marketHours'
 import { TIMEFRAMES } from '@/lib/constants'
 import { ema, rsi } from '@/lib/ta'
 import { cn } from '@/lib/utils'
@@ -134,6 +134,28 @@ export default function TerminalPage() {
             </span>
           </div>
         </div>
+
+        {/* ── Market-closed banner ──────────────────────────────────────── */}
+        {(session === 'closed' || session === 'after_hours') && (
+          <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl
+            bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20">
+            <div className="flex items-center gap-2.5">
+              <div className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
+              <span className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                {session === 'after_hours' ? 'After Hours' : 'Market Closed'}
+              </span>
+              <span className="text-sm text-amber-700 dark:text-amber-400">
+                {(() => {
+                  const nxt = nextOpenLabel(exchange)
+                  return nxt ? `· Opens ${nxt}` : '· Live execution unavailable'
+                })()}
+              </span>
+            </div>
+            <span className="text-[11px] font-bold uppercase tracking-widest text-amber-600 dark:text-amber-400 px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-500/20">
+              Data Only
+            </span>
+          </div>
+        )}
 
         {/* ── Timeframe selector ───────────────────────────────────────── */}
         <div className="flex items-center gap-1 p-1 rounded-xl bg-zinc-100/70 dark:bg-zinc-800/50 w-fit">

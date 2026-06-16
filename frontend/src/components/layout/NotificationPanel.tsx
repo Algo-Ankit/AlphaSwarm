@@ -1,25 +1,27 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bell, Check, CheckCheck, TrendingUp, AlertTriangle, Newspaper, Info } from 'lucide-react'
+import { Bell, Check, CheckCheck, TrendingUp, AlertTriangle, Newspaper, Info, RefreshCw, ThumbsUp } from 'lucide-react'
 import { api, getAccessToken, portfolioSocketUrl } from '@/lib/api'
 import { openReconnectingSocket } from '@/lib/ws'
 import { cn } from '@/lib/utils'
 import type { AppNotification, NotificationType, PortfolioWsMessage } from '@/lib/types'
 
 const ICON: Record<NotificationType, typeof Bell> = {
-  trade_executed: TrendingUp,
-  bot_error: AlertTriangle,
-  pnl_threshold: TrendingUp,
-  news: Newspaper,
-  system: Info,
+  trade_executed:     TrendingUp,
+  bot_error:          AlertTriangle,
+  pnl_threshold:      TrendingUp,
+  news:               Newspaper,
+  system:             Info,
+  rebalance_approval: RefreshCw,
 }
 
 const ICON_COLOR: Record<NotificationType, string> = {
-  trade_executed: 'text-emerald-500',
-  bot_error: 'text-rose-500',
-  pnl_threshold: 'text-violet-500',
-  news: 'text-blue-500',
-  system: 'text-zinc-400',
+  trade_executed:     'text-emerald-500',
+  bot_error:          'text-rose-500',
+  pnl_threshold:      'text-violet-500',
+  news:               'text-blue-500',
+  system:             'text-zinc-400',
+  rebalance_approval: 'text-amber-500',
 }
 
 function timeAgo(iso: string): string {
@@ -90,6 +92,21 @@ export function NotificationPanel() {
     try { await api.markAllNotificationsRead() } catch { /* ignore */ }
   }
 
+  const [approving, setApproving] = useState<string | null>(null)
+
+  const approve = async (id: string) => {
+    setApproving(id)
+    try {
+      await api.approveRebalance(id)
+      setItems((prev) => prev.map((n) =>
+        n.id === id
+          ? { ...n, is_read: true, approved_at: new Date().toISOString() }
+          : n,
+      ))
+    } catch { /* ignore */ }
+    finally { setApproving(null) }
+  }
+
   return (
     <div ref={boxRef} className="relative">
       <button
@@ -148,12 +165,31 @@ export function NotificationPanel() {
                       <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 line-clamp-2">{n.body}</p>
                       <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-1">{timeAgo(n.created_at)}</p>
                     </div>
-                    {!n.is_read && (
-                      <button onClick={() => markRead(n.id)} title="Mark read"
-                        className="flex-shrink-0 text-zinc-400 hover:text-violet-600 dark:hover:text-violet-400 transition-colors">
-                        <Check className="w-4 h-4" />
-                      </button>
-                    )}
+                    <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                      {n.type === 'rebalance_approval' && !n.approved_at && (
+                        <button
+                          onClick={() => approve(n.id)}
+                          disabled={approving === n.id}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest
+                            bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300
+                            hover:bg-amber-200 dark:hover:bg-amber-500/30 transition-colors disabled:opacity-50"
+                        >
+                          <ThumbsUp className="w-3 h-3" />
+                          {approving === n.id ? '…' : 'Approve'}
+                        </button>
+                      )}
+                      {n.type === 'rebalance_approval' && n.approved_at && (
+                        <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">
+                          Approved
+                        </span>
+                      )}
+                      {!n.is_read && (
+                        <button onClick={() => markRead(n.id)} title="Mark read"
+                          className="text-zinc-400 hover:text-violet-600 dark:hover:text-violet-400 transition-colors">
+                          <Check className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )
               })

@@ -34,6 +34,9 @@ export interface Strategy {
   generated_logic: string
   explanation: string
   risk: StrategyRiskConfig
+  sip_paused: boolean
+  sip_monthly_amount: number | null
+  sip_frequency: string
   created_at: string
   updated_at: string
 }
@@ -84,6 +87,8 @@ export interface UserProfile {
   email: string
 }
 
+export type OAuthTokenStatus = 'connected' | 'expired' | 'none'
+
 export interface BrokerConnection {
   id: string
   broker: string
@@ -91,6 +96,9 @@ export interface BrokerConnection {
   is_paper: boolean
   is_active: boolean
   key_preview: string
+  oauth_connected: boolean
+  token_status: OAuthTokenStatus
+  token_expires_at: string | null
   created_at: string
   updated_at: string
 }
@@ -290,8 +298,19 @@ export interface PortfolioTick extends PortfolioSnapshot {
   type: 'portfolio'
 }
 
+// ── Portfolio Allocation ───────────────────────────────────────────────────────
+
+export interface AllocationSlice {
+  label: string
+  value: number
+  pct: number
+  color: string
+}
+
+// ── Notification types ─────────────────────────────────────────────────────────
+
 export type NotificationType =
-  | 'trade_executed' | 'bot_error' | 'pnl_threshold' | 'news' | 'system'
+  | 'trade_executed' | 'bot_error' | 'pnl_threshold' | 'news' | 'system' | 'rebalance_approval'
 
 export interface AppNotification {
   id: string
@@ -301,6 +320,7 @@ export interface AppNotification {
   entity_type: string | null
   entity_id: string | null
   is_read: boolean
+  approved_at: string | null
   created_at: string
 }
 

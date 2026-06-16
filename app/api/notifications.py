@@ -72,3 +72,26 @@ async def mark_all_read(
 ) -> None:
     repo = NotificationRepo(pool, current_user.tenant_id)
     await repo.mark_all_read(current_user.user_id)
+
+
+@router.post("/{notif_id}/approve", status_code=status.HTTP_204_NO_CONTENT)
+async def approve_notification(
+    notif_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> None:
+    """
+    Approve a rebalance_approval notification.
+    Marks it as read + sets approved_at timestamp.
+    The Celery worker picks up approved rebalances on the next beat cycle.
+    """
+    repo = NotificationRepo(pool, current_user.tenant_id)
+    notif = await repo.get_by_id(notif_id)
+    if not notif:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found")
+    if notif["type"] != "rebalance_approval":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only rebalance_approval notifications can be approved",
+        )
+    await repo.approve(notif_id, current_user.user_id)

@@ -17,8 +17,10 @@ import {
   Play, Activity, ArrowLeft, Clock,
   History, Database, ShieldAlert, CheckCircle2, Terminal,
   FlaskConical, TrendingUp, TrendingDown, BarChart3, Zap,
-  Pencil, Save, X, Code2, FileText,
+  Pencil, Save, X, Code2, FileText, AlertTriangle,
+  PauseCircle, PlayCircle, Plus,
 } from 'lucide-react'
+import { sessionStatus, SESSION_LABEL, nextOpenLabel } from '@/lib/marketHours'
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false })
 
@@ -171,6 +173,34 @@ export default function StrategyDetailPage() {
     }
   }
 
+  const [sipLoading, setSipLoading] = useState(false)
+  const [lumpSumOpen, setLumpSumOpen] = useState(false)
+  const [lumpAmount, setLumpAmount] = useState('')
+
+  async function handleToggleSip() {
+    if (!strategy) return
+    setSipLoading(true)
+    try {
+      const updated = await api.updateSip(strategy.id, !strategy.sip_paused)
+      setStrategy(updated)
+    } catch { /* ignore */ }
+    finally { setSipLoading(false) }
+  }
+
+  async function handleLumpSum() {
+    if (!strategy || !lumpAmount) return
+    const amt = parseFloat(lumpAmount)
+    if (!amt || amt <= 0) return
+    try {
+      await api.lumpSumBoost(strategy.id, amt)
+      setLumpSumOpen(false)
+      setLumpAmount('')
+      alert('Lump-sum request queued — check your notification center to approve.')
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : 'Failed')
+    }
+  }
+
   if (loading) return (
     <AppShell>
       <div className="animate-pulse space-y-6">
@@ -184,6 +214,9 @@ export default function StrategyDetailPage() {
   if (!strategy) return null
 
   const isQuant = (strategy as { creation_mode?: string }).creation_mode === 'quant'
+  const session = sessionStatus(strategy.exchange)
+  const marketOpen = session === 'open' || session === 'pre_market'
+  const nextOpen = nextOpenLabel(strategy.exchange)
   const m = btResult?.metrics
   // Plain-English explanation is the default view; code is one toggle away.
   // Quant / hand-written strategies have no explanation → always show code.
@@ -242,6 +275,47 @@ export default function StrategyDetailPage() {
           </div>
 
           <div className="flex flex-col items-end gap-2 flex-shrink-0">
+            {/* Market-hours badge */}
+            {!marketOpen && strategy.exchange !== 'CRYPTO' && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl
+                bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+                <span className="text-xs font-medium text-amber-700 dark:text-amber-300">
+                  {SESSION_LABEL[session]}
+                  {nextOpen && ` · Opens ${nextOpen}`}
+                </span>
+              </div>
+            )}
+
+            {/* SIP pause/resume */}
+            <button onClick={handleToggleSip} disabled={sipLoading}
+              className={cn(
+                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors disabled:opacity-50',
+                strategy.sip_paused
+                  ? 'border-emerald-300 dark:border-emerald-600 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/10'
+                  : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800',
+              )}>
+              {strategy.sip_paused
+                ? <><PlayCircle className="w-3.5 h-3.5" /> Resume SIP</>
+                : <><PauseCircle className="w-3.5 h-3.5" /> Pause SIP</>}
+            </button>
+
+            {/* Lump-sum */}
+            {lumpSumOpen ? (
+              <div className="flex items-center gap-2">
+                <input type="number" min="1" step="any" value={lumpAmount} onChange={(e) => setLumpAmount(e.target.value)}
+                  placeholder="Amount…" autoFocus
+                  className="w-28 h-8 px-3 text-sm rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-violet-500/30" />
+                <Button size="sm" onClick={handleLumpSum} disabled={!lumpAmount}><Plus className="w-3.5 h-3.5" /></Button>
+                <Button size="sm" variant="ghost" onClick={() => { setLumpSumOpen(false); setLumpAmount('') }}>✕</Button>
+              </div>
+            ) : (
+              <button onClick={() => setLumpSumOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
+                <Plus className="w-3.5 h-3.5" /> Lump-Sum Boost
+              </button>
+            )}
+
             {/* Live agent status pill */}
             {lastRun && (
               <div className={cn(
@@ -273,6 +347,7 @@ export default function StrategyDetailPage() {
               variant={(dispatching || agentIsLive) ? 'secondary' : 'primary'}
               onClick={handleRun}
               disabled={dispatching || agentIsLive}
+              title={!marketOpen && strategy.exchange !== 'CRYPTO' ? 'Paper run — live orders will queue until market opens' : undefined}
               className={cn(
                 !(dispatching || agentIsLive) && 'shadow-[0_4px_20px_rgba(109,40,217,0.35)] hover:shadow-[0_6px_28px_rgba(109,40,217,0.5)]',
               )}
@@ -281,8 +356,13 @@ export default function StrategyDetailPage() {
                 ? <><Activity className="w-4 h-4 mr-2 animate-spin" /> Dispatching…</>
                 : agentIsLive
                   ? <><Activity className="w-4 h-4 mr-2 animate-pulse" /> Agent Running…</>
-                  : <><Play className="w-4 h-4 mr-2" /> Run Agent</>}
+                  : <><Play className="w-4 h-4 mr-2" /> {!marketOpen && strategy.exchange !== 'CRYPTO' ? 'Run Agent (Paper)' : 'Run Agent'}</>}
             </Button>
+            {!marketOpen && strategy.exchange !== 'CRYPTO' && (
+              <p className="text-[10px] text-zinc-400 dark:text-zinc-500 text-right">
+                Live orders blocked — market closed.
+              </p>
+            )}
           </div>
         </div>
 

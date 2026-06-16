@@ -93,6 +93,15 @@ class StrategyRepo(BaseRepo):
             self.tenant_id,
         )
 
+    async def update_sip_paused(self, strategy_id: UUID, paused: bool) -> None:
+        await self.execute(
+            """
+            UPDATE strategies SET sip_paused = $1, updated_at = now()
+            WHERE id = $2 AND tenant_id = $3
+            """,
+            paused, strategy_id, self.tenant_id,
+        )
+
     async def update_status(self, strategy_id: UUID, new_status: str) -> None:
         await self.execute(
             """

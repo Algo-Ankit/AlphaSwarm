@@ -5,11 +5,12 @@ import { AppShell } from '@/components/layout/AppShell'
 import { StrategyCard } from '@/components/dashboard/StrategyCard'
 import { StatsBar } from '@/components/dashboard/StatsBar'
 import { PortfolioOverview } from '@/components/dashboard/PortfolioOverview'
+import { GoalWizard } from '@/components/dashboard/GoalWizard'
 import { Button } from '@/components/ui/Button'
 import { GlassCard } from '@/components/ui/GlassCard'
 import { api, getAccessToken, getUserProfile } from '@/lib/api'
 import type { Strategy } from '@/lib/types'
-import { Plus, Zap, Activity } from 'lucide-react'
+import { Plus, Activity } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 function Skeleton() {
@@ -18,46 +19,6 @@ function Skeleton() {
       {[1, 2, 3].map((i) => (
         <div key={i} className="glass-card h-52 animate-pulse" style={{ opacity: 0.5 }} />
       ))}
-    </div>
-  )
-}
-
-function Empty({ onBuild }: { onBuild: () => void }) {
-  return (
-    <div className={cn(
-      'relative overflow-hidden rounded-2xl',
-      'border border-zinc-200 dark:border-white/[0.07]',
-      'bg-white dark:bg-zinc-900/40',
-      'flex flex-col items-center justify-center py-24 text-center',
-    )}>
-      {/* Ambient glow */}
-      <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[60%] h-48
-          bg-gradient-to-b from-violet-500/08 dark:from-violet-500/15 to-transparent rounded-full blur-3xl" />
-      </div>
-
-      <div className="relative z-10 max-w-sm mx-auto">
-        <div className="w-16 h-16 rounded-2xl mx-auto mb-6
-          bg-gradient-to-br from-violet-500 to-violet-700
-          flex items-center justify-center
-          shadow-[0_8px_32px_rgba(124,58,237,0.35)] dark:shadow-[0_8px_40px_rgba(124,58,237,0.45)]
-          hover:scale-105 transition-transform duration-500 cursor-default">
-          <Zap className="w-8 h-8 text-white fill-white/20" />
-        </div>
-
-        <h2 className="text-2xl font-extrabold text-zinc-900 dark:text-zinc-50 mb-2 tracking-tight">
-          No strategies yet
-        </h2>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-8 leading-relaxed">
-          Describe your trading idea in plain English — our AI turns it into a live, risk-managed bot in seconds.
-        </p>
-
-        <Button size="lg" onClick={onBuild}
-          className="shadow-[0_4px_20px_rgba(109,40,217,0.35)] hover:shadow-[0_6px_28px_rgba(109,40,217,0.5)] transition-shadow">
-          <Plus className="w-4 h-4 mr-2" />
-          Build First Strategy
-        </Button>
-      </div>
     </div>
   )
 }
@@ -146,7 +107,7 @@ export default function DashboardPage() {
             <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1.5">{error}</p>
           </GlassCard>
         ) : strategies.length === 0 ? (
-          <Empty onBuild={() => router.push('/strategies/new')} />
+          <GoalWizard onBuild={() => router.push('/strategies/new')} />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {strategies.map((s) => <StrategyCard key={s.id} strategy={s} />)}
