@@ -3,8 +3,8 @@ BaseStrategy contract guard.
 
 A strategy gets its strategy_id from the StrategyContext (self.ctx.strategy_id),
 NOT from the frozen risk config (self.ctx.risk has no strategy_id field). The
-docstring example and the AutoGen system prompt are the templates humans and the
-LLM copy, so a wrong field there silently propagates into every generated/hand-
+docstring example and the Agent Framework system prompt are the templates humans
+and the LLM copy, so a wrong field there silently propagates into every generated/hand-
 written strategy and crashes OrderIntent construction at the first order. These
 tests lock the correct contract.
 
@@ -37,7 +37,7 @@ def test_docstring_example_uses_ctx_strategy_id():
 
 
 def test_system_prompt_uses_ctx_strategy_id():
-    # The AutoGen builder's template must also use the correct field.
+    # The Agent Framework builder's template must also use the correct field.
     from app.services import strategy_builder
     src = inspect.getsource(strategy_builder)
     assert "self.ctx.risk.strategy_id" not in src

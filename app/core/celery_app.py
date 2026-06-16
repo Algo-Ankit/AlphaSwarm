@@ -5,6 +5,22 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
+# ── Sentry (worker-side error + performance monitoring) ────────────────────────
+# Initialised at module import so every Celery worker/beat process is covered.
+# The CeleryIntegration captures unhandled task exceptions + soft/hard timeouts.
+# No-op when SENTRY_DSN is unset.
+if settings.sentry_dsn:
+    import sentry_sdk
+    from sentry_sdk.integrations.celery import CeleryIntegration
+
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.sentry_environment,
+        traces_sample_rate=settings.sentry_traces_sample_rate,
+        integrations=[CeleryIntegration()],
+        send_default_pii=False,
+    )
+
 celery_app = Celery(
     "alphaswarm_worker",
     broker=settings.celery_broker_url,

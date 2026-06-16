@@ -15,7 +15,7 @@ import logging
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -23,6 +23,7 @@ import pandas as pd
 # parts of this module (e.g. _compute_metrics) can be imported/tested without it.
 
 from app.domain.base_strategy import BaseStrategy, ReadOnlyDataFrame, StrategyContext
+from app.domain.broker_routing import allows_fractional_shares
 from app.domain.market_data import Bar, MarketState
 from app.domain.models import OrderIntent, OrderSide, OrderType, StrategyRiskConfig
 from app.domain.risk import verify_order_intent
@@ -34,6 +35,14 @@ logger = logging.getLogger(__name__)
 
 # Max historical bars passed to StrategyContext — bounds the view size to O(1) per bar
 _CONTEXT_WINDOW = 300
+
+# Liquidity realism: a single fill may consume at most this fraction of the fill
+# bar's actual traded volume. The remainder above the cap is DROPPED (cancelled),
+# never carried — an order that can't be filled at the touch simply doesn't fill.
+_MAX_PARTICIPATION_RATE = 0.10
+
+# Stock-loan fee charged on short market value, accrued per bar from this annual rate.
+_SHORT_BORROW_ANNUAL_RATE = 0.08
 
 # Trading-period annualization factor per timeframe
 _BARS_PER_YEAR: dict[str, float] = {
@@ -151,6 +160,9 @@ def run_backtest(
     slippage_bps = float(rc.get("slippage_bps", 5.0))
     commission_per_share = float(rc.get("commission_per_share", 0.005))
 
+    # Per-bar fraction of a year — basis for accruing the short borrow fee bar-by-bar.
+    bars_per_year = _BARS_PER_YEAR.get(timeframe, _BARS_PER_YEAR.get(timeframe.lower(), 252.0))
+
     # Broker-enforced bracket exit levels for the currently open position.
     # Set only on a clean entry from flat (non-crypto) — mirrors the live worker.
     exit_stop_price: float | None = None
@@ -169,7 +181,7 @@ def run_backtest(
         if position != 0:
             exit_fill = _bracket_exit_fill(
                 position, exit_stop_price, exit_take_price,
-                float(bars[i].high), float(bars[i].low), slippage_bps,
+                float(bars[i].open), float(bars[i].high), float(bars[i].low), slippage_bps,
             )
             if exit_fill is not None:
                 exit_side, exit_px = exit_fill
@@ -193,6 +205,13 @@ def run_backtest(
                 avg_cost = None
                 exit_stop_price = None
                 exit_take_price = None
+
+        # 0b. Short borrow cost — a short position is not free leverage. Accrue the
+        #     stock-loan fee per bar from an 8% annualized rate on the short market
+        #     value, so short P&L reflects the real cost of carry. Charged only while
+        #     the position is still open this bar (a bracket close above sets it flat).
+        if position < 0:
+            cash -= abs(float(position)) * close_price * (_SHORT_BORROW_ANNUAL_RATE / bars_per_year)
 
         # 1. Mark-to-market at close of bar i
         equity = cash + float(position) * close_price
@@ -246,6 +265,34 @@ def run_backtest(
             continue
         next_open = Decimal(str(next_open_val))
 
+        # Whole-share enforcement: NSE/BSE forbid fractional equity. Floor the
+        # requested qty to a whole number so a ₹5,000 SIP into a ₹3,000 stock buys
+        # exactly 1 share (₹3,000) and the ₹2,000 remainder stays in cash — never a
+        # 1.66-share order. Floored BEFORE the risk check so the integer size is
+        # what's evaluated (and so risk.py's whole-share guard never fires here).
+        if not allows_fractional_shares(exchange):
+            floored = signal.quantity.to_integral_value(rounding=ROUND_DOWN)
+            if floored <= 0:
+                continue  # not enough allocation for a single whole share this bar
+            if floored != signal.quantity:
+                signal = signal.model_copy(update={"quantity": floored})
+
+        # Liquidity participation cap — a fill can absorb at most 10% of the fill
+        # bar's traded volume. The unfillable remainder is DROPPED, not carried: a
+        # real order that exceeds available liquidity at the touch does not silently
+        # complete on a later bar. A zero-volume bar offers no liquidity → no fill.
+        next_volume = float(bars[i + 1].volume)
+        if math.isnan(next_volume) or next_volume <= 0:
+            continue
+        max_fillable = Decimal(str(_MAX_PARTICIPATION_RATE * next_volume))
+        if signal.quantity > max_fillable:
+            capped = max_fillable
+            if not allows_fractional_shares(exchange):
+                capped = capped.to_integral_value(rounding=ROUND_DOWN)
+            if capped <= 0:
+                continue  # not even one tradeable unit of liquidity this bar
+            signal = signal.model_copy(update={"quantity": capped})
+
         current_pos = float(position) if position else None
 
         current_date = bars[i].timestamp.date()
@@ -260,8 +307,16 @@ def run_backtest(
             today_executed_notional=Decimal(str(today_notional)),
         )
 
+        # Feed Checks 4a/4b their inputs so the per-symbol position cap and the
+        # max-open-positions cap are rigorously enforced in simulation (not bypassed).
+        # Single-symbol backtest: existing exposure is this position; open count is 0/1.
+        current_pos_value = abs(float(position)) * float(signal.estimated_price) if position else 0.0
+        open_positions_count = 1 if position != 0 else 0
+
         risk_result = verify_order_intent(
-            signal, risk_profile, market_state=mock_state, current_position=current_pos
+            signal, risk_profile, market_state=mock_state, current_position=current_pos,
+            current_position_value=current_pos_value,
+            open_positions_count=open_positions_count,
         )
         if not risk_result.approved:
             logger.debug("Bar %d: risk rejected — %s", i, risk_result.reason)
@@ -275,20 +330,34 @@ def run_backtest(
         commission = commission_per_share * float(qty)
         prev_pos = position
 
-        if signal.order_type == OrderType.limit and signal.limit_price is not None:
+        is_limit = signal.order_type == OrderType.limit and signal.limit_price is not None
+        if is_limit:
             if signal.side == OrderSide.buy and float(bars[i + 1].low) > float(signal.limit_price):
                 continue
             if signal.side == OrderSide.sell and float(bars[i + 1].high) < float(signal.limit_price):
                 continue
-            base_fill = signal.limit_price
+            # The better of the limit price or the opening price
+            if signal.side == OrderSide.buy:
+                base_fill = min(next_open, Decimal(str(signal.limit_price)))
+            else:
+                base_fill = max(next_open, Decimal(str(signal.limit_price)))
         else:
             base_fill = next_open
 
+        # Apply slippage, but a LIMIT order can never fill worse than its limit
+        # price — a limit buy paying limit×(1+slip) is fantasy P&L; the order would
+        # simply rest unfilled. Clamp limits to the limit price; market orders take
+        # the full adverse slippage. (Previously slippage was applied blindly to all
+        # orders, inflating limit-order costs and faking losses.)
         if signal.side == OrderSide.buy:
             fill_price = base_fill * Decimal(str(1 + slippage_bps / 10000.0))
+            if is_limit:
+                fill_price = min(fill_price, Decimal(str(signal.limit_price)))
         else:
             fill_price = base_fill * Decimal(str(1 - slippage_bps / 10000.0))
-            
+            if is_limit:
+                fill_price = max(fill_price, Decimal(str(signal.limit_price)))
+
         notional = float(qty * fill_price)
 
         if signal.side == OrderSide.buy:
@@ -325,14 +394,22 @@ def run_backtest(
         flipped = (prev_pos > 0 and position < 0) or (prev_pos < 0 and position > 0)
         if position == 0:
             exit_stop_price = exit_take_price = None
-        elif flat_entry and exchange.upper() != "CRYPTO" and (
+        elif (flat_entry or flipped) and exchange.upper() != "CRYPTO" and (
             risk_profile.stop_loss_pct is not None or risk_profile.take_profit_pct is not None
         ):
+            # Clean entry from flat OR a stop-and-reverse. On a flip the old brackets
+            # belonged to the now-closed opposite side; we must attach FRESH legs to
+            # the reversed position. Without this the flipped side ran completely
+            # unprotected (naked risk) until the next signal.
+            # Anchor the bracket to the ACTUAL fill price (next_open ± slippage), not
+            # the signal-bar estimate. Measuring the stop/take from a price we never
+            # paid mis-sizes both legs, badly so on a gapped open.
             exit_stop_price, exit_take_price = _bracket_exit_levels(
-                position > 0, float(signal.estimated_price),
+                position > 0, float(fill_price),
                 risk_profile.stop_loss_pct, risk_profile.take_profit_pct,
             )
         elif flipped:
+            # Flipped but no brackets attachable (crypto, or no SL/TP configured).
             exit_stop_price = exit_take_price = None
 
         trades.append(BacktestTrade(
@@ -345,12 +422,28 @@ def run_backtest(
         ))
 
     # ── Liquidate any remaining open position at last available close ─────────
-    # Formula: cash += position × last_close handles both long (+ cash) and short (- cash)
+    # Formula: cash += position × last_close handles both long (+ cash) and short (- cash).
+    # Deduct the broker commission on this forced exit too — omitting it inflates the
+    # final equity (and therefore CAGR) with a free, frictionless liquidation.
     if position != 0:
-        cash += float(position) * float(bars[-1].close)
+        liquidation_commission = commission_per_share * abs(float(position))
+        cash += float(position) * float(bars[-1].close) - liquidation_commission
 
     final_equity = round(cash, 2)
-    metrics = _compute_metrics(equity_curve, trades, initial_equity, final_equity, timeframe, bars)
+
+    # Keep the equity curve's terminal point identical to final_equity. The last
+    # point was marked at close BEFORE the liquidation commission; overwriting it
+    # means Sharpe/Sortino/drawdown and total-return all read off one coherent
+    # series instead of two that disagree by the final commission.
+    if equity_curve:
+        equity_curve[-1] = final_equity
+    else:
+        equity_curve.append(final_equity)
+
+    metrics = _compute_metrics(
+        equity_curve, trades, initial_equity, final_equity, timeframe, bars,
+        commission_per_share=commission_per_share,
+    )
 
     bar_records = [
         BacktestBar(
@@ -409,6 +502,7 @@ def _bracket_exit_fill(
     position: Decimal,
     stop_price: float | None,
     take_price: float | None,
+    bar_open: float,
     bar_high: float,
     bar_low: float,
     slippage_bps: float,
@@ -420,6 +514,10 @@ def _bracket_exit_fill(
       - Pessimistic: if both legs are touched in one bar, the stop fills first.
       - Stop legs convert to market orders → adverse slippage applied.
       - Take legs are limit orders → fill at the exact limit price (no slippage).
+      - GAP RISK: a triggered stop is a MARKET order. If the bar OPENS past the stop
+        (a gap), it fills at the adverse open price, not the (now-unreachable) stop
+        price. Filling a gapped stop at stop_price is hallucinated P&L — the market
+        never traded there. Slippage is applied on top of the gapped open.
     """
     if position == 0:
         return None
@@ -428,14 +526,16 @@ def _bracket_exit_fill(
         stop_hit = stop_price is not None and not math.isnan(bar_low) and bar_low <= stop_price
         take_hit = take_price is not None and not math.isnan(bar_high) and bar_high >= take_price
         if stop_hit:
-            return OrderSide.sell, stop_price * (1 - slip)
+            ref = bar_open if (not math.isnan(bar_open) and bar_open < stop_price) else stop_price
+            return OrderSide.sell, ref * (1 - slip)
         if take_hit:
             return OrderSide.sell, take_price
     else:             # short: stop above entry, take below
         stop_hit = stop_price is not None and not math.isnan(bar_high) and bar_high >= stop_price
         take_hit = take_price is not None and not math.isnan(bar_low) and bar_low <= take_price
         if stop_hit:
-            return OrderSide.buy, stop_price * (1 + slip)
+            ref = bar_open if (not math.isnan(bar_open) and bar_open > stop_price) else stop_price
+            return OrderSide.buy, ref * (1 + slip)
         if take_hit:
             return OrderSide.buy, take_price
     return None
@@ -491,6 +591,7 @@ def _compute_metrics(
     final_equity: float,
     timeframe: str,
     bars: list[Bar] | None = None,
+    commission_per_share: float = 0.0,
 ) -> BacktestMetrics:
     import numpy as np
 
@@ -519,7 +620,10 @@ def _compute_metrics(
             # with few losing days.
             downside_sq = np.minimum(returns, 0.0) ** 2
             dstd = float(np.sqrt(downside_sq.mean()))
-            sortino = float(returns.mean() / dstd * ann_factor) if dstd > 0 else 0.0
+            # Zero downside deviation = no losing bars. Returning 0.0 would punish a
+            # flawless strategy as if it had no edge; use a 999.0 sentinel (mirrors
+            # Calmar) to mean "return with zero downside risk".
+            sortino = float(returns.mean() / dstd * ann_factor) if dstd > 0 else 999.0
 
     # Max drawdown (peak-to-trough on equity curve)
     peak = initial_equity
@@ -546,6 +650,7 @@ def _compute_metrics(
                 closing_trades += 1
                 closed_qty = min(float(qty), float(abs(sim_pos)))
                 pnl = (sim_avg_cost - float(t.price)) * closed_qty  # short: profit when price falls
+                pnl -= 2.0 * commission_per_share * closed_qty       # entry + exit commission
                 if pnl >= 0:
                     profitable += 1
                     gross_profit += pnl
@@ -565,6 +670,7 @@ def _compute_metrics(
                 closing_trades += 1
                 closed_qty = min(float(qty), float(sim_pos))
                 pnl = (float(t.price) - sim_avg_cost) * closed_qty  # long: profit when price rises
+                pnl -= 2.0 * commission_per_share * closed_qty       # entry + exit commission
                 if pnl >= 0:
                     profitable += 1
                     gross_profit += pnl

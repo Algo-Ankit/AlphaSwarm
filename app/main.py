@@ -12,6 +12,7 @@ from slowapi.errors import RateLimitExceeded
 
 from app.api.auth import router as auth_router
 from app.api.backtest import router as backtest_router
+from app.api.billing import router as billing_router
 from app.api.brokers import router as broker_router
 from app.api.llm_configs import router as llm_configs_router
 from app.api.market import router as market_router
@@ -24,6 +25,24 @@ from app.core.rate_limit import limiter
 from app.db.connection import close_pool, create_pool, get_pool
 
 settings = get_settings()
+
+# ── Sentry (production error + performance monitoring) ─────────────────────────
+# Initialised before the app is constructed so startup/import errors are captured.
+# No-op when SENTRY_DSN is unset (local dev / CI).
+if settings.sentry_dsn:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.starlette import StarletteIntegration
+
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.sentry_environment,
+        traces_sample_rate=settings.sentry_traces_sample_rate,
+        integrations=[StarletteIntegration(), FastApiIntegration()],
+        # Don't ship request bodies (may contain credentials / order intents).
+        send_default_pii=False,
+    )
+
 
 def _build_cors_origins() -> list[str]:
     if settings.is_production:
@@ -111,6 +130,7 @@ app.include_router(strategy_router)
 app.include_router(backtest_router)
 app.include_router(portfolio_router)
 app.include_router(notifications_router)
+app.include_router(billing_router)
 
 
 # ── Health checks ─────────────────────────────────────────────

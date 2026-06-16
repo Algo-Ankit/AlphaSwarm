@@ -83,3 +83,33 @@ def is_market_open(exchange: str, now_utc: datetime | None = None) -> bool:
 
 def exchange_timezone(exchange: str) -> str:
     return _SCHEDULES.get(exchange.upper(), {}).get("tz", "UTC")
+
+
+def next_open_time(exchange: str, now_utc: datetime | None = None) -> datetime | None:
+    """
+    Return the UTC datetime of the next regular session open for the exchange.
+    Returns None for CRYPTO (always open) and unknown exchanges.
+    """
+    schedule = _SCHEDULES.get(exchange.upper())
+    if not schedule:
+        return None
+    if exchange.upper() == "CRYPTO":
+        return None  # 24/7
+
+    tz = pytz.timezone(schedule["tz"])
+    base = (now_utc or datetime.utcnow().replace(tzinfo=pytz.utc)).astimezone(tz)
+
+    open_time = schedule["open"]
+    weekdays  = schedule["weekdays"]
+
+    # Walk up to 7 days forward to find the next open
+    for day_offset in range(8):
+        candidate = base + __import__("datetime").timedelta(days=day_offset)
+        if candidate.weekday() not in weekdays:
+            continue
+        local_open = candidate.replace(
+            hour=open_time.hour, minute=open_time.minute, second=0, microsecond=0,
+        )
+        if local_open > base:
+            return local_open.astimezone(pytz.utc)
+    return None

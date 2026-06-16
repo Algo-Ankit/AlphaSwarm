@@ -16,16 +16,18 @@ from app.services.broker_crypto import decrypt_key, encrypt_key
 router = APIRouter(prefix="/v1/llm-configs", tags=["llm-configs"])
 
 _PROVIDER_BASE_URLS: dict[str, str] = {
-    "groq":      "https://api.groq.com/openai/v1",
-    "openai":    "https://api.openai.com/v1",
-    "together":  "https://api.together.xyz/v1",
-    "anthropic": "https://api.anthropic.com/v1",
+    "groq":       "https://api.groq.com/openai/v1",
+    "gemini":     "https://generativelanguage.googleapis.com/v1beta/openai/",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "openai":     "https://api.openai.com/v1",
+    "together":   "https://api.together.xyz/v1",
+    "anthropic":  "https://api.anthropic.com/v1",
 }
 
 
 class LLMConfigCreate(BaseModel):
     label:    str  = Field(min_length=1, max_length=80)
-    provider: str  = Field(default="custom", pattern="^(groq|openai|together|anthropic|custom)$")
+    provider: str  = Field(default="custom", pattern="^(groq|gemini|openrouter|openai|together|anthropic|custom)$")
     base_url: str  = Field(min_length=5, max_length=512)
     api_key:  str  = Field(min_length=1, max_length=512)
     model:    str  = Field(min_length=1, max_length=120)

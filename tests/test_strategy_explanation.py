@@ -1,5 +1,5 @@
 """
-Plain-English strategy explanation tests — pure helpers only (no AutoGen / network).
+Plain-English strategy explanation tests — pure helpers only (no Agent Framework / network).
 Runnable with pytest OR directly:  python tests/test_strategy_explanation.py
 """
 from app.services.strategy_builder import (

@@ -12,6 +12,7 @@ from app.services.auth import (
     hash_password,
     verify_password,
 )
+from app.services.email import send_welcome_email
 
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
 
@@ -74,6 +75,9 @@ async def register(
     )
     raw_refresh = create_refresh_token()
     await token_repo.create(user["id"], raw_refresh, get_refresh_token_expiry())
+
+    # Best-effort welcome/verification email (no-op if SendGrid unconfigured).
+    await send_welcome_email(body.email, user["display_name"])
 
     return TokenResponse(
         access_token=access_token,

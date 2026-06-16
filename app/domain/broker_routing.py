@@ -38,6 +38,12 @@ _CURRENCY_SYMBOL: dict[str, str] = {
 DEFAULT_BROKER = "alpaca"
 DEFAULT_CURRENCY = "USD"
 
+# Exchanges that legally forbid fractional EQUITY shares. Indian cash-market
+# equity (NSE/BSE) settles only in whole shares — a 1.66-share order is rejected
+# by the exchange. US equity (Alpaca) supports fractional, and crypto is
+# inherently fractional, so those are intentionally absent here.
+NON_FRACTIONAL_EXCHANGES: frozenset[str] = frozenset({"NSE", "BSE"})
+
 # Currency the platform-level caps (settings.default_max_order_notional, etc.)
 # are denominated in. Single source of truth — risk.py converts order notionals
 # into this currency (or the cap into the order's currency) before comparing.
@@ -63,6 +69,11 @@ def broker_for_exchange(exchange: str) -> str:
 def currency_for_exchange(exchange: str) -> str:
     """Settlement currency (ISO code) for this exchange."""
     return _EXCHANGE_CURRENCY.get((exchange or "").upper(), DEFAULT_CURRENCY)
+
+
+def allows_fractional_shares(exchange: str) -> bool:
+    """False for exchanges that forbid fractional equity (NSE/BSE); True otherwise."""
+    return (exchange or "").upper() not in NON_FRACTIONAL_EXCHANGES
 
 
 def currency_symbol(currency: str) -> str:

@@ -80,11 +80,15 @@ class AlpacaExecutor:
             from alpaca.trading.enums import OrderClass
             from alpaca.trading.requests import TakeProfitRequest, StopLossRequest
             req_kwargs["order_class"] = OrderClass.BRACKET if leg_class == "bracket" else OrderClass.OTO
-            # Round to the penny — Alpaca rejects sub-penny prices on US equities ≥ $1.
+            # Preserve up to 4 decimals (FIX-API standard). round(x, 2) truncates
+            # sub-dollar/penny-stock stops & takes to zero precision, mispricing legs
+            # on instruments quoted in sub-penny increments.
             if order.take_profit_price is not None:
-                req_kwargs["take_profit"] = TakeProfitRequest(limit_price=str(round(float(order.take_profit_price), 2)))
+                tp_str = f"{float(order.take_profit_price):.4f}".rstrip('0').rstrip('.')
+                req_kwargs["take_profit"] = TakeProfitRequest(limit_price=tp_str)
             if order.stop_loss_price is not None:
-                req_kwargs["stop_loss"] = StopLossRequest(stop_price=str(round(float(order.stop_loss_price), 2)))
+                sl_str = f"{float(order.stop_loss_price):.4f}".rstrip('0').rstrip('.')
+                req_kwargs["stop_loss"] = StopLossRequest(stop_price=sl_str)
 
         if order.order_type == OrderType.market:
             req = MarketOrderRequest(**req_kwargs)
@@ -114,12 +118,28 @@ class AlpacaExecutor:
             except Exception:
                 pass
 
-        # Normalize status to standard internal strings
+        # Quantity the broker ACTUALLY filled (may be < requested on a partial fill).
+        # Preserved separately so downstream position sizing never assumes we got
+        # the full requested size. None when the broker hasn't reported a qty yet.
+        filled_quantity = None
+        if getattr(result, "filled_qty", None) is not None:
+            try:
+                filled_quantity = Decimal(str(result.filled_qty))
+            except Exception:
+                pass
+
+        # Normalize status to standard internal strings.
+        # IMPORTANT: 'partially_filled' is kept DISTINCT from 'filled'. Collapsing
+        # the two (the old behaviour) silently overstated the position by the
+        # unfilled remainder — a fund-destroying sizing bug. Callers must inspect
+        # filled_quantity / is_complete_fill before treating an order as done.
         status_val = result.status.value if hasattr(result.status, "value") else str(result.status)
         if status_val in ("accepted_for_bidding", "pending_new", "accepted", "new"):
             normalized_status = "pending"
-        elif status_val in ("filled", "partially_filled"):
+        elif status_val == "filled":
             normalized_status = "filled"
+        elif status_val == "partially_filled":
+            normalized_status = "partially_filled"
         else:
             normalized_status = status_val
 
@@ -128,6 +148,7 @@ class AlpacaExecutor:
             symbol=order.symbol,
             side=order.side,
             quantity=order.quantity,
+            filled_quantity=filled_quantity,
             fill_price=fill_price,
             estimated_price=order.estimated_price,
             broker_status=normalized_status,
@@ -150,46 +171,207 @@ class AlpacaExecutor:
         self._client.cancel_order_by_id(order_id)
 
 
+# ── Upstox instrument-key resolution ──────────────────────────────────────────
+# Upstox places orders by instrument_key (e.g. "NSE_EQ|INE002A01018"), not by
+# trading symbol. We resolve symbol → instrument_key from Upstox's published
+# instrument master, cached process-wide (it changes at most daily).
+_UPSTOX_INSTRUMENTS_URL = "https://assets.upstox.com/market-quote/instruments/exchange/{exchange}.json.gz"
+# exchange (NSE/BSE) → {TRADING_SYMBOL: instrument_key}
+_UPSTOX_INSTRUMENT_CACHE: dict[str, dict[str, str]] = {}
+
+
+def _load_upstox_instruments(exchange: str) -> dict[str, str]:
+    """Fetch + cache the {trading_symbol: instrument_key} map for an exchange's equity segment."""
+    exch = exchange.upper()
+    if exch in _UPSTOX_INSTRUMENT_CACHE:
+        return _UPSTOX_INSTRUMENT_CACHE[exch]
+
+    import gzip
+    import json
+
+    import httpx
+
+    url = _UPSTOX_INSTRUMENTS_URL.format(exchange=exch)
+    try:
+        resp = httpx.get(url, timeout=30.0, follow_redirects=True)
+        resp.raise_for_status()
+        raw = gzip.decompress(resp.content)
+        instruments = json.loads(raw)
+    except Exception as exc:
+        raise RuntimeError(f"Could not load Upstox instrument master for {exch}: {exc}") from exc
+
+    eq_segment = f"{exch}_EQ"
+    mapping: dict[str, str] = {}
+    for inst in instruments:
+        if inst.get("segment") == eq_segment and inst.get("trading_symbol"):
+            mapping[inst["trading_symbol"].upper()] = inst["instrument_key"]
+    _UPSTOX_INSTRUMENT_CACHE[exch] = mapping
+    return mapping
+
+
 class UpstoxExecutor:
     """
-    Indian-market (NSE/BSE) executor — placeholder.
+    Live NSE/BSE executor via the official upstox-python-sdk (OAuth access token).
 
-    Live Indian execution requires the Upstox SDK + OAuth flow, which is not wired
-    yet. This class exists so exchange-driven routing fails LOUDLY and clearly for
-    NSE/BSE live trading instead of silently sending Indian orders to a US broker.
-    Paper/dry-run never reaches here (the worker builds no executor in dry_run).
+    Paper/dry-run never reaches here — the worker only builds an executor for live
+    runs, and the risk gate (verify_order_intent) runs in the worker BEFORE
+    place_order is called. As a defensive backstop, place_order refuses to send a
+    paper-flagged order to the live broker (Upstox has no paper environment).
     """
 
-    def __init__(self, api_key: str, secret_key: str, paper: bool = True):
-        self._paper = paper
+    # Upstox order product codes: D = delivery (CNC), I = intraday (MIS).
+    def __init__(self, access_token: str, *, paper: bool = False, product: str = "D"):
+        if not access_token:
+            raise ValueError(
+                "Upstox live trading requires an OAuth access token. Connect Upstox "
+                "in Settings → Broker Connections (the access token may have expired — re-login)."
+            )
+        import upstox_client
 
-    def _not_implemented(self):
-        raise NotImplementedError(
-            "Live trading on Indian markets (NSE/BSE) via Upstox is not yet available. "
-            "Paper-trade and backtest this strategy now; live Upstox execution is on the roadmap."
-        )
+        self._paper = paper
+        self._product = product
+        config = upstox_client.Configuration()
+        config.access_token = access_token
+        self._api_client = upstox_client.ApiClient(config)
+        self._order_api = upstox_client.OrderApi(self._api_client)
+        self._portfolio_api = upstox_client.PortfolioApi(self._api_client)
+        self._user_api = upstox_client.UserApi(self._api_client)
+        self._api_version = "v2"
+
+    def _instrument_key(self, order: OrderIntent) -> str:
+        # Allow callers to pass a pre-resolved instrument_key directly.
+        if "|" in order.symbol:
+            return order.symbol
+        mapping = _load_upstox_instruments(order.exchange or "NSE")
+        key = mapping.get(order.symbol.upper())
+        if not key:
+            raise RuntimeError(
+                f"No Upstox instrument found for {order.symbol} on {order.exchange}. "
+                "Confirm the trading symbol is correct for this exchange."
+            )
+        return key
 
     def place_order(self, order: OrderIntent, client_order_id: str | None = None) -> OrderResult:
-        self._not_implemented()
+        import upstox_client
+        from upstox_client.rest import ApiException
+
+        # Defensive risk backstop: a paper order must never reach the live broker.
+        # The authoritative gate (verify_order_intent) already ran in the worker.
+        if order.is_paper:
+            raise RuntimeError(
+                "Refusing to route a paper-flagged order to live Upstox (no paper environment). "
+                "This indicates a risk-gate bypass — order rejected."
+            )
+
+        # NSE/BSE cash equity is whole-share only; verify_order_intent enforces this
+        # upstream, but Upstox also requires an integer quantity.
+        quantity = int(order.quantity)
+        if quantity <= 0:
+            raise ValueError(f"Upstox order quantity must be a positive integer, got {order.quantity}")
+
+        is_limit = order.order_type == OrderType.limit
+        price = float(order.limit_price) if (is_limit and order.limit_price is not None) else 0.0
+
+        body = upstox_client.PlaceOrderRequest(
+            quantity=quantity,
+            product=self._product,
+            validity="DAY",
+            price=price,
+            tag=(client_order_id or "alphaswarm")[:20],
+            instrument_token=self._instrument_key(order),
+            order_type="LIMIT" if is_limit else "MARKET",
+            transaction_type="BUY" if order.side == OrderSide.buy else "SELL",
+            disclosed_quantity=0,
+            trigger_price=0.0,
+            is_amo=False,
+        )
+
+        try:
+            resp = self._order_api.place_order(body, api_version=self._api_version)
+        except ApiException as exc:
+            raise RuntimeError(f"Upstox order submission failed for {order.symbol}: {exc}") from exc
+
+        order_id = getattr(getattr(resp, "data", None), "order_id", None)
+
+        # Upstox returns an order id on acceptance; fills are reported
+        # asynchronously (poll get_positions / order book). Treat as pending.
+        return OrderResult(
+            order_id=str(order_id) if order_id else None,
+            symbol=order.symbol,
+            side=order.side,
+            quantity=order.quantity,
+            filled_quantity=None,
+            fill_price=None,
+            estimated_price=order.estimated_price,
+            broker_status="pending",
+            is_paper=False,
+        )
 
     def get_positions(self) -> dict[str, Decimal]:
-        return {}
+        from upstox_client.rest import ApiException
+
+        try:
+            resp = self._portfolio_api.get_positions(api_version=self._api_version)
+        except ApiException as exc:
+            raise RuntimeError(f"Upstox get_positions failed: {exc}") from exc
+
+        positions: dict[str, Decimal] = {}
+        for p in (getattr(resp, "data", None) or []):
+            symbol = getattr(p, "trading_symbol", None) or getattr(p, "tradingsymbol", None)
+            qty = getattr(p, "quantity", None)
+            if symbol is not None and qty is not None:
+                positions[str(symbol).upper()] = Decimal(str(qty))
+        return positions
 
     def get_account(self) -> dict:
-        self._not_implemented()
+        from upstox_client.rest import ApiException
+
+        try:
+            resp = self._user_api.get_user_fund_margin(api_version=self._api_version)
+        except ApiException as exc:
+            raise RuntimeError(f"Upstox get_user_fund_margin failed: {exc}") from exc
+
+        data = getattr(resp, "data", None) or {}
+        # Upstox returns a dict keyed by segment ('equity', 'commodity').
+        equity_seg = data.get("equity") if isinstance(data, dict) else None
+        available = getattr(equity_seg, "available_margin", None) if equity_seg is not None else None
+        if available is None and isinstance(equity_seg, dict):
+            available = equity_seg.get("available_margin")
+        cash = str(available) if available is not None else "0"
+        return {
+            "equity": cash,
+            "cash": cash,
+            "portfolio_value": cash,
+            "buying_power": cash,
+        }
 
     def cancel_order(self, order_id: str) -> None:
-        self._not_implemented()
+        from upstox_client.rest import ApiException
+
+        try:
+            self._order_api.cancel_order(order_id, api_version=self._api_version)
+        except ApiException as exc:
+            raise RuntimeError(f"Upstox cancel_order failed for {order_id}: {exc}") from exc
 
 
-def get_executor(broker: str, *, api_key: str, secret_key: str, paper: bool = True) -> BrokerExecutor:
+def get_executor(
+    broker: str,
+    *,
+    api_key: str,
+    secret_key: str,
+    paper: bool = True,
+    access_token: str | None = None,
+) -> BrokerExecutor:
     """
     Factory: return the executor for a broker key (see broker_routing.broker_for_exchange).
     Raises ValueError for an unknown broker so misconfiguration fails fast.
+
+    `access_token` is required for OAuth brokers (Upstox); `api_key`/`secret_key`
+    are used by static-key brokers (Alpaca).
     """
     name = (broker or "alpaca").lower()
     if name == "alpaca":
         return AlpacaExecutor(api_key=api_key, secret_key=secret_key, paper=paper)
     if name == "upstox":
-        return UpstoxExecutor(api_key=api_key, secret_key=secret_key, paper=paper)
+        return UpstoxExecutor(access_token=access_token or "", paper=paper)
     raise ValueError(f"Unsupported broker '{broker}'. Supported: alpaca, upstox.")

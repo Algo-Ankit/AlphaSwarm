@@ -25,6 +25,43 @@ class TenantRepo:
             tenant_id,
         )
 
+    async def get_by_stripe_customer(self, customer_id: str) -> asyncpg.Record | None:
+        return await self._pool.fetchrow(
+            "SELECT * FROM tenants WHERE stripe_customer_id = $1",
+            customer_id,
+        )
+
+    async def set_stripe_customer(self, tenant_id: UUID, customer_id: str) -> None:
+        await self._pool.execute(
+            "UPDATE tenants SET stripe_customer_id = $1 WHERE id = $2",
+            customer_id, tenant_id,
+        )
+
+    async def update_subscription(
+        self,
+        tenant_id: UUID,
+        *,
+        status: str,
+        plan: str | None = None,
+        stripe_customer_id: str | None = None,
+        stripe_subscription_id: str | None = None,
+        current_period_end: datetime | None = None,
+    ) -> None:
+        """Persist Stripe subscription state from a verified webhook event."""
+        await self._pool.execute(
+            """
+            UPDATE tenants
+            SET subscription_status             = $1,
+                plan                            = COALESCE($2, plan),
+                stripe_customer_id              = COALESCE($3, stripe_customer_id),
+                stripe_subscription_id          = COALESCE($4, stripe_subscription_id),
+                subscription_current_period_end = COALESCE($5, subscription_current_period_end)
+            WHERE id = $6
+            """,
+            status, plan, stripe_customer_id, stripe_subscription_id,
+            current_period_end, tenant_id,
+        )
+
 
 class AuthUserRepo:
     """

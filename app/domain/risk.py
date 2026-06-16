@@ -8,12 +8,20 @@ from decimal import Decimal
 from app.core.config import Settings, get_settings
 from app.domain.broker_routing import (
     PLATFORM_CAP_CURRENCY,
+    allows_fractional_shares,
     convert_amount,
     currency_symbol,
 )
 from app.domain.market_data import MarketState
 from app.domain.market_hours import is_market_open
 from app.domain.models import OrderIntent, OrderSide, RiskCheckResult, StrategyRiskConfig
+
+# When no real-time tick is available, the daily-notional cap must not blindly
+# trust yesterday's close (order.estimated_price). A stock that gaps up violently
+# at the open can blow past the rupee cap while the stale-price math still reads
+# "under limit". We size the cap on the close inflated by this safety margin so
+# the guardrail fails CLOSED on an open gap. Only ever tightens the cap.
+GAP_SAFETY_MARGIN = Decimal("0.03")  # 3%
 
 
 def verify_order_intent(
@@ -24,6 +32,7 @@ def verify_order_intent(
     current_position: float | None = None,
     current_position_value: float | None = None,
     open_positions_count: int = 0,
+    reference_price: Decimal | None = None,
 ) -> RiskCheckResult:
     """
     Validates an order intent against all risk rules.
@@ -36,6 +45,9 @@ def verify_order_intent(
         settings: App settings. Defaults to singleton.
         current_position: Current held quantity for this symbol (positive=long, negative=short, None/0=flat).
                           Used to determine whether an order is risk-reducing or risk-adding.
+        reference_price: Real-time tick/last-trade price, if available. Used by the daily
+                         notional cap (Check 5) to defend against open gaps. When omitted,
+                         the cap falls back to estimated_price inflated by GAP_SAFETY_MARGIN.
     """
     settings = settings or get_settings()
     symbol = order.symbol.upper()
@@ -68,12 +80,36 @@ def verify_order_intent(
             order_notional=notional,
         )
 
+    # ── Check 3a: Whole-share enforcement (no fractional equity) ─────────────
+    # Indian cash-market equity (NSE/BSE) rejects fractional quantities outright.
+    # Catch it here rather than letting the broker reject it (or, worse, letting a
+    # SIP attempt to buy 1.66 shares). US equity / crypto allow fractional, so this
+    # is a no-op there. The SIP allocator floors qty upstream; this is the wall.
+    if not allows_fractional_shares(order.exchange):
+        if order.quantity != order.quantity.to_integral_value():
+            return RiskCheckResult(
+                approved=False,
+                reason=(
+                    f"{symbol} on {order.exchange} allows whole shares only; "
+                    f"order quantity {order.quantity} is fractional. Floor the allocation to an integer."
+                ),
+                order_notional=notional,
+            )
+
+    # ── Determine safe cap price for ALL notional checks ─────────────────────
+    if reference_price is not None and reference_price > 0 and market_state is not None and market_state.is_open:
+        cap_price = reference_price
+    else:
+        cap_price = order.estimated_price * (Decimal("1") + GAP_SAFETY_MARGIN)
+
+    safe_notional = order.quantity * cap_price
+
     # ── Check 4: Order notional ≤ strategy limit ─────────────────────────────
-    if notional > strategy_risk.max_order_notional:
+    if safe_notional > strategy_risk.max_order_notional:
         return RiskCheckResult(
             approved=False,
-            reason=f"Order notional {cur}{notional:.2f} exceeds strategy limit {cur}{strategy_risk.max_order_notional:.2f}.",
-            order_notional=notional,
+            reason=f"Order notional {cur}{safe_notional:.2f} exceeds strategy limit {cur}{strategy_risk.max_order_notional:.2f}.",
+            order_notional=safe_notional,
         )
 
     # ── Check 4a: Per-symbol position notional cap ────────────────────────────
@@ -95,9 +131,9 @@ def verify_order_intent(
         # If it was a stop-and-reverse, the new risk exposure is the absolute size of the new position.
         # If just adding to a position, it's the current value + new order value.
         if (pos > 0 and order.side == OrderSide.sell) or (pos < 0 and order.side == OrderSide.buy):
-            projected_position = abs(projected_position_qty) * order.estimated_price
+            projected_position = abs(projected_position_qty) * cap_price
         else:
-            projected_position = Decimal(str(current_position_value)) + notional
+            projected_position = Decimal(str(current_position_value)) + safe_notional
         if projected_position > strategy_risk.max_position_notional:
             return RiskCheckResult(
                 approved=False,
@@ -105,7 +141,7 @@ def verify_order_intent(
                     f"Order would bring {symbol} exposure to {cur}{projected_position:.2f}, "
                     f"exceeding the per-symbol position limit of {cur}{strategy_risk.max_position_notional:.2f}."
                 ),
-                order_notional=notional,
+                order_notional=safe_notional,
             )
 
     # ── Check 4b: Max concurrent open positions ───────────────────────────────
@@ -117,17 +153,11 @@ def verify_order_intent(
                     f"Strategy has {open_positions_count} open positions at the limit of "
                     f"{strategy_risk.max_open_positions}. Close an existing position before opening {symbol}."
                 ),
-                order_notional=notional,
+                order_notional=safe_notional,
             )
 
     # ── Check 5: Today's executed notional ≤ daily limit ─────────────────────
-    # Only exempt genuinely risk-reducing trades (closing an open position).
-    # A SELL when flat is a short sale — subject to the cap.
-    # A BUY when flat is a new long — subject to the cap.
-    # Exempting all SELLs (old behaviour) allowed unbounded short selling and
-    # then trapped the strategy: the buy-to-cover would be blocked by the daily cap.
     closing_qty = Decimal("0")
-    # Float precision fix: safely round tiny leftovers to 0
     clean_pos = Decimal(str(pos))
     if abs(clean_pos) < Decimal("0.0000001"):
         clean_pos = Decimal("0")
@@ -137,11 +167,8 @@ def verify_order_intent(
     elif order.side == OrderSide.buy and clean_pos < 0:
         closing_qty = min(order.quantity, abs(clean_pos))
 
-    # Daily cap evaluates purely the new risk added to the market today.
-    # We must use order.estimated_price consistently for both sides of the equation
-    # to prevent Limit Order manipulation where a limit price creates negative daily usage.
-    closing_notional = closing_qty * order.estimated_price
-    notional_at_market = order.quantity * order.estimated_price
+    closing_notional = closing_qty * cap_price
+    notional_at_market = order.quantity * cap_price
     increasing_notional = notional_at_market - closing_notional
 
     if market_state is not None and increasing_notional > 0:
@@ -153,27 +180,23 @@ def verify_order_intent(
                     f"Order would bring today's total to {cur}{projected_daily:.2f}, "
                     f"exceeding the daily limit of {cur}{strategy_risk.max_daily_notional:.2f}."
                 ),
-                order_notional=notional,
+                order_notional=safe_notional,
             )
 
     # ── Check 6: Platform-level order notional cap ────────────────────────────
-    # The platform cap is denominated in PLATFORM_CAP_CURRENCY (USD); the order
-    # notional is in the strategy's currency (e.g. INR for NSE/BSE). Compare in a
-    # single currency — convert the cap into the order's currency so the failure
-    # message reads in the same units (₹ vs $) as the rest of the check.
     platform_cap_usd = Decimal(str(settings.default_max_order_notional))
     platform_cap = convert_amount(
         platform_cap_usd, PLATFORM_CAP_CURRENCY, strategy_risk.currency
     )
-    if notional > platform_cap:
+    if safe_notional > platform_cap:
         return RiskCheckResult(
             approved=False,
-            reason=f"Order notional {cur}{notional:.2f} exceeds platform-level cap {cur}{platform_cap:.2f}.",
-            order_notional=notional,
+            reason=f"Order notional {cur}{safe_notional:.2f} exceeds platform-level cap {cur}{platform_cap:.2f}.",
+            order_notional=safe_notional,
         )
 
     return RiskCheckResult(
         approved=True,
         reason="Order passed all risk checks.",
-        order_notional=notional,
+        order_notional=safe_notional,
     )

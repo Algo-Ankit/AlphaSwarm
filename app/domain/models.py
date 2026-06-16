@@ -102,6 +102,9 @@ class StrategyResponse(BaseModel):
     generated_logic: str
     explanation: str = ""  # plain-English summary (NL strategies); empty for quant/hand-written
     risk: StrategyRiskConfig
+    sip_paused: bool = False
+    sip_monthly_amount: float | None = None
+    sip_frequency: str = "monthly"
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -157,12 +160,23 @@ class OrderResult(BaseModel):
     order_id: str | None = None           # broker order ID; None for dry runs
     symbol: str
     side: OrderSide
-    quantity: JsonDecimal
+    quantity: JsonDecimal                  # quantity *intended* (the order intent's size)
+    # Quantity the broker actually filled. Distinct from `quantity`: on a
+    # partially_filled order these differ, and position sizing MUST use this,
+    # not the requested amount. None = unknown (e.g. dry run / still pending).
+    filled_quantity: JsonDecimal | None = None
     fill_price: JsonDecimal | None = None
     estimated_price: JsonDecimal
-    broker_status: str                     # filled | pending | dry_run | rejected
+    broker_status: str                     # filled | partially_filled | pending | dry_run | rejected
     is_paper: bool
     created_at: datetime = Field(default_factory=utc_now)
+
+    @property
+    def is_complete_fill(self) -> bool:
+        """True only when the broker filled the entire requested quantity."""
+        return self.broker_status == "filled" and (
+            self.filled_quantity is None or self.filled_quantity >= self.quantity
+        )
 
 
 class TaskStatusResponse(BaseModel):

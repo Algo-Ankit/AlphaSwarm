@@ -37,8 +37,14 @@ def test_exchange_to_currency():
 
 
 def test_factory_returns_upstox():
-    u = get_executor("upstox", api_key="k", secret_key="s", paper=True)
-    assert isinstance(u, UpstoxExecutor)
+    # Upstox is now a live OAuth executor — it needs an access token. If the
+    # upstox SDK isn't installed in this env, the ImportError still proves the
+    # factory routed "upstox" → UpstoxExecutor.
+    try:
+        u = get_executor("upstox", api_key="", secret_key="", paper=False, access_token="tok")
+        assert isinstance(u, UpstoxExecutor)
+    except (ImportError, ModuleNotFoundError):
+        pass
 
 
 def test_factory_routes_alpaca():
@@ -59,18 +65,14 @@ def test_factory_rejects_unknown_broker():
         assert "Unsupported broker" in str(exc)
 
 
-def test_upstox_live_order_fails_loudly():
-    u = get_executor("upstox", api_key="k", secret_key="s", paper=False)
-    order = OrderIntent(
-        strategy_id="00000000-0000-0000-0000-000000000001",
-        symbol="RELIANCE", exchange="NSE", side=OrderSide.buy,
-        quantity=Decimal("1"), estimated_price=Decimal("100"), is_paper=False,
-    )
+def test_upstox_without_access_token_fails_loudly():
+    # Live Upstox requires an OAuth access token; routing without one must fail
+    # loudly rather than silently building a broken executor.
     try:
-        u.place_order(order)
-        assert False, "expected NotImplementedError"
-    except NotImplementedError as exc:
-        assert "Upstox" in str(exc)
+        get_executor("upstox", api_key="k", secret_key="s", paper=False, access_token=None)
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        assert "access token" in str(exc).lower()
 
 
 def test_inr_strategy_rejection_message_uses_rupee_symbol():

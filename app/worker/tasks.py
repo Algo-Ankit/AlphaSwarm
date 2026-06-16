@@ -230,9 +230,15 @@ async def _execute_async(
 
         broker_creds = None
         if broker_row:
+            # OAuth brokers (Upstox) authenticate with an access token, not a
+            # static key/secret. Decrypt it when present.
+            access_token = None
+            if broker_row.get("access_token"):
+                access_token = decrypt_key(broker_row["access_token"])
             broker_creds = {
-                "api_key": decrypt_key(broker_row["key_encrypted"]),
-                "secret_key": decrypt_key(broker_row["secret_encrypted"]),
+                "api_key": decrypt_key(broker_row["key_encrypted"]) if broker_row.get("key_encrypted") else "",
+                "secret_key": decrypt_key(broker_row["secret_encrypted"]) if broker_row.get("secret_encrypted") else "",
+                "access_token": access_token,
                 "paper": bool(broker_row["is_paper"]),
             }
 
@@ -287,6 +293,7 @@ async def _execute_async(
                 api_key=broker_creds["api_key"],
                 secret_key=broker_creds["secret_key"],
                 paper=broker_creds["paper"],
+                access_token=broker_creds.get("access_token"),
             )
             if log:
                 log.info(

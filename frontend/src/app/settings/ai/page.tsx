@@ -5,17 +5,22 @@ import { GlassCard } from '@/components/ui/GlassCard'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import type { LLMConfig, LLMConfigCreate } from '@/lib/types'
-import { Brain, Trash2, Plus, ChevronDown, ChevronUp, Eye, EyeOff, XCircle, CheckCircle2 } from 'lucide-react'
+import { Brain, Trash2, Plus, ChevronDown, ChevronUp, Eye, EyeOff, XCircle, CheckCircle2, ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 // ── Provider metadata ────────────────────────────────────────────────────────
 
+// `free` flags providers with a no-credit-card free tier — surfaced in the UI so
+// learners can self-serve a key at zero cost. `keyUrl` is the provider's official
+// key-creation console (verified); rendered as the "Create API key" button.
 const PROVIDERS = [
-  { id: 'groq',      label: 'Groq',      color: 'from-orange-400 to-orange-600',  defaultUrl: 'https://api.groq.com/openai/v1',    hint: 'Free tier: 14,400 req/day. Fast inference.', models: ['llama-3.1-8b-instant', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768'] },
-  { id: 'openai',    label: 'OpenAI',    color: 'from-emerald-400 to-teal-600',   defaultUrl: 'https://api.openai.com/v1',          hint: 'GPT-4o, GPT-4 Turbo. Best code quality.',    models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo'] },
-  { id: 'together',  label: 'Together',  color: 'from-blue-400 to-indigo-600',    defaultUrl: 'https://api.together.xyz/v1',        hint: 'Free $25 credit on signup.',                 models: ['meta-llama/Llama-3-8b-chat-hf', 'mistralai/Mixtral-8x7B-Instruct-v0.1'] },
-  { id: 'anthropic', label: 'Anthropic', color: 'from-violet-400 to-purple-600',  defaultUrl: 'https://api.anthropic.com/v1',       hint: 'Claude 3.5 Haiku, Claude 3 Opus.',           models: ['claude-3-5-haiku-20241022', 'claude-3-5-sonnet-20241022'] },
-  { id: 'custom',    label: 'Custom',    color: 'from-zinc-400 to-zinc-600',      defaultUrl: '',                                   hint: 'Any OpenAI-compatible endpoint.',            models: [] },
+  { id: 'groq',       label: 'Groq',       color: 'from-orange-400 to-orange-600',  defaultUrl: 'https://api.groq.com/openai/v1',                       hint: 'Free, no card. 14,400 req/day. Fast.',        free: true,  keyUrl: 'https://console.groq.com/keys',          models: ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile', 'mixtral-8x7b-32768'] },
+  { id: 'gemini',     label: 'Gemini',     color: 'from-sky-400 to-blue-600',       defaultUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/', hint: 'Free tier, no card. Google AI Studio.',    free: true,  keyUrl: 'https://aistudio.google.com/app/apikey', models: ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'] },
+  { id: 'openrouter', label: 'OpenRouter', color: 'from-pink-400 to-rose-600',      defaultUrl: 'https://openrouter.ai/api/v1',                        hint: 'Has free models (:free suffix).',             free: true,  keyUrl: 'https://openrouter.ai/settings/keys',    models: ['meta-llama/llama-3.1-8b-instruct:free', 'google/gemma-2-9b-it:free'] },
+  { id: 'openai',     label: 'OpenAI',     color: 'from-emerald-400 to-teal-600',   defaultUrl: 'https://api.openai.com/v1',                           hint: 'Paid. GPT-4o. Best code quality.',            free: false, keyUrl: 'https://platform.openai.com/api-keys',   models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo'] },
+  { id: 'together',   label: 'Together',   color: 'from-blue-400 to-indigo-600',    defaultUrl: 'https://api.together.xyz/v1',                         hint: 'Free $25 credit on signup.',                  free: true,  keyUrl: 'https://api.together.xyz/settings/api-keys', models: ['meta-llama/Llama-3-8b-chat-hf', 'mistralai/Mixtral-8x7B-Instruct-v0.1'] },
+  { id: 'anthropic',  label: 'Anthropic',  color: 'from-violet-400 to-purple-600',  defaultUrl: 'https://api.anthropic.com/v1',                        hint: 'Paid. Claude 3.5 Haiku / Sonnet.',            free: false, keyUrl: 'https://console.anthropic.com/settings/keys', models: ['claude-3-5-haiku-20241022', 'claude-3-5-sonnet-20241022'] },
+  { id: 'custom',     label: 'Custom',     color: 'from-zinc-400 to-zinc-600',      defaultUrl: '',                                                    hint: 'Any OpenAI-compatible endpoint.',             free: false, keyUrl: '',                                       models: [] },
 ] as const
 
 type ProviderId = (typeof PROVIDERS)[number]['id']
@@ -135,20 +140,23 @@ function AddConfigForm({ onAdded }: { onAdded: (c: LLMConfig) => void }) {
             {/* Provider selector */}
             <div>
               <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Provider</label>
-              <div className="grid grid-cols-5 gap-2">
+              <div className="grid grid-cols-4 gap-2">
                 {PROVIDERS.map((p) => (
                   <button
                     key={p.id}
                     type="button"
                     onClick={() => handleProviderChange(p.id as ProviderId)}
                     className={cn(
-                      'py-2 rounded-xl text-xs font-semibold border transition-all',
+                      'relative py-2 rounded-xl text-xs font-semibold border transition-all',
                       provider === p.id
                         ? 'border-violet-500 bg-violet-50 dark:bg-violet-500/15 text-violet-700 dark:text-violet-300'
                         : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:border-zinc-300 dark:hover:border-zinc-600',
                     )}
                   >
                     {p.label}
+                    {p.free && (
+                      <span className="absolute -top-1.5 -right-1.5 text-[8px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500 text-white uppercase tracking-wide">Free</span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -212,7 +220,20 @@ function AddConfigForm({ onAdded }: { onAdded: (c: LLMConfig) => void }) {
 
             {/* API Key */}
             <div>
-              <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">API Key</label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest">API Key</label>
+                {meta.keyUrl && (
+                  <a
+                    href={meta.keyUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-violet-600 dark:text-violet-400 hover:text-violet-700 dark:hover:text-violet-300 transition-colors"
+                  >
+                    Create {meta.label} API key
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+              </div>
               <div className="relative">
                 <input
                   type={showKey ? 'text' : 'password'}
@@ -274,25 +295,36 @@ export default function AISettingsPage() {
         <div className="mb-10">
           <h1 className="text-3xl font-extrabold text-zinc-900 dark:text-zinc-100 tracking-tight">AI Models</h1>
           <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-            Add your own LLM API keys to unlock better models for NL strategy generation. The platform provides a free Groq tier by default.
+            Bring your own LLM API key for NL strategy generation. No key yet? Pick a <span className="font-semibold text-emerald-600 dark:text-emerald-400">Free</span> provider
+            below, click <span className="font-semibold">Create API key</span>, paste it here — it takes about two minutes and costs nothing.
           </p>
         </div>
 
-        {/* Platform default */}
+        {/* Free options callout */}
         <section className="mb-8">
-          <h2 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-3">Platform Default</h2>
-          <GlassCard padding="none" className="overflow-hidden">
-            <div className="flex items-center gap-4 px-6 py-5">
-              <div className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm bg-gradient-to-br from-orange-400 to-orange-600">G</div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-[15px] font-semibold text-zinc-900 dark:text-zinc-100">Groq (Platform Key)</span>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300">Free</span>
+          <h2 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-3">Free Options — No Credit Card</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {PROVIDERS.filter((p) => p.free && p.keyUrl).map((p) => (
+              <a
+                key={p.id}
+                href={p.keyUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group flex items-center gap-3 px-4 py-4 rounded-2xl border border-zinc-200/70 dark:border-zinc-700/50 hover:border-violet-400 dark:hover:border-violet-500/60 transition-colors"
+              >
+                <div className={cn('flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-sm bg-gradient-to-br', p.color)}>
+                  {p.label[0]}
                 </div>
-                <p className="text-xs text-zinc-400 mt-0.5">llama-3.1-8b-instant · Always available · No setup required</p>
-              </div>
-            </div>
-          </GlassCard>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">
+                    {p.label}
+                    <ExternalLink className="w-3 h-3 text-zinc-400 group-hover:text-violet-500 transition-colors" />
+                  </p>
+                  <p className="text-[11px] text-zinc-400 mt-0.5 truncate">{p.hint}</p>
+                </div>
+              </a>
+            ))}
+          </div>
         </section>
 
         {/* User configs */}

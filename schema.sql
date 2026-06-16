@@ -14,8 +14,16 @@ CREATE TABLE tenants (
     name         TEXT NOT NULL,
     plan         TEXT NOT NULL DEFAULT 'founding_member', -- founding_member | trader | pro | quant
     max_bots     INT  NOT NULL DEFAULT 5,
+    -- ── Billing (Stripe) ──────────────────────────────────────────────
+    -- subscription_status gates LIVE agent deployment. 'active'/'trialing'
+    -- on the Quant Tier unlocks live trading; everything else is paper-only.
+    stripe_customer_id              TEXT,
+    stripe_subscription_id          TEXT,
+    subscription_status             TEXT NOT NULL DEFAULT 'inactive', -- inactive | active | trialing | past_due | canceled
+    subscription_current_period_end TIMESTAMPTZ,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX idx_tenants_stripe_customer ON tenants(stripe_customer_id);
 
 CREATE TABLE users (
     id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

@@ -224,6 +224,24 @@ async def run_strategy(
             detail="This strategy is restricted to paper trading only by its risk configuration.",
         )
 
+    # ── Billing gate: live agents require an active Quant Tier subscription ──
+    # Paper/backtest runs (dry_run) are always free. Live deployment is the
+    # monetised action, so it is blocked unless the tenant's Stripe subscription
+    # is active/trialing.
+    if not request.dry_run:
+        from app.db.repositories.users import TenantRepo
+        from app.services.billing import is_active_status
+
+        tenant = await TenantRepo(pool).get_by_id(current_user.tenant_id)
+        if not tenant or not is_active_status(tenant.get("subscription_status")):
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=(
+                    "Live agent deployment requires an active Quant Tier subscription. "
+                    "Upgrade in Billing, or run this strategy in paper mode (dry_run=true)."
+                ),
+            )
+
     try:
         task = execute_trading_strategy.apply_async(
             args=[
@@ -315,6 +333,14 @@ async def lump_sum_boost(
         entity_type="strategy",
         entity_id=strategy_id,
     )
+
+    # Mirror the in-app notification to email so the user can act on the
+    # rebalance approval without being logged in (no-op if SendGrid unconfigured).
+    from app.services.email import send_rebalance_approval_email
+    await send_rebalance_approval_email(
+        current_user.email, record["name"], notif["body"],
+    )
+
     return {"notification_id": str(notif["id"]), "status": "pending_approval"}
 
 

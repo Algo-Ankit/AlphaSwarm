@@ -1,10 +1,12 @@
 """
 Broker key encryption tests.
 
-Locks in the per-record random salt (v2 envelope) and that legacy static-salt
-ciphertext still decrypts. Runnable with pytest OR directly:
+Locks in the current v3 (HKDF) envelope with a per-record random salt, and that
+the decrypt-only fallbacks — v2 (PBKDF2) and pre-v2 legacy static-salt ciphertext
+— still decrypt. Runnable with pytest OR directly:
     python tests/test_broker_crypto.py
 """
+import base64
 import os
 
 os.environ.setdefault("BROKER_KEY_ENCRYPTION_SECRET", "x" * 40)
@@ -17,9 +19,19 @@ from app.services import broker_crypto as bc  # noqa: E402
 
 
 def test_roundtrip():
+    # New keys are written with the current v3 (HKDF) envelope.
     ct = bc.encrypt_key("alpaca-api-key-123")
-    assert ct.startswith("v2:")
+    assert ct.startswith("v3:")
     assert bc.decrypt_key(ct) == "alpaca-api-key-123"
+
+
+def test_v2_envelope_still_decrypts():
+    # v2 (PBKDF2) is decrypt-only now, but existing v2 ciphertext MUST stay readable
+    # so no key migration is forced. Build a real v2 envelope and read it back.
+    salt = os.urandom(bc._SALT_BYTES)
+    token = bc._derive_fernet_pbkdf2(bc._validated_secret(), salt).encrypt(b"v2-secret").decode()
+    v2_ct = f"v2:{base64.urlsafe_b64encode(salt).decode()}:{token}"
+    assert bc.decrypt_key(v2_ct) == "v2-secret"
 
 
 def test_per_record_random_salt():

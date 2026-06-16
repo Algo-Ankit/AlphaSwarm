@@ -68,9 +68,34 @@ class Settings(BaseSettings):
     # Broker key encryption (Fernet)
     broker_key_encryption_secret: str = ""
 
+    # OAuth — broker-level credentials (platform-level, not per-user)
+    # Upstox: register a platform app at https://upstox.com/developer/
+    upstox_client_id: str = ""
+    upstox_client_secret: str = ""
+    # Base URL of the frontend — used to build OAuth redirect URIs
+    app_base_url: str = "http://localhost:3000"
+
     # Sentry
     sentry_dsn: str = ""
     sentry_environment: str = "development"
+    sentry_traces_sample_rate: float = 0.1
+
+    # ── Billing (Stripe) ─────────────────────────────────────────────────────
+    # Live agent deployment requires an active "Quant Tier" subscription. The
+    # checkout/webhook endpoints are no-ops until stripe_secret_key is set.
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""        # whsec_... — verifies webhook signatures
+    stripe_price_quant: str = ""           # price_... for the Quant Tier subscription
+    # Where Stripe Checkout redirects after success/cancel (frontend routes).
+    stripe_success_url: str = "http://localhost:3000/billing/success?session_id={CHECKOUT_SESSION_ID}"
+    stripe_cancel_url: str = "http://localhost:3000/billing/cancel"
+
+    # ── Transactional email (SendGrid) ───────────────────────────────────────
+    # Falls back to console-print stubs when sendgrid_api_key is empty, so dev
+    # works with no external dependency.
+    sendgrid_api_key: str = ""
+    email_from: str = "no-reply@alphaswarm.io"
+    email_from_name: str = "AlphaSwarm"
 
     # Strategy sandbox — wall-clock budget for a single on_bar() / backtest loop.
     # Backstops the RestrictedPython sandbox against CPU-exhaustion (e.g.

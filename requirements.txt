@@ -87,7 +87,14 @@ pyflakes>=3.2.0                    # Python linting for code editor feedback
 # Rate Limiting & Monitoring
 # ──────────────────────────────────────────
 slowapi>=0.1.9                     # rate limiting for FastAPI
-sentry-sdk[fastapi]>=2.19.0       # error + performance monitoring
+sentry-sdk[fastapi]>=2.19.0       # error + performance monitoring (FastAPI + Celery integrations)
+
+# ──────────────────────────────────────────
+# Billing, Email & Live Indian Execution (GTM)
+# ──────────────────────────────────────────
+stripe>=11.0.0                     # subscription billing (Quant Tier checkout + webhooks)
+sendgrid>=6.11.0                   # transactional email (welcome + rebalance approval)
+upstox-python-sdk>=2.15.0          # live NSE/BSE order execution via Upstox
 
 # ──────────────────────────────────────────
 # Utilities
