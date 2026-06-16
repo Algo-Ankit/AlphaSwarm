@@ -86,11 +86,24 @@ class Settings(BaseSettings):
     sentry_environment: str = "development"
     sentry_traces_sample_rate: float = 0.1
 
-    # ── Billing (Razorpay) ───────────────────────────────────────────────────
-    # India-first billing: UPI AutoPay / e-mandate recurring subscriptions via
-    # Razorpay's Subscriptions API (Stripe is RBI-restricted for recurring INR).
-    # Live agent deployment requires an active "Quant Tier" subscription. The
-    # subscribe/webhook endpoints are no-ops until razorpay_key_id is set.
+    # ── Billing: dual gateway ────────────────────────────────────────────────
+    # Live agent deployment requires an active "Quant Tier" subscription. We run
+    # TWO payment gateways side-by-side and route by the customer's currency:
+    #   • Stripe   → USD / Global
+    #   • Razorpay → INR / India (UPI AutoPay / e-mandate; Stripe is RBI-
+    #                restricted for recurring INR mandates)
+    # The universal `subscription_status` column is the single source of truth;
+    # each gateway's webhook writes to it. Each gateway is a no-op until its keys
+    # are set, so you can enable one, both, or neither.
+
+    # Stripe (USD / Global)
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""        # whsec_... — verifies webhook signatures
+    stripe_price_quant: str = ""           # price_... for the Quant Tier subscription
+    stripe_success_url: str = "http://localhost:3000/settings/billing?status=success&session_id={CHECKOUT_SESSION_ID}"
+    stripe_cancel_url: str = "http://localhost:3000/settings/billing?status=cancel"
+
+    # Razorpay (INR / India)
     razorpay_key_id: str = ""
     razorpay_key_secret: str = ""
     razorpay_plan_quant: str = ""          # plan_... for the Quant Tier recurring plan

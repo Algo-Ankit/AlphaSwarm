@@ -228,8 +228,9 @@ async def run_strategy(
 
     # ── Billing gate: live agents require an active Quant Tier subscription ──
     # Paper/backtest runs (dry_run) are always free. Live deployment is the
-    # monetised action, so it is blocked unless the tenant's Razorpay
-    # subscription is active.
+    # monetised action, so it is blocked unless the tenant's subscription is
+    # active — `subscription_status` is the universal source of truth written by
+    # both billing gateways (Stripe USD / Razorpay INR).
     if not request.dry_run:
         from app.db.repositories.users import TenantRepo
         from app.services.billing import is_active_status

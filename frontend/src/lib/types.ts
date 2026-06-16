@@ -332,3 +332,22 @@ export interface NotificationTick {
 }
 
 export type PortfolioWsMessage = PortfolioTick | NotificationTick | { type: 'pong' }
+
+// ── Billing (dual gateway) ─────────────────────────────────────────────────────
+
+/** Currency the user pays in — selects the gateway (USD→Stripe, INR→Razorpay). */
+export type BillingCurrency = 'USD' | 'INR'
+
+export interface CheckoutResponse {
+  gateway: 'stripe' | 'razorpay'
+  /** URL to redirect to (Stripe Checkout page or Razorpay hosted authorization). */
+  checkout_url: string
+  reference_id: string
+}
+
+export interface Subscription {
+  plan: string
+  subscription_status: string
+  is_active: boolean
+  current_period_end: string | null
+}

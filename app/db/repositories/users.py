@@ -25,6 +25,12 @@ class TenantRepo:
             tenant_id,
         )
 
+    async def get_by_stripe_customer(self, customer_id: str) -> asyncpg.Record | None:
+        return await self._pool.fetchrow(
+            "SELECT * FROM tenants WHERE stripe_customer_id = $1",
+            customer_id,
+        )
+
     async def get_by_razorpay_customer(self, customer_id: str) -> asyncpg.Record | None:
         return await self._pool.fetchrow(
             "SELECT * FROM tenants WHERE razorpay_customer_id = $1",
@@ -43,22 +49,32 @@ class TenantRepo:
         *,
         status: str,
         plan: str | None = None,
+        stripe_customer_id: str | None = None,
+        stripe_subscription_id: str | None = None,
         razorpay_customer_id: str | None = None,
         razorpay_subscription_id: str | None = None,
         current_period_end: datetime | None = None,
     ) -> None:
-        """Persist Razorpay subscription state from a verified webhook event."""
+        """
+        Persist subscription state from a verified webhook event (either gateway).
+        `subscription_status` is the universal source of truth; per-gateway id
+        columns are written only when that gateway sends them (COALESCE keeps the
+        other gateway's ids intact).
+        """
         await self._pool.execute(
             """
             UPDATE tenants
             SET subscription_status             = $1,
                 plan                            = COALESCE($2, plan),
-                razorpay_customer_id            = COALESCE($3, razorpay_customer_id),
-                razorpay_subscription_id        = COALESCE($4, razorpay_subscription_id),
-                subscription_current_period_end = COALESCE($5, subscription_current_period_end)
-            WHERE id = $6
+                stripe_customer_id              = COALESCE($3, stripe_customer_id),
+                stripe_subscription_id          = COALESCE($4, stripe_subscription_id),
+                razorpay_customer_id            = COALESCE($5, razorpay_customer_id),
+                razorpay_subscription_id        = COALESCE($6, razorpay_subscription_id),
+                subscription_current_period_end = COALESCE($7, subscription_current_period_end)
+            WHERE id = $8
             """,
-            status, plan, razorpay_customer_id, razorpay_subscription_id,
+            status, plan, stripe_customer_id, stripe_subscription_id,
+            razorpay_customer_id, razorpay_subscription_id,
             current_period_end, tenant_id,
         )
 

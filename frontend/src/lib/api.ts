@@ -5,6 +5,8 @@ import type {
   BacktestResult,
   BacktestSummary,
   Bar,
+  BillingCurrency,
+  CheckoutResponse,
   BrokerConnectRequest,
   BrokerConnection,
   Forecast,
@@ -17,6 +19,7 @@ import type {
   Strategy,
   StrategyCreateRequest,
   StrategyRunResponse,
+  Subscription,
   TaskStatusResponse,
   TestConnectionResponse,
   TickerSearchResult,
@@ -387,4 +390,16 @@ export const api = {
     req<BacktestSummary>(`/v1/strategies/${strategyId}/backtests/latest`, {
       headers: authHeaders(),
     }),
+
+  // ── Billing (dual gateway) ────────────────────────────────────
+  // Currency routes the gateway: USD → Stripe (Global), INR → Razorpay (India).
+  createCheckout: (currency: BillingCurrency) =>
+    req<CheckoutResponse>('/v1/billing/checkout', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ currency }),
+    }),
+
+  getSubscription: () =>
+    req<Subscription>('/v1/billing/subscription', { headers: authHeaders() }),
 }

@@ -29,6 +29,8 @@ const BREADCRUMBS: Record<string, string[]> = {
   '/':                  ['Dashboard'],
   '/strategies/new':    ['Strategies', 'New'],
   '/settings/brokers':  ['Settings', 'Brokers'],
+  '/settings/ai':       ['Settings', 'AI Models'],
+  '/settings/billing':  ['Settings', 'Billing'],
 }
 
 function ApiBadge() {
