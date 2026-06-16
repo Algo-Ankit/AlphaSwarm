@@ -40,16 +40,16 @@ cryptography>=43.0.0               # Fernet encryption for broker keys
 # ──────────────────────────────────────────
 # AI & Agent Framework
 # ──────────────────────────────────────────
-# Microsoft AutoGen — NOT LangChain
-# pyautogen>=0.3 is a proxy package for the modern autogen-agentchat/autogen-core/
-# autogen-ext stack (async-native AssistantAgent + model clients). The legacy 0.2.x
-# line (monolithic `autogen` module, AssistantAgent.generate_reply) requires numpy<2,
-# which conflicts with pandas-ta/yfinance's numpy>=2 requirement — not viable here.
-autogen-agentchat>=0.3.0
-autogen-ext[openai]>=0.3.0
-pyautogen>=0.3.0
-tiktoken>=0.8.0                    # autogen_ext's openai client imports this directly
-openai>=1.50.0                     # OpenAI API
+# Microsoft Agent Framework — NOT LangChain, NOT AutoGen.
+# Agent Framework (GA 1.0, April 2026) is the successor that absorbed AutoGen +
+# Semantic Kernel; AutoGen is now maintenance-only (security fixes, no features).
+# agent-framework-core ships the Agent abstraction; the OpenAIChatClient lives in
+# the SEPARATE agent-framework-openai package (core does NOT bundle it). Both are
+# required for the strategy builder (ReAct via a sandbox-validation tool).
+agent-framework-core>=1.8.0
+agent-framework-openai>=1.8.0     # OpenAIChatClient (Ollama/LM Studio/Groq via base_url)
+openai>=1.50.0                    # underlying OpenAI-compatible SDK
+tiktoken>=0.8.0                   # token accounting
 
 # ──────────────────────────────────────────
 # Market Data

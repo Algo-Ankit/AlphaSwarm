@@ -1,16 +1,28 @@
 """
-StrategyBuilderAgent — AutoGen pipeline: NL description → validated Python BaseStrategy subclass.
+StrategyBuilderAgent — Microsoft Agent Framework pipeline: NL description →
+validated Python BaseStrategy subclass.
 
-Uses AutoGen AssistantAgent (autogen-agentchat) backed by an OpenAI-compatible
-chat completion endpoint (autogen-ext's OpenAIChatCompletionClient) — points at
-a free local model server (Ollama, LM Studio) or a free-tier proxy (Groq), so
-strategy generation never requires a paid API key. Up to 3 sandbox-validate retries.
+Uses agent_framework.Agent backed by an OpenAI-compatible chat client
+(agent_framework.openai.OpenAIChatClient) — points at a free local model server
+(Ollama, LM Studio) or a free-tier proxy (Groq) via base_url, so strategy
+generation never requires a paid API key.
+
+ReAct (Reason + Act): the writer agent is given a `validate_strategy_code` TOOL
+that compiles candidate code in the RestrictedPython sandbox and returns the
+exact error. The model reasons, writes code, ACTS by calling the tool, observes
+the result, and self-corrects — all within a single agent run — instead of the
+old hand-rolled "regenerate from scratch" loop. An outer bounded loop remains as
+a safety net for models that ignore the tool. Migrated off Microsoft AutoGen,
+which entered maintenance mode after Agent Framework 1.0 (GA April 2026).
 """
 from __future__ import annotations
 
+import inspect
 import logging
 import re
-from typing import Optional
+from typing import Annotated, Optional
+
+from pydantic import Field
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +58,10 @@ STRICT RULES:
 15. Use getattr(self, 'key', default) for lazy instance state. Never define __init__.
 16. Output ONLY the fenced code block below — no explanations, no preamble, no
     markdown outside the fences, no commentary before or after. Just the class.
+17. ReAct workflow: BEFORE giving your final answer, call the `validate_strategy_code`
+    tool with your full class source. If it returns anything other than "VALID", read
+    the error, fix the code, and call the tool again. Only emit your final fenced
+    answer once the tool returns "VALID".
 
 Wrap your code in ```python ... ``` fences. Output ONLY the class, nothing else.
 
@@ -142,28 +158,69 @@ def _build_user_message(prompt: str, symbols: list[str], timeframe: str) -> str:
     )
 
 
-def _make_model_client(api_key: str, base_url: str, model: str):
-    from autogen_core.models import ModelFamily, ModelInfo
-    from autogen_ext.models.openai import OpenAIChatCompletionClient
+def _make_chat_client(api_key: str, base_url: str, model: str):
+    """OpenAI-compatible chat client. base_url targets Ollama/LM Studio/Groq, etc.
 
-    return OpenAIChatCompletionClient(
-        model=model,
-        api_key=api_key,
-        base_url=base_url,
-        temperature=0.2,
-        max_tokens=4096,
-        # Free/local models (Ollama, LM Studio, Groq) aren't in autogen's model
-        # registry, so capabilities must be declared explicitly or the client
-        # raises "model_info is required" before making any call.
-        model_info=ModelInfo(
-            vision=False,
-            function_calling=False,
-            json_output=False,
-            family=ModelFamily.UNKNOWN,
-            structured_output=False,
-            multiple_system_messages=True,
-        ),
-    )
+    Unlike AutoGen, Agent Framework infers model capabilities from the client, so
+    no explicit ModelInfo/capability declaration is needed for non-registry models.
+    """
+    from agent_framework.openai import OpenAIChatClient
+
+    return OpenAIChatClient(model=model, api_key=api_key, base_url=base_url)
+
+
+async def _close_client(client) -> None:
+    """Best-effort cleanup — close whichever coroutine/method the client exposes."""
+    closer = getattr(client, "aclose", None) or getattr(client, "close", None)
+    if closer is None:
+        return
+    try:
+        res = closer()
+        if inspect.isawaitable(res):
+            await res
+    except Exception as exc:  # cleanup must never mask the real result/error
+        logger.debug("chat client cleanup failed (non-fatal): %s", exc)
+
+
+def validate_strategy_code(
+    code: Annotated[str, Field(description="The complete Python source of the BaseStrategy subclass to validate.")]
+) -> str:
+    """Compile a candidate strategy in the secure sandbox.
+
+    Returns "VALID" if the code passes all sandbox checks, otherwise
+    "INVALID: <reason>" with the exact error to fix. This is the agent's ACT step
+    in the ReAct loop — call it to check your code before answering.
+    """
+    from app.services.strategy_sandbox import SandboxError, compile_strategy_code
+
+    try:
+        compile_strategy_code(code)
+        return "VALID"
+    except SandboxError as exc:
+        return f"INVALID: {exc}"
+    except Exception as exc:  # surface any load-time error to the model verbatim
+        return f"INVALID: {exc}"
+
+
+async def _run_agent(agent, task: str, *, timeout: float, label: str) -> str:
+    """Run an agent with a bounded per-call timeout + transient-failure retries."""
+    import asyncio
+
+    for net_attempt in range(1, 4):
+        try:
+            result = await asyncio.wait_for(agent.run(task), timeout=timeout)
+            return (result.text or "").strip()
+        except asyncio.TimeoutError:
+            if net_attempt == 3:
+                raise ValueError(f"{label} timed out after 3 network attempts.")
+            logger.warning("%s timeout, retrying %d/3...", label, net_attempt)
+            await asyncio.sleep(2 ** net_attempt)
+        except Exception as exc:
+            if net_attempt == 3:
+                raise ValueError(f"{label} failed after 3 network attempts: {exc}") from exc
+            logger.warning("%s error: %s, retrying %d/3...", label, exc, net_attempt)
+            await asyncio.sleep(2 ** net_attempt)
+    return ""  # unreachable; loop either returns or raises
 
 
 async def build_strategy_async(
@@ -176,20 +233,21 @@ async def build_strategy_async(
     max_retries: int = 3,
 ) -> str:
     """
-    Calls AutoGen StrategyWriterAgent via an OpenAI-compatible endpoint, validates
-    in the RestrictedPython sandbox. Returns validated Python source string.
-    Raises ValueError after all retries exhausted.
+    Drives a Microsoft Agent Framework ChatAgent (ReAct) to convert an NL prompt
+    into a sandbox-validated Python BaseStrategy subclass. The agent self-corrects
+    via the validate_strategy_code tool; the outer loop re-prompts as a safety net.
+    Returns validated Python source. Raises ValueError after all retries exhausted.
     """
-    from autogen_agentchat.agents import AssistantAgent
-    from autogen_agentchat.messages import TextMessage
+    from agent_framework import Agent
 
     from app.services.strategy_sandbox import SandboxError, compile_strategy_code
 
-    model_client = _make_model_client(api_key, base_url, model)
-    writer = AssistantAgent(
+    client = _make_chat_client(api_key, base_url, model)
+    writer = Agent(
+        client=client,
         name="StrategyWriter",
-        model_client=model_client,
-        system_message=_WRITER_SYSTEM_PROMPT,
+        instructions=_WRITER_SYSTEM_PROMPT,
+        tools=[validate_strategy_code],  # ReAct: the agent validates as it reasons
     )
 
     task: str = _build_user_message(prompt, symbols, timeframe)
@@ -198,27 +256,7 @@ async def build_strategy_async(
     try:
         for attempt in range(1, max_retries + 1):
             logger.info("StrategyBuilderAgent attempt %d/%d", attempt, max_retries)
-
-            # Network/API retry loop for transient failures (independent of sandbox retries)
-            result = None
-            import asyncio
-            for net_attempt in range(1, 4):
-                try:
-                    result = await asyncio.wait_for(writer.run(task=task), timeout=45.0)
-                    break  # Success
-                except asyncio.TimeoutError:
-                    if net_attempt == 3:
-                        raise ValueError("AutoGen LLM call timed out after 3 network attempts.")
-                    logger.warning("LLM API timeout, retrying %d/3...", net_attempt)
-                    await asyncio.sleep(2 ** net_attempt)
-                except Exception as exc:
-                    if net_attempt == 3:
-                        raise ValueError(f"AutoGen LLM call failed after 3 network attempts: {exc}") from exc
-                    logger.warning("LLM API error: %s, retrying %d/3...", exc, net_attempt)
-                    await asyncio.sleep(2 ** net_attempt)
-
-            reply = result.messages[-1] if result.messages else None
-            content = reply.content if isinstance(reply, TextMessage) else ""
+            content = await _run_agent(writer, task, timeout=60.0, label="Agent Framework LLM call")
 
             if not content:
                 last_error = "LLM returned empty response"
@@ -241,10 +279,11 @@ async def build_strategy_async(
                 if attempt < max_retries:
                     task = (
                         f"Sandbox validation failed: {exc}\n\n"
-                        "Fix the error and respond with the corrected class only in ```python ... ``` fences."
+                        "Call validate_strategy_code to confirm your fix, then respond with the "
+                        "corrected class only in ```python ... ``` fences."
                     )
     finally:
-        await model_client.close()
+        await _close_client(client)
 
     raise ValueError(
         f"StrategyBuilderAgent failed after {max_retries} attempts. Last error: {last_error}"
@@ -261,30 +300,24 @@ async def explain_strategy_async(
     """
     Produce a plain-English explanation of an already-validated strategy.
 
-    This is a SEPARATE agent pass from build_strategy_async — it never touches the
-    Python-only sandbox path, so the strict code-generation contract stays intact.
-    Explanation is best-effort: any failure falls back to echoing the user's prompt
-    rather than blocking strategy creation.
+    A SEPARATE agent pass from build_strategy_async (no tools, no sandbox) so the
+    strict code-generation contract stays intact. Best-effort: any failure falls
+    back to echoing the user's prompt rather than blocking strategy creation.
     """
-    import asyncio
+    from agent_framework import Agent
 
-    from autogen_agentchat.agents import AssistantAgent
-    from autogen_agentchat.messages import TextMessage
-
-    model_client = _make_model_client(api_key, base_url, model)
-    explainer = AssistantAgent(
+    client = _make_chat_client(api_key, base_url, model)
+    explainer = Agent(
+        client=client,
         name="StrategyExplainer",
-        model_client=model_client,
-        system_message=_EXPLAINER_SYSTEM_PROMPT,
+        instructions=_EXPLAINER_SYSTEM_PROMPT,
     )
     task = _build_explain_message(prompt, code)
     try:
-        result = await asyncio.wait_for(explainer.run(task=task), timeout=30.0)
-        reply = result.messages[-1] if result.messages else None
-        content = reply.content.strip() if isinstance(reply, TextMessage) and reply.content else ""
+        content = await _run_agent(explainer, task, timeout=30.0, label="StrategyExplainerAgent")
         return content or _fallback_explanation(prompt)
     except Exception as exc:
         logger.warning("StrategyExplainerAgent failed, using fallback: %s", exc)
         return _fallback_explanation(prompt)
     finally:
-        await model_client.close()
+        await _close_client(client)
