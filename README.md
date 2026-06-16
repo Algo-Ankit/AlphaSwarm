@@ -9,10 +9,11 @@
 ╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝
 ```
 
-### **Bloomberg Terminal meets Linear. Built for the next generation of traders.**
+### **Your AI quant team, in a browser tab.**
 
-*Describe a strategy in plain English. AI generates, validates, backtests, and deploys it.*  
-*Monitor via a full trading terminal. No Bloomberg subscription required.*
+*Describe a strategy in plain English — or set a goal like "retire by 50."*
+*AlphaSwarm's AI writes the code, backtests it against institutional-grade reality, and trades it through **your own broker**.*
+*A full trading terminal. Goal-based SIPs. Zero infrastructure. No Bloomberg subscription.*
 
 ---
 
@@ -22,568 +23,363 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?style=flat-square&logo=postgresql&logoColor=white)](https://postgresql.org)
 [![Redis](https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io)
 [![Celery](https://img.shields.io/badge/Celery-5.4+-37814A?style=flat-square&logo=celery&logoColor=white)](https://docs.celeryq.dev)
-[![Claude](https://img.shields.io/badge/Claude-Sonnet_4.6-FF6B35?style=flat-square&logo=anthropic&logoColor=white)](https://anthropic.com)
+[![Agent Framework](https://img.shields.io/badge/Microsoft_Agent_Framework-1.x-5E5CE6?style=flat-square&logo=microsoft&logoColor=white)](https://github.com/microsoft/agent-framework)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com)
+[![CI](https://img.shields.io/badge/CI-GitHub_Actions-2088FF?style=flat-square&logo=githubactions&logoColor=white)](.github/workflows/main.yml)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
-[![Build Status](https://img.shields.io/badge/System-Production_Ready-success?style=flat-square)](https://github.com/Algo-Ankit/AlphaSwarm)
-[![Phase](https://img.shields.io/badge/Current_Phase-7_(Production_Hardened)-blue?style=flat-square)](https://github.com/Algo-Ankit/AlphaSwarm)
-[![Founding Members](https://img.shields.io/badge/Founding_Members-500_spots-gold?style=flat-square)](https://github.com/Algo-Ankit/AlphaSwarm)
+[![Status](https://img.shields.io/badge/Status-MVP_Live-success?style=flat-square)](https://github.com/Algo-Ankit/AlphaSwarm)
+[![Phase](https://img.shields.io/badge/Phase-10_(Go--To--Market)-blue?style=flat-square)](https://github.com/Algo-Ankit/AlphaSwarm)
+[![Founding Members](https://img.shields.io/badge/Founding_Members-Open-gold?style=flat-square)](https://github.com/Algo-Ankit/AlphaSwarm)
 
 </div>
 
 ---
 
-## What is AlphaSwarm?
+## ⚡ The 30-Second Pitch
 
-AlphaSwarm is a **production-grade, multi-tenant algorithmic trading SaaS** — a fundable startup MVP being built in public.
+Building an algorithmic trading strategy today means hiring a quant, writing Python, wiring up market data, backtesting it honestly, managing risk, and babysitting a server. **AlphaSwarm collapses that entire stack into a sentence.**
 
-Two types of users are served simultaneously:
+> 🗣️ *"Buy RELIANCE when RSI(14) drops below 30 and price is above the 200-day EMA. Take profit at 8%."*
 
-| User Type | Journey |
-|-----------|---------|
-| **Retail Trader (No-Code)** | Describe a strategy in plain English → AI generates + explains it → Backtest → Deploy paper → Go live |
-| **Quant Developer** | Write Python in a browser Monaco editor → Sandbox validates → Backtest → Deploy |
+You type that. AlphaSwarm's AI generates a validated, sandboxed Python strategy, backtests it with **real-world slippage and market-impact modelling**, and — once you connect your own broker — deploys it. Want something simpler? Tell our **Goal Wizard** *"I want ₹50L for retirement in 20 years"* and it builds a SIP portfolio for you.
 
-The core thesis: **traders shouldn't need to build infrastructure**. AlphaSwarm handles the entire stack — data feeds, technical indicators, AI strategy generation, risk management, broker execution, and real-time monitoring — so traders can focus on edge, not engineering.
+**We never touch your money.** Your funds stay in your own Zerodha / Upstox / Alpaca account. AlphaSwarm is software that sends orders on your behalf — not a broker, not a fund. That's the whole trust model.
 
-> **BYOB (Bring Your Own Broker)** — AlphaSwarm never touches your funds. All money lives in your own broker account (Alpaca, Upstox, Zerodha). AlphaSwarm sends orders via your API keys. This means: no money transmission license, no custody liability.
+| Who | What they get |
+|-----|----------------|
+| 🧑‍💼 **Retail investor** | A Goal Wizard, SIPs you can pause/resume, XIRR & allocation dashboards, plain-English strategies — no code, ever. |
+| 📈 **Active trader** | A Bloomberg-style terminal: candles, RSI/MACD/Bollinger, news, AI forecasts, live P&L over WebSockets. |
+| 🧑‍🔬 **Quant developer** | A browser Monaco editor, a hardened Python sandbox, and a backtester that models slippage like a prop firm. |
 
 ---
 
-## Core Product Modules
+## 🎯 Why traders should trust it
 
-<details>
-<summary><strong>📊 Trading Terminal</strong> — The primary product screen</summary>
+- **🔒 No custody, no licence risk.** Bring Your Own Broker (BYOB). Your capital never leaves your regulated broker account.
+- **🛡️ A risk engine that cannot be bypassed.** `verify_order_intent()` runs before *every* order — in live trading **and** in backtests. Same code path, no exceptions. Protected by transactional 64-bit advisory locks against race conditions.
+- **🔑 Bring Your Own Key (BYOK).** The AI runs on *your* free API key (Groq, Gemini, OpenRouter, or local Ollama). We ship no hidden paid key and never bill you for tokens.
+- **🧪 Honest backtests.** Most retail backtesters lie — they fill stop-losses at the stop price and assume infinite liquidity. Ours models adverse gap fills, a 10% volume-participation cap (Almgren–Chriss), bid/ask reality, commissions, and short-borrow financing.
+- **🔐 Real security.** RestrictedPython sandbox hardened against RCE & DoS, HKDF/Fernet envelope encryption for broker keys, RS256 JWT, strict per-tenant SQL isolation. See [Security](#-security-architecture).
 
-- **Candlestick chart** via [TradingView Lightweight Charts v4](https://tradingview.github.io/lightweight-charts/) — the only production-grade charting library
-- **Timeframe selector**: 1m / 5m / 15m / 1h / 4h / 1D / 1W
-- **Indicator overlays**: 20 EMA, 50 EMA, 200 EMA, Bollinger Bands, VWAP
-- **Sub-charts**: RSI(14), MACD histogram + signal, Volume bars
-- **Parameterizable**: `rsi(21)`, `macd(5,35,5)`, `bb(20,2.5)` — user-configurable at runtime
-- All indicator values computed **server-side** via [pandas-ta](https://github.com/twopirllc/pandas-ta). Client displays only.
+---
 
-</details>
+## 🧩 Core Product Modules
 
 <details>
 <summary><strong>🤖 AI Strategy Builder</strong> — Natural language → deployable Python</summary>
 
-- User types: *"Buy RELIANCE when RSI(14) drops below 30 and close is above 200-day EMA. Sell when RSI crosses above 70."*
-- `StrategyBuilderAgent` (Microsoft [AutoGen](https://github.com/microsoft/autogen) + Claude Sonnet 4.6) interprets → generates a validated `BaseStrategy` Python subclass
-- Multi-turn conversation: generate → self-critique → fix
-- User sees plain-English confirmation only; code hidden behind "Show Code" toggle
-- Failure contract: always returns `{error, suggestion}` — never silently emits broken code
+- Powered by the **Microsoft Agent Framework** (ReAct pattern) + your BYOK model.
+- Multi-turn: the agent generates code, validates it against the live sandbox tool, self-critiques, and fixes itself.
+- Output is always a validated `BaseStrategy` subclass. The user sees a plain-English explanation; the code hides behind a "Show Code" toggle.
+- Failure contract: always returns `{error, suggestion}` — never silently emits broken code.
 
 </details>
 
 <details>
-<summary><strong>📈 Backtesting Engine</strong> — Same risk checks as live trading</summary>
+<summary><strong>🎯 Goal-Based Investing & SIPs</strong> — Wealth-tech for everyone</summary>
 
-- `BacktestRunner` replays historical OHLCV bars through `strategy.on_bar()` sequentially
-- Risk function called on every simulated order — **no bypass in backtesting**
-- Outputs: Total return %, Sharpe, Sortino, Max Drawdown, Win Rate, Profit Factor
-- Equity curve stored as JSON → overlaid on the same TradingView chart
-- Historical data from `market_data_cache` or fetched live from Alpaca/yfinance
+- **Goal Wizard**: pick a goal (retirement, education) → risk profile → horizon → AlphaSwarm pre-fills a strategy.
+- **SIP controls**: pause/resume any SIP, fire a lump-sum boost, approve rebalances from the notifications panel.
+- **Dashboards built for investors, not just traders**: XIRR (computed via Newton–Raphson) and an asset-allocation donut chart instead of raw P&L.
+
+</details>
+
+<details>
+<summary><strong>📊 Trading Terminal</strong> — The pro screen</summary>
+
+- Candlesticks via **TradingView Lightweight Charts v4**; timeframes 1m → 1W.
+- Overlays: 20/50/200 EMA, Bollinger Bands, VWAP. Sub-charts: RSI(14), MACD, Volume.
+- Parameterizable at runtime — `rsi(21)`, `macd(5,35,5)`, `bb(20,2.5)`.
+- All indicators computed **server-side** with `pandas-ta`; the client only renders.
+
+</details>
+
+<details>
+<summary><strong>📈 Institutional-Grade Backtester</strong> — Same risk checks as live</summary>
+
+- Replays historical OHLCV through `strategy.on_bar()` — the risk engine runs on every simulated order.
+- Models **adverse gap fills**, **10% volume-participation cap**, **bid/ask spread**, **commission-aware** profit factor & win rate, **short-borrow financing**, and terminal-liquidation costs.
+- Outputs Total Return, Sharpe, **Sortino (true RMS downside deviation)**, Max Drawdown, Calmar, Win Rate, Profit Factor.
+- Equity curve overlays onto the same TradingView chart.
 
 </details>
 
 <details>
 <summary><strong>📰 Market Intelligence</strong> — News + AI forecasting</summary>
 
-- **News**: NewsAPI + Alpha Vantage, last 7 days per ticker
-- **Sentiment**: scored by Claude Haiku (fast + cheap)
-- **Forecast**: Prophet + ARIMA ensemble, 5-day horizon, 80% confidence band
-- Always labeled: *"Statistical projection — not financial advice"*
-- Shows model error metrics (MAE, MAPE) for transparency
+- News (NewsAPI + Alpha Vantage) with AI sentiment scoring.
+- Forecast: Prophet + ARIMA ensemble, 5-day horizon, 80% confidence band — always labelled *"Statistical projection, not financial advice"* with MAE/MAPE shown.
 
 </details>
 
 <details>
-<summary><strong>🛡️ Risk System</strong> — Non-negotiable, never bypassed</summary>
+<summary><strong>🛡️ The Risk System</strong> — Non-negotiable</summary>
 
-Six checks in order before any broker API call:
-1. Market is currently open for this exchange
-2. Symbol is on the strategy's allowed list
-3. Order notional ≤ `max_order_notional`
-4. Today's executed notional ≤ `max_daily_notional`
-5. Total open positions ≤ tenant plan limit
-6. Paper trading gate (live orders rejected if `paper_trading_only: true`)
+Six checks, in order, before any broker API call (and in every backtest):
+1. Market open for this exchange  2. Symbol on the allowed list  3. Order notional ≤ cap
+4. Daily executed notional ≤ cap  5. Open positions ≤ plan limit  6. Paper-trading gate
 
-`verify_order_intent()` is the single entry point. It is called in backtests too.
+`verify_order_intent()` is the single entry point. There is no second door.
 
 </details>
 
 ---
 
-## System Architecture
+## 🏗️ System Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  FRONTEND  (Next.js 14 App Router — Vercel)              │
-│  /dashboard  /terminal/[symbol]  /strategies/*  /market  │
+│  FRONTEND  (Next.js 14 App Router — Vercel)               │
+│  /dashboard  /terminal  /strategies/*  /settings/*        │
 └───────────────────────┬──────────────────────────────────┘
                         │  REST + WebSocket (JWT Bearer)
 ┌───────────────────────▼──────────────────────────────────┐
-│  CONTROL PLANE  (FastAPI + asyncpg — Hetzner CX32)       │
-│  Auth · Strategies · Market Data · Portfolio · WS        │
-└───────┬────────────────────────┬────────────────────────┘
+│  CONTROL PLANE  (FastAPI + asyncpg — Hetzner)             │
+│  Auth · Strategies · Market · Portfolio · Brokers/OAuth   │
+│  Billing (Stripe+Razorpay) · Notifications · WS fan-out   │
+└───────┬────────────────────────┬─────────────────────────┘
         │ Celery (Redis broker)  │ Direct async calls
-┌───────▼────────────┐   ┌───────▼──────────────────────┐
-│  EXECUTION PLANE   │   │  INTELLIGENCE SERVICES        │
-│  (Celery Workers)  │   │  market_data.py  (Alpaca/yf)  │
-│                    │   │  indicators.py   (pandas-ta)  │
-│  StrategyRunAgent  │   │  forecaster.py   (Prophet+ARIMA)│
-│  RiskAgent (pure)  │   │  news_intel.py   (Claude Haiku)│
-│  ExecutionAgent    │   │  backtester.py   (BacktestRunner)│
-│  HeartbeatTask     │   └───────────────────────────────┘
-└────────────────────┘
+┌───────▼────────────┐   ┌───────▼──────────────────────────┐
+│  EXECUTION PLANE   │   │  INTELLIGENCE SERVICES            │
+│  (Celery Workers)  │   │  market_data · indicators (TA)    │
+│  StrategyRunAgent  │   │  forecaster (Prophet+ARIMA)       │
+│  Risk (pure func)  │   │  news_intel · backtest            │
+│  ExecutionAgent    │   │  oauth_manager · strategy_builder │
+│  SIP / Heartbeat   │   │  (Microsoft Agent Framework)      │
+└────────────────────┘   └───────────────────────────────────┘
         │
 ┌───────▼──────────────────────────────────────────────────┐
 │  DATA LAYER                                               │
-│  PostgreSQL 16 (primary store)  ·  Redis 7 (broker+pubsub)│
-│  16 tables: strategies, runs, orders, positions,          │
-│  portfolio_snapshots, market_data_cache, forecasts...     │
+│  PostgreSQL 16 (primary)  ·  Redis 7 (broker + pub/sub)  │
+│  Sentry (errors) · SendGrid (email) · CI via Actions     │
 └──────────────────────────────────────────────────────────┘
 ```
 
-**Infrastructure**: Hetzner CX32 (~€15/mo) + Cloudflare (free SSL/CDN) + Vercel (free frontend)
+**Infrastructure**: Hetzner (~€15/mo) + Cloudflare (free SSL/CDN) + Vercel (free frontend). Production-grade at bootstrap pricing.
 
 ---
 
-## Technology Choices
+## 🛠️ Technology Choices (and why)
 
-| Layer | Technology | Why This Specific Choice |
-|-------|-----------|--------------------------|
-| AI Agent Framework | [Microsoft AutoGen](https://github.com/microsoft/autogen) | NOT LangChain — see Engineering Decisions |
-| AI Model | [Claude Sonnet 4.6](https://anthropic.com) | Strategy generation + market analysis |
-| Technical Analysis | [pandas-ta](https://github.com/twopirllc/pandas-ta) | Pure Python — no TA-Lib compile failures |
-| Forecasting | [Prophet](https://facebook.github.io/prophet/) + [statsmodels ARIMA](https://www.statsmodels.org/) | Ensemble with confidence intervals |
-| Charts | [TradingView Lightweight Charts v4](https://tradingview.github.io/lightweight-charts/) | Only library with production-grade candlesticks |
-| Code Editor | [Monaco Editor](https://microsoft.github.io/monaco-editor/) | VS Code engine in the browser |
-| DB Driver | [asyncpg](https://github.com/MagicStack/asyncpg) | Fastest async PostgreSQL driver — raw SQL, no ORM |
-| Migrations | [Alembic](https://alembic.sqlalchemy.org/) | Version-controlled schema, async-compatible |
-| Auth | [python-jose](https://github.com/mpdavis/python-jose) + [passlib](https://passlib.readthedocs.io/) | RS256 JWT + bcrypt — industry standard |
-| Sandbox | [RestrictedPython](https://restrictedpython.readthedocs.io/) | Safe execution of user-submitted strategy code |
-| Task Queue | [Celery 5](https://docs.celeryq.dev/) + Redis | Isolated workers per strategy. Battle-tested at scale. |
-| US Market Data | [Alpaca](https://alpaca.markets/docs/) | Free paper trading + consistent data format |
-| Indian Market Data | [yfinance](https://ranaroussi.github.io/yfinance/) | `RELIANCE.NS` / `RELIANCE.BO` — works reliably |
-| Rate Limiting | [slowapi](https://github.com/laurentS/slowapi) | Per-endpoint, per-user on FastAPI |
-| Monitoring | [Sentry](https://sentry.io/) | Production error + performance tracking |
+| Layer | Tech | The reason |
+|-------|------|-----------|
+| AI orchestration | **Microsoft Agent Framework** | Stable API; migrated off AutoGen (now maintenance-only). LangChain is banned — it ships breaking changes in minor versions. |
+| AI model | **BYOK** (Groq / Gemini / OpenRouter / Ollama / Claude) | Users bring a free key. No shipped paid key, no token billing. |
+| Technical analysis | **pandas-ta** | Pure Python — no TA-Lib C-compile pain across OSes. |
+| Forecasting | **Prophet + statsmodels ARIMA** | Ensemble with confidence intervals. |
+| Charts | **TradingView Lightweight Charts v4** | The only library with prop-grade candlesticks + sub-charts. |
+| Code editor | **Monaco** | The VS Code engine, in the browser. |
+| DB driver | **asyncpg** (raw SQL, no ORM) | 3–5× faster for our read-heavy workloads; explicit `tenant_id` isolation. |
+| Migrations | **Alembic** (async) | Version-controlled schema, asyncpg-native. |
+| Auth | **python-jose + passlib** | RS256 JWT + bcrypt. |
+| Sandbox | **RestrictedPython** | Hardened safe execution of user strategy code. |
+| Queue | **Celery 5 + Redis** | Isolated workers per strategy. |
+| Market data | **Alpaca** (US/crypto) · **yfinance** (`.NS`/`.BO`) · **Upstox/Zerodha** (live India) | NSEpy is permanently banned — it's broken on current NSE infra. |
+| Billing | **Stripe (USD) + Razorpay (INR/UPI)** | Dual-gateway, gates live deployment. |
+| Ops | **Sentry · SendGrid · GitHub Actions** | Errors, transactional email, CI. |
 
 ---
 
-## Getting Started
+## 🚀 Getting Started
 
 ### Prerequisites
+- Python 3.11+ · Docker Desktop · Node.js 18+
 
-- Python 3.11+
-- Docker Desktop (for PostgreSQL + Redis)
-- Node.js 18+ (for frontend)
-
-### 1. Clone & Configure
-
+### 1. Clone & configure
 ```bash
 git clone https://github.com/Algo-Ankit/AlphaSwarm.git
 cd AlphaSwarm
-
-# Copy and fill in your API keys
-cp .env.example .env
+cp .env.example .env   # fill in your keys — see .env.example for the full annotated list
 ```
-
-Required environment variables in `.env`:
-
+Minimum to run locally (defaults work with docker-compose):
 ```bash
-# Core infrastructure (defaults work with docker-compose)
 DATABASE_URL=postgresql+asyncpg://alphaswarm:alphaswarm@localhost:5432/alphaswarm
 DATABASE_SYNC_URL=postgresql://alphaswarm:alphaswarm@localhost:5432/alphaswarm
 REDIS_URL=redis://localhost:6379/0
+JWT_SECRET_KEY=dev-secret-change-in-production   # HS256 dev fallback, no key-gen needed
 
-# AI (get at console.anthropic.com)
-ANTHROPIC_API_KEY=sk-ant-...
+# BYOK AI — point at a FREE provider (Groq shown) or a local Ollama; no paid key required
+LLM_BASE_URL=https://api.groq.com/openai/v1
+LLM_API_KEY=<your-free-groq-key>
+LLM_MODEL=llama-3.1-8b-instant
 
-# Alpaca (free paper account at alpaca.markets)
+# Alpaca paper account (free) for US market data + paper trading
 ALPACA_API_KEY=PK...
 ALPACA_SECRET_KEY=...
 ALPACA_BASE_URL=https://paper-api.alpaca.markets
-
-# JWT — for dev, only JWT_SECRET_KEY is needed (HS256 fallback)
-# For production, generate RS256 keys (see .env.example for commands)
-JWT_SECRET_KEY=your-dev-secret-change-in-production
 ```
 
-### 2. Start Infrastructure
-
+### 2. Infra → migrate → API
 ```bash
-# Starts PostgreSQL 16, Redis 7, and Adminer (DB UI at localhost:8080)
-docker compose up -d
-```
-
-### 3. Run Migrations
-
-```bash
+docker compose up -d                 # PostgreSQL 16 + Redis 7 (+ Adminer at :8080)
 pip install -r requirements.txt
-alembic upgrade head
+alembic upgrade head                 # applies migrations 0001 → 0005
+uvicorn app.main:app --reload        # API at http://localhost:8000  ·  docs at /docs
 ```
 
-### 4. Start the API
-
+### 3. Workers
 ```bash
-uvicorn app.main:app --reload
-# API available at http://localhost:8000
-# Swagger docs at http://localhost:8000/docs
-```
-
-### 5. Start Celery Workers
-
-```bash
-# In separate terminals:
 celery -A app.core.celery_app.celery_app worker -Q trading_tasks -c 2 --loglevel=info
 celery -A app.core.celery_app.celery_app beat --loglevel=info
 ```
 
-### 6. Start the Frontend
-
+### 4. Frontend
 ```bash
-cd frontend
-npm install
-npm run dev
-# Available at http://localhost:3000
+cd frontend && npm install && npm run dev   # http://localhost:3000
 ```
 
-### Quick API Smoke Test
-
-**Register a new account:**
+### Smoke test
 ```bash
-curl -X POST http://localhost:8000/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "trader@example.com",
-    "password": "securepassword",
-    "display_name": "Test Trader",
-    "tenant_name": "My Trading Firm"
-  }'
-```
+# Register → returns nothing sensitive; then log in for a token
+curl -X POST http://localhost:8000/v1/auth/register -H "Content-Type: application/json" \
+  -d '{"email":"trader@example.com","password":"securepassword","display_name":"Test","tenant_name":"My Firm"}'
 
-**Login:**
-```bash
-curl -X POST http://localhost:8000/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "trader@example.com", "password": "securepassword"}'
-# Returns: {"access_token": "eyJ...", "refresh_token": "..."}
-```
-
-**Create a strategy:**
-```bash
-curl -X POST http://localhost:8000/v1/strategies \
-  -H "Authorization: Bearer <access_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "SPY Momentum",
-    "prompt": "Buy SPY when RSI(14) drops below 30. Sell when RSI crosses above 70.",
-    "symbols": ["SPY"],
-    "timeframe": "1h"
-  }'
+curl -X POST http://localhost:8000/v1/auth/login -H "Content-Type: application/json" \
+  -d '{"email":"trader@example.com","password":"securepassword"}'   # → {access_token, refresh_token}
 ```
 
 ---
 
-## API Reference
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| `POST` | `/v1/auth/register` | — | Create tenant + owner account |
-| `POST` | `/v1/auth/login` | — | Email/password → JWT tokens |
-| `POST` | `/v1/auth/refresh` | — | Rotate refresh token → new access token |
-| `POST` | `/v1/auth/logout` | Bearer | Invalidate refresh token |
-| `POST` | `/v1/strategies` | Bearer | Create strategy (NL or code) |
-| `GET` | `/v1/strategies` | Bearer | List all tenant strategies |
-| `GET` | `/v1/strategies/{id}` | Bearer | Strategy detail |
-| `POST` | `/v1/strategies/{id}/runs` | Bearer | Deploy strategy (paper or live) |
-| `GET` | `/v1/tasks/{task_id}` | Bearer | Celery task status |
-| `GET` | `/health` | — | Liveness probe |
-| `GET` | `/health/ready` | — | Readiness probe (checks DB + Redis) |
-
-> Full OpenAPI spec: [`openapi.json`](openapi.json) — or visit `/docs` when running locally.
-
-**Upcoming in Phase 5:**
-`POST /v1/strategies/build` (AutoGen generation) · `/sandbox/validate` · `/v1/backtest` (Historical execution)
-
----
-
-## Security Architecture
+## 🔐 Security Architecture
 
 ```
-Access Token:   RS256 JWT · 15-minute expiry · sub=user_id + tenant_id + role
-Refresh Token:  32-byte random · SHA-256 hashed in DB · 30-day expiry · rotated on use
-Multi-tenancy:  Every SQL query has WHERE tenant_id = $N · enforced in repository layer
-Broker Keys:    Fernet AES-128-CBC encrypted at rest · decrypted in memory only
-Dev Mode:       HS256 fallback (no key generation required) · set JWT_SECRET_KEY only
-Code Sandbox:   RestrictedPython · no os/subprocess/socket imports · 30s timeout
+Access token   RS256 JWT · 15-min expiry · sub = user_id + tenant_id + role  (HS256 dev fallback)
+Refresh token  32-byte random · SHA-256 hashed in DB · 30-day · rotated on use
+Multi-tenancy  every query carries WHERE tenant_id = $N · enforced in BaseRepo, impossible to skip
+Broker keys    HKDF + Fernet envelope encryption at rest · decrypted in memory only
+OAuth tokens   Indian brokers expire daily → encrypted refresh + retry_on_401 transparent renewal
+Code sandbox   RestrictedPython · str-subclass guard · format denylist · iter DoS removed · exec timeout
+LLM access     strict BYOK · founder-only platform-key fallback gated by timing-safe email compare
 ```
 
 ---
 
-## Engineering Decisions
+## 🧠 Engineering Decisions
 
-These are the non-obvious choices made and why. Each one resolved a real constraint.
+The non-obvious calls, each resolving a real constraint:
 
-### 1. Microsoft AutoGen — not LangChain
-
-**Decision**: Use [Microsoft AutoGen](https://github.com/microsoft/autogen) for all AI agent orchestration.
-
-**Why not LangChain**: LangChain ships breaking API changes in minor versions. In early prototyping, an upgrade from `0.1.x` to `0.2.x` broke the agent chain with no deprecation notice. A trading system that breaks on `pip install --upgrade` is not deployable. AutoGen's multi-agent API has been stable since its public release and is production-deployed at Microsoft.
-
-**Result**: `StrategyBuilderAgent`, `StrategyRunAgent`, `ExecutionAgent`, `AnalysisAgent` — all AutoGen. LangChain imports are banned in this codebase.
-
----
-
-### 2. pandas-ta — not TA-Lib
-
-**Decision**: Use [pandas-ta](https://github.com/twopirllc/pandas-ta) for all technical indicators.
-
-**Why not TA-Lib**: TA-Lib requires compiling a C extension. On Windows it requires Visual Studio Build Tools. On Alpine Linux (used in Docker) it requires `build-essential` and custom wheel builds. This adds 15+ minutes to CI and breaks for new contributors on fresh machines. pandas-ta is pure Python, installs in seconds on any OS, and covers every indicator we need (RSI, MACD, Bollinger, EMA, VWAP, ATR, Stochastic).
-
-**Result**: Zero compile-step indicators. `pip install pandas-ta` just works.
+1. **Microsoft Agent Framework, not LangChain.** LangChain breaks on minor upgrades — unacceptable for a trading system. We even migrated *off* AutoGen once it went maintenance-only.
+2. **pandas-ta, not TA-Lib.** No C-compile step; installs in seconds on any OS.
+3. **Raw asyncpg, not an ORM.** 3–5× faster on our read-heavy paths; explicit tenant isolation.
+4. **TradingView charts, not Recharts/Chart.js.** The only library that renders 10k candles + sub-charts at terminal speed.
+5. **yfinance, not NSEpy.** NSEpy depends on dead NSE scraping endpoints. Hard-banned.
+6. **BYOB — no custody.** Launch with zero money-transmission licensing. Revenue is SaaS, not AUM.
+7. **Hetzner + Cloudflare + Vercel, not AWS.** ~€15/mo vs ~$250/mo for the same capability.
 
 ---
 
-### 3. Raw asyncpg — not SQLAlchemy ORM
+## 🐛 Battle Scars — Bugs Found & Fixed
 
-**Decision**: Use [asyncpg](https://github.com/MagicStack/asyncpg) with raw SQL, not SQLAlchemy ORM.
+The git history reads like a postmortem. Highlights:
 
-**Why**: Financial data access patterns are known and stable — we write specific queries, not dynamic ones. Raw asyncpg is 3-5x faster than SQLAlchemy async ORM for the read-heavy workloads in trading (fetching 500 bars, indicator computation, order history). The repository pattern with explicit `tenant_id` enforcement gives us better security than ORM-level row-level security. Alembic handles migrations fine without ORM models.
-
-**Result**: Sub-millisecond DB calls for market data fetches. Explicit tenant isolation impossible to accidentally bypass.
-
----
-
-### 4. TradingView Lightweight Charts — not Recharts or Chart.js
-
-**Decision**: Use [TradingView Lightweight Charts v4](https://tradingview.github.io/lightweight-charts/) exclusively.
-
-**Why**: We evaluated Recharts, Chart.js, Victory, Nivo, and D3. None support candlestick charts with proper OHLC rendering, sub-charts (RSI/MACD panes), and the ~500ms paint time needed for a real-time terminal. TradingView Lightweight Charts is what TradingView itself uses for its lightweight embeds. It renders 10,000 candles in milliseconds via canvas. It's the only library in this space worth using.
-
-**Result**: Professional candlestick + TA terminal. No compromises on chart quality.
+| Phase | The bug | The fix |
+|-------|---------|---------|
+| 2 | Strategies lost on every restart (in-memory dict) | PostgreSQL via tenant-scoped repositories |
+| 5 | `OverflowError` on short-window CAGR; wrong Sortino math | Edge-case-hardened metrics, true RMS downside deviation |
+| 6 | Sync Redis `.publish()` blocked the ASGI loop; WS race overwrote live data | Async `aioredis`; merge-not-replace state |
+| 7 | **TOCTOU double-fills** under concurrent signals | `pg_advisory_xact_lock` (64-bit) with position reads *inside* the transaction |
+| 7 | **Sandbox RCE/DoS** via str-subclassing, `iter(int,1)`, `.format` maps | Locked-down guarded getattr, type checks, format denylist, `ReadOnlyDataFrame` |
+| 8 | Schema could orphan active SIPs (`ON DELETE SET NULL`) | `tenant_id` on mandates, strict `CHECK` constraints, normalized OAuth fields |
+| 9 | Backtester filled gapped stop-losses at the stop price | Adverse-gap fills, volume-participation cap, bid/ask + cost realism |
 
 ---
 
-### 5. NSEpy is banned — use yfinance for Indian data
-
-**Decision**: NSEpy is explicitly banned. Use `yfinance` with `.NS` / `.BO` suffixes for all Indian market data.
-
-**Why**: NSEpy depended on undocumented NSE website scraping endpoints that NSE changed their infrastructure and removed. NSEpy returns empty DataFrames or HTTP 403s on current NSE infrastructure. Every project that used NSEpy for Indian EOD data is now broken. yfinance's `RELIANCE.NS` (NSE) and `RELIANCE.BO` (BSE) format works reliably for daily/weekly data.
-
-**Result**: `import NSEpy` is a hard ban. Any agent or contributor attempting to use it gets rejected at code review.
-
----
-
-### 6. BYOB (Bring Your Own Broker) — no custody
-
-**Decision**: AlphaSwarm never holds or touches trader funds. All money stays in the trader's own regulated broker account.
-
-**Why**: Holding or transmitting customer funds requires money transmission licenses in every jurisdiction you operate in. The regulatory and compliance overhead would dwarf the engineering cost and make the startup unlaunachable without significant legal infrastructure. BYOB means: trader deposits in their Zerodha/Alpaca account, gives AlphaSwarm API keys, AlphaSwarm sends orders on their behalf. AlphaSwarm is software, not a broker.
-
-**Result**: Launch without any financial licensing. Revenue comes from SaaS subscriptions, not from managing funds.
-
----
-
-### 7. Hetzner + Cloudflare + Vercel — not AWS
-
-**Decision**: Hetzner CX32 for compute, Cloudflare for CDN/DDoS, Vercel for frontend.
-
-**Why**: An AWS EC2 `t3.large` + RDS + ElastiCache costs ~$250/month minimum. A Hetzner CX32 (4 vCPU, 8 GB RAM) costs €15/month and runs the full stack (API + workers + PostgreSQL + Redis). Cloudflare's free tier handles SSL termination, DDoS protection, and CDN. Vercel's free tier handles Next.js deployment natively. Total infra cost at launch: ~€15/month. This matters for a bootstrapped startup.
-
-**Result**: Production-grade infra at startup pricing. Upgrade path: add Hetzner boxes as load requires.
-
----
-
-## Issues Encountered & Resolved
-
-Real problems that came up during development and how they were fixed.
-
-| # | Issue | Root Cause | Resolution |
-|---|-------|-----------|------------|
-| 1 | **Strategy data lost on every restart** | `StrategyStore` was an in-memory Python dict | Phase 2: replaced with PostgreSQL via `StrategyRepo` + asyncpg pool |
-| 2 | **Alembic couldn't connect without psycopg2** | Alembic's default sync driver requires psycopg2; we only have asyncpg | Used SQLAlchemy 2.0 async engine via `async_engine_from_config` in `alembic/env.py` — no psycopg2 needed |
-| 3 | **JWT dev setup required key generation commands** | RS256 requires RSA key pair; new devs would hit auth errors immediately | Added HS256 fallback in `app/services/auth.py` — if `JWT_PRIVATE_KEY` not set, falls back to `JWT_SECRET_KEY` for HS256. Dev works out of the box. |
-| 4 | **Tenant isolation could be accidentally bypassed** | Route-layer tenant filtering is easy to forget | Enforced at repository layer in `BaseRepo` — `tenant_id` is set at construction, every query must use `self.tenant_id`. |
-| 5 | **JSONB columns returned as strings in asyncpg** | asyncpg doesn't register a JSONB decoder by default | Registered a custom codec in `_init_connection`: `set_type_codec('jsonb', encoder=json.dumps, decoder=json.loads)` |
-| 6 | **Strategy versioning FK cycle** | `strategies.current_version_id` FK to `strategy_versions`, which FKs back to `strategies` | Created strategy first, then version, then updated `current_version_id` in a single transaction. FK added as `ALTER TABLE` after both tables exist. |
-| 7 | **NSEpy returns empty data** | NSE changed their infrastructure | Hard-banned NSEpy across the codebase. `yfinance` with `.NS`/`.BO` suffix is the replacement. |
-
----
-
-## Build Status & Roadmap
+## 🗺️ Roadmap
 
 ```text
-Phase 0  [██████████] System Design v2.0 — complete, all gaps resolved
-Phase 1  [██████████] Backend Foundation — FastAPI, Celery, Docker, Nginx, Pydantic models
-Phase 2  [██████████] DB Layer + Auth — asyncpg pool, Alembic, repositories, JWT RS256/HS256
-Phase 3  [██████████] Market Data & Intelligence — Alpaca/yfinance feeds, pandas-ta, AI forecasting
-Phase 4  [██████████] Execution Engine — Live Alpaca broker, position tracking, strict risk engine
-Phase 5  [██████████] Strategy Builder & Backtesting — AutoGen NL -> Python, Sandbox
-Phase 6  [██████████] Frontend UI — TradingView terminal, WebSockets, Live P&L Dashboard
-Phase 7  [██████████] Production Hardening — Security audits, cryptography, connection pooling
+Phase 0   [██████████] System design v2.0
+Phase 1-2 [██████████] Backend, DB layer, multi-tenant JWT auth
+Phase 3-4 [██████████] Market data + execution engine + zero-bypass risk
+Phase 5   [██████████] AI strategy builder + sandbox + backtesting
+Phase 6   [██████████] Next.js terminal, WebSockets, live P&L
+Phase 7   [██████████] Production hardening — security & concurrency audit
+Phase 8   [██████████] Wealth-tech pivot — Goal Wizard, XIRR, multi-broker OAuth, SIPs
+Phase 9   [██████████] Institutional backtester — slippage, market impact, cost realism
+Phase 10  [█████████░] Go-to-market — Stripe + Razorpay billing, SendGrid, Sentry, CI/CD, live Upstox
 ```
 
-### AlphaSwarm is Production-Ready (Seed Stage)
+### 🔮 What's next (the feature plans)
 
-The system has successfully completed rigorous Phase 7 production hardening, ensuring institutional-grade security and stability:
-- **Zero-Bypass Risk Engine:** Transactional 64-bit advisory locks eliminate TOCTOU race conditions.
-- **Bulletproof Sandbox:** Hardened RestrictedPython environment safely executes user-generated code with protection against RCE and DoS.
-- **Enterprise Cryptography:** HKDF/Fernet envelope encryption for broker keys.
-- **Global Market Support:** Dynamic timezone execution for US (NYSE/NASDAQ) and Indian (NSE/BSE) markets.
-- **High-Performance Architecture:** Pooled Redis connections, asyncpg, and ASGI loops optimized for real-time WebSocket fan-outs.
-
----
-
-## Monetization Model
-
-**AlphaSwarm is launching with a Founding Member program** — first 500 users get full access free, forever (within the founding tier).
-
-| Tier | Bots | Markets | Price |
-|------|------|---------|-------|
-| **Founding Member** | 5 | Paper + Live | **Free** (500 spots) |
-| Trader *(coming soon)* | 5 | Paper + Live | INR 999/mo · $15/mo |
-| Pro *(coming soon)* | 20 | All global | INR 2999/mo · $49/mo |
-| Quant *(coming soon)* | Unlimited | All + API | INR 7999/mo · $99/mo |
-
-Payments: **Stripe** (international) · **Razorpay** (India / UPI)
+- **Tax-Loss Harvesting Engine** — FIFO lot accounting + automated harvesting around India's ₹1.25L LTCG exemption.
+- **Account Aggregator (RBI AA) integration** — pull external MF/stock holdings for holistic AI advice.
+- **Social / copy trading** — publish equity curves & configs to a public marketplace.
+- **Corporate-actions pipeline** — auto-adjust for splits, bonuses, dividends, mergers.
+- **e-NACH / UPI AutoPay mandates** — fully automated SIP funding (Razorpay/Digio).
+- **Centralized feed handler (TimescaleDB)** — multiplex one data stream to thousands of users.
+- **SEBI peak-margin & circuit-limit awareness** — cleared-vs-uncleared cash, pre-open session orders.
 
 ---
 
-## Market Coverage
+## 💳 Monetization
 
-| Market | Source | Notes |
-|--------|--------|-------|
-| US (NASDAQ, NYSE) | Alpaca Data API | Free with paper account |
-| Indian EOD (NSE, BSE) | yfinance (`RELIANCE.NS`, `RELIANCE.BO`) | Reliable daily/weekly data |
-| Indian Intraday (NSE) | Zerodha Kite Connect / Upstox | User provides own broker credentials |
-| Crypto | Alpaca Crypto | Same format as equities |
-| Global | yfinance | All other tickers |
+**Founding Member program at launch** — early users get full access while we grow.
 
-> ⚠️ NSEpy is **permanently banned** in this codebase. It fails on current NSE infrastructure.
+| Tier | What it unlocks | Price |
+|------|------------------|-------|
+| **Free / BYOK** | AI builder, paper trading, full backtester, terminal, goal wizard | **₹0** |
+| **Quant Tier** | Live agent deployment + live broker execution | Stripe (USD) · Razorpay (INR/UPI) |
 
----
-
-## Supported Brokers at Launch
-
-| Broker | Status | Connection Method |
-|--------|--------|-------------------|
-| **Alpaca** | ✅ Launch | 3-step guided wizard |
-| **Upstox** | ✅ Launch | OAuth one-click |
-| Zerodha | 🔜 Post-launch | OAuth (after developer fee ROI) |
-| Fyers | 🔜 Post-launch | OAuth |
+> Live deployment is gated behind an active Quant Tier subscription. Everything else — including the AI builder and the institutional backtester — is free, because you bring your own AI key and your own broker.
 
 ---
 
-## Project Structure
+## 📁 Project Structure
 
 ```
 AlphaSwarm/
 ├── app/
-│   ├── api/
-│   │   ├── auth.py          # POST /v1/auth/{register,login,refresh,logout}
-│   │   ├── deps.py          # JWT dependency injection → CurrentUser
-│   │   └── routes.py        # Strategy CRUD + run dispatch
-│   ├── core/
-│   │   ├── config.py        # pydantic-settings — all env vars
-│   │   └── celery_app.py    # Celery + Beat config
-│   ├── db/
-│   │   ├── connection.py    # asyncpg pool + JSONB codec
-│   │   ├── base_repo.py     # Tenant-scoped base repository
-│   │   └── repositories/
-│   │       ├── users.py     # TenantRepo, AuthUserRepo, RefreshTokenRepo, UserRepo
-│   │       ├── strategies.py # StrategyRepo (CRUD + versioning)
-│   │       └── runs.py      # RunRepo (lifecycle management)
-│   ├── domain/
-│   │   ├── base_strategy.py # BaseStrategy interface (all strategies subclass this)
-│   │   ├── market_data.py   # Canonical Bar model + Exchange enum
-│   │   ├── market_hours.py  # Exchange schedules + is_market_open()
-│   │   ├── models.py        # All Pydantic request/response models
-│   │   └── risk.py          # verify_order_intent() — never bypassed
-│   ├── services/
-│   │   ├── auth.py          # JWT sign/verify + bcrypt + refresh tokens
-│   │   └── strategy_compiler.py  # Stub → replaced by AutoGen in Phase 5
-│   ├── worker/
-│   │   ├── tasks.py         # Celery tasks (stub → real in Phase 4)
-│   │   └── beat_tasks.py    # Scheduled tasks (stubs)
-│   └── main.py              # FastAPI app, lifespan, middleware, health checks
-├── alembic/
-│   ├── env.py               # Async migration environment (asyncpg via SQLAlchemy)
-│   └── versions/
-│       └── 0001_initial_schema.py  # All 16 tables
-├── frontend/                # Next.js 14 App Router (Phase 6)
-├── nginx/nginx.conf         # Least-conn LB, rate limiting, WS upgrade
-├── docker-compose.yml       # Local: postgres + redis + adminer
-├── docker-compose.prod.yml  # Prod: nginx + 3x API + 2x worker + beat
-├── Dockerfile               # Multi-stage, non-root, uvloop
-├── schema.sql               # Reference schema (source of truth for migrations)
-├── ARCHITECTURE.md          # Complete system design — read before coding
-└── requirements.txt         # All 30+ dependencies
+│   ├── api/           # auth, routes, brokers (+OAuth), market, portfolio,
+│   │                  # notifications, billing, backtest, llm_configs, ws
+│   ├── core/          # config (pydantic-settings), celery_app
+│   ├── db/            # asyncpg pool + JSONB codec, tenant-scoped repositories
+│   ├── domain/        # base_strategy, risk (verify_order_intent), market_hours,
+│   │                  # broker_routing, models
+│   ├── services/      # strategy_builder (Agent Framework), backtest, execution,
+│   │                  # oauth_manager, billing, email, broker_crypto, sandbox,
+│   │                  # forecaster, news_intel, indicators, market_data
+│   └── main.py        # FastAPI app, lifespan, Sentry, health checks
+├── alembic/versions/  # 0001 → 0005 (initial, OAuth/SIP, billing, razorpay, dual-gateway)
+├── frontend/src/app/  # Next.js 14 — dashboard, terminal, strategies, settings, login
+├── tests/             # 13 suites: risk, sandbox security, backtest metrics, billing,
+│                      # broker crypto, BYOK founder gate, no-fund-custody, execution…
+├── .github/workflows/ # CI: lint (ruff) + type-check + tests
+├── docker-compose.yml · docker-compose.prod.yml · Dockerfile · nginx/
+├── ARCHITECTURE.md · PROJECT_JOURNEY.md · schema.sql
 ```
 
 ---
 
-## Contributing
+## 🤝 Contributing
 
-AlphaSwarm is being built as a startup MVP. Architecture decisions are documented in [`ARCHITECTURE.md`](ARCHITECTURE.md) — **read it in full before writing any code**.
+Read [`ARCHITECTURE.md`](ARCHITECTURE.md) before writing code. Hard rules:
 
-**Hard rules for contributors:**
-- No LangChain — AutoGen only
-- No NSEpy — yfinance only
-- No TA-Lib — pandas-ta only
-- `verify_order_intent()` must be called before every broker API call, always
-- Every DB query must include `tenant_id` filter — enforced in `BaseRepo`, never bypass it
-- Every chart must answer a specific question. No decorative charts.
+- **No LangChain** — Microsoft Agent Framework only.
+- **No NSEpy** — yfinance / Upstox / Zerodha only.
+- **No TA-Lib** — pandas-ta only.
+- **`verify_order_intent()` before every broker call** — always, including backtests.
+- **Every query filters `tenant_id`** — enforced in `BaseRepo`, never bypass it.
 
 ```bash
-# Run tests (coming in Phase 3)
-pytest
-
-# Lint
-ruff check .
-
-# Type check
-mypy app/
+pytest            # tests
+ruff check .      # lint
 ```
 
 ---
 
-## Deployment
+## 📜 License
 
-### Local Development
-```bash
-docker compose up -d          # infrastructure
-alembic upgrade head           # run migrations
-uvicorn app.main:app --reload  # API
-```
-
-### Production (Hetzner)
-```bash
-git pull origin main
-docker compose -f docker-compose.prod.yml build
-docker compose -f docker-compose.prod.yml up -d --scale api=3 --scale worker=2
-docker compose -f docker-compose.prod.yml exec api alembic upgrade head
-```
-
-**Infrastructure stack**: Hetzner CX32 → Nginx (LB + rate limiting + WS) → 3x FastAPI containers → 2x Celery workers + 1x Beat → PostgreSQL 16 + Redis 7
-
----
-
-## License
-
-MIT © 2026 AlphaSwarm — Built by [Ankit Anand Singh](https://github.com/Algo-Ankit)
+MIT © 2026 AlphaSwarm — built by [Ankit Anand Singh](https://github.com/Algo-Ankit)
 
 ---
 
 <div align="center">
 
-**AlphaSwarm is being built in public.**  
-Star the repo to follow the journey from infrastructure to a full trading terminal.
+**AlphaSwarm is being built in public.**
+Star the repo to follow the journey from raw infrastructure to a full AI trading terminal.
 
 [![GitHub Stars](https://img.shields.io/github/stars/Algo-Ankit/AlphaSwarm?style=social)](https://github.com/Algo-Ankit/AlphaSwarm)
 
-*Phase 7 complete. AlphaSwarm is officially production-hardened and ready for live trading.*
+*Phase 10 in progress. The platform is live as an MVP — bring your key, bring your broker, and trade.*
 
 </div>
