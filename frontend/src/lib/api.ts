@@ -402,4 +402,12 @@ export const api = {
 
   getSubscription: () =>
     req<Subscription>('/v1/billing/subscription', { headers: authHeaders() }),
+
+  // ── AI Investment Advisor (BYOK) ──────────────────────────────
+  analyzeAdvisor: (query: string) =>
+    req<{ response: string }>('/v1/ai-advisor/analyze', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ query }),
+    }),
 }

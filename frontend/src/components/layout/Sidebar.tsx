@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import {
-  LayoutDashboard, Zap, Activity, Settings, TrendingUp, ChevronRight, Brain, CandlestickChart, CreditCard,
+  LayoutDashboard, Zap, Activity, Settings, TrendingUp, ChevronRight, Brain, CandlestickChart, CreditCard, Sparkles,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getUserProfile } from '@/lib/api'
@@ -25,6 +25,7 @@ const NAV_SECTIONS = [
       { href: '/',               icon: LayoutDashboard,   label: 'Dashboard'  },
       { href: '/terminal',       icon: CandlestickChart,  label: 'Terminal'   },
       { href: '/strategies/new', icon: Zap,               label: 'Strategies' },
+      { href: '/advisor',        icon: Sparkles,          label: 'AI Advisor' },
       { href: '/runs',           icon: Activity,          label: 'Runs', soon: true },
     ],
   },

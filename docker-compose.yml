@@ -2,6 +2,7 @@ services:
 
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: alphaswarm
       POSTGRES_USER: alphaswarm
@@ -10,7 +11,6 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # schema.sql is the reference document — Alembic owns schema creation via: alembic upgrade head
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U alphaswarm -d alphaswarm"]
       interval: 5s
@@ -19,6 +19,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     ports:
       - "6379:6379"
     healthcheck:
@@ -29,6 +30,7 @@ services:
 
   adminer:
     image: adminer:latest
+    restart: unless-stopped
     ports:
       - "8080:8080"
     environment:
@@ -36,6 +38,77 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://alphaswarm:alphaswarm@postgres:5432/alphaswarm
+      DATABASE_SYNC_URL: postgresql://alphaswarm:alphaswarm@postgres:5432/alphaswarm
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    entrypoint: ["/bin/sh", "/app/entrypoint.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    expose:
+      - "8000"
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://alphaswarm:alphaswarm@postgres:5432/alphaswarm
+      DATABASE_SYNC_URL: postgresql://alphaswarm:alphaswarm@postgres:5432/alphaswarm
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    command:
+      - celery
+      - -A
+      - app.core.celery_app
+      - worker
+      - --loglevel=info
+      - --concurrency=2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/proxy_params:/etc/nginx/proxy_params:ro
+    depends_on:
+      - api
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost
+      NEXT_PUBLIC_DEMO_TENANT_ID: demo-tenant-001
+      NEXT_PUBLIC_DEMO_USER_ID: demo-user-001
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
 
 volumes:
   postgres_data:

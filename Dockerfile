@@ -32,6 +32,7 @@ USER alphaswarm
 
 # Copy application code
 COPY --chown=alphaswarm:alphaswarm . .
+RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 8000
 

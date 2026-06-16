@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+from app.api.ai_advisor import router as ai_advisor_router
 from app.api.auth import router as auth_router
 from app.api.backtest import router as backtest_router
 from app.api.billing import router as billing_router
@@ -131,6 +132,7 @@ app.include_router(backtest_router)
 app.include_router(portfolio_router)
 app.include_router(notifications_router)
 app.include_router(billing_router)
+app.include_router(ai_advisor_router)
 
 
 # ── Health checks ─────────────────────────────────────────────

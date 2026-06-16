@@ -10,8 +10,62 @@ import { Button } from '@/components/ui/Button'
 import { GlassCard } from '@/components/ui/GlassCard'
 import { api, getAccessToken, getUserProfile } from '@/lib/api'
 import type { Strategy } from '@/lib/types'
-import { Plus, Activity } from 'lucide-react'
+import { Plus, Activity, Zap, Sparkles, ArrowRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
+
+type ActionCardProps = {
+  title: string
+  description: string
+  icon: typeof Zap
+  onClick: () => void
+  accent: 'violet' | 'emerald'
+}
+
+function ActionCard({ title, description, icon: Icon, onClick, accent }: ActionCardProps) {
+  const accents = {
+    violet: {
+      glow: 'hover:shadow-[0_12px_40px_rgba(109,40,217,0.28)] hover:border-violet-300 dark:hover:border-violet-500/40',
+      iconBg: 'bg-gradient-to-br from-violet-500 to-violet-700 shadow-[0_4px_18px_rgba(124,58,237,0.45)]',
+      arrow: 'text-violet-500 group-hover:text-violet-600 dark:text-violet-400',
+    },
+    emerald: {
+      glow: 'hover:shadow-[0_12px_40px_rgba(16,185,129,0.24)] hover:border-emerald-300 dark:hover:border-emerald-500/40',
+      iconBg: 'bg-gradient-to-br from-emerald-500 to-emerald-700 shadow-[0_4px_18px_rgba(16,185,129,0.45)]',
+      arrow: 'text-emerald-500 group-hover:text-emerald-600 dark:text-emerald-400',
+    },
+  }[accent]
+
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'glass-card group relative overflow-hidden text-left p-6 rounded-2xl',
+        'transition-all duration-200 hover:-translate-y-0.5 active:scale-[0.99]',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40',
+        accents.glow,
+      )}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className={cn(
+          'flex items-center justify-center w-12 h-12 rounded-xl flex-shrink-0',
+          accents.iconBg,
+        )}>
+          <Icon className="w-6 h-6 text-white" />
+        </div>
+        <ArrowRight className={cn(
+          'w-5 h-5 mt-1 transition-transform duration-200 group-hover:translate-x-1',
+          accents.arrow,
+        )} />
+      </div>
+      <h3 className="text-lg font-bold text-zinc-900 dark:text-zinc-50 mt-4 tracking-tight">
+        {title}
+      </h3>
+      <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1 font-medium leading-snug">
+        {description}
+      </p>
+    </button>
+  )
+}
 
 function Skeleton() {
   return (
@@ -58,6 +112,24 @@ export default function DashboardPage() {
   return (
     <AppShell>
       <div className="space-y-8" style={{ animation: 'fadeIn 0.2s ease-out' }}>
+
+        {/* Premium action cards — primary entry points */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+          <ActionCard
+            title="Build a Strategy"
+            description="Describe a trading idea in plain English and let the AI compile a backtestable bot."
+            icon={Zap}
+            accent="violet"
+            onClick={() => router.push('/strategies/new')}
+          />
+          <ActionCard
+            title="Consult AI Advisor"
+            description="Get stock & ETF analysis, SIP/SWP planning, and a clear verdict — powered by your own AI key."
+            icon={Sparkles}
+            accent="emerald"
+            onClick={() => router.push('/advisor')}
+          />
+        </div>
 
         {/* Header */}
         <div className="flex items-end justify-between gap-4">
