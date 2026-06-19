@@ -7,9 +7,15 @@ import type {
   Bar,
   BillingCurrency,
   CheckoutResponse,
+  LeaderboardEntry,
+  PublishRequest,
+  SubscribeResponse,
+  SubscriptionEntry,
   BrokerConnectRequest,
   BrokerConnection,
+  CasHoldingInput,
   Forecast,
+  ForecastRequest,
   IndicatorSnapshot,
   LLMConfig,
   LLMConfigCreate,
@@ -24,7 +30,9 @@ import type {
   TestConnectionResponse,
   TickerSearchResult,
   TokenResponse,
+  UnifiedPortfolio,
   UserProfile,
+  WealthForecast,
 } from './types'
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
@@ -409,5 +417,52 @@ export const api = {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({ query }),
+    }),
+
+  // ── Social copy trading ───────────────────────────────────────
+  getLeaderboard: (limit = 50) =>
+    req<LeaderboardEntry[]>(`/v1/social/leaderboard?limit=${limit}`, {
+      headers: authHeaders(),
+    }),
+
+  publishStrategy: (data: PublishRequest) =>
+    req<{ public_strategy_id: string; strategy_id: string; title: string; subscriber_count: number }>(
+      '/v1/social/publish',
+      { method: 'POST', headers: authHeaders(), body: JSON.stringify(data) },
+    ),
+
+  subscribeStrategy: (publicStrategyId: string, allocatedCapital: number) =>
+    req<SubscribeResponse>(`/v1/social/subscribe/${publicStrategyId}`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ allocated_capital: allocatedCapital }),
+    }),
+
+  unsubscribeStrategy: (publicStrategyId: string) =>
+    fetch(`${BASE}/v1/social/subscribe/${publicStrategyId}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    }).then((r) => { if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`) }),
+
+  listSubscriptions: () =>
+    req<SubscriptionEntry[]>('/v1/social/subscriptions', { headers: authHeaders() }),
+
+  // ── Unified Portfolio (multi-broker CAS) ──────────────────────
+  getUnifiedPortfolio: () =>
+    req<UnifiedPortfolio>('/v1/portfolio/unified', { headers: authHeaders() }),
+
+  uploadCas: (data: { statement_date?: string | null; holdings: CasHoldingInput[] }) =>
+    req<UnifiedPortfolio>('/v1/portfolio/upload-cas', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    }),
+
+  // ── Monte Carlo wealth forecast ───────────────────────────────
+  forecastWealth: (data: ForecastRequest) =>
+    req<WealthForecast>('/v1/portfolio/forecast', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(data),
     }),
 }

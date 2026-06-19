@@ -354,6 +354,279 @@ class UpstoxExecutor:
             raise RuntimeError(f"Upstox cancel_order failed for {order_id}: {exc}") from exc
 
 
+# ── Social copy-trading: signal fan-out ───────────────────────────────────────
+# When a published strategy generates a signal, the same signal is replicated to
+# every subscriber copying it, sized proportionally to the capital each subscriber
+# allocated. Each copied order runs through the SAME risk gate (verify_order_intent)
+# as a first-party order and executes in the subscriber's OWN broker account — the
+# platform never holds funds or co-mingles positions.
+
+# Mirrors risk.GAP_SAFETY_MARGIN so copy sizing leaves headroom for the cap price
+# the risk gate uses (estimated_price inflated by this margin). Without it a copy
+# sized exactly to allocated_capital would be rejected by the order-notional check.
+_COPY_SAFETY_MARGIN = Decimal("0.03")
+
+
+def copy_order_quantity(
+    *,
+    signal_quantity: Decimal,
+    creator_capital_base: Decimal,
+    allocated_capital: Decimal,
+    price: Decimal,
+    whole_shares: bool,
+    safety_margin: Decimal = _COPY_SAFETY_MARGIN,
+) -> Decimal:
+    """
+    Proportionally size a copied order for a subscriber.
+
+    The subscriber's order quantity scales with how much capital they allocated
+    relative to the creator's per-position capital base:
+
+        qty = signal_quantity * (allocated_capital / creator_capital_base)
+
+    The result is then clamped so a single copied order never deploys more than the
+    subscriber's allocated capital (using a gap-inflated cap price to stay inside the
+    risk gate's order-notional check), and floored to whole shares for exchanges that
+    forbid fractional equity (NSE/BSE). Returns Decimal("0") when no valid order can
+    be sized (which the caller skips).
+    """
+    if (
+        creator_capital_base <= 0
+        or allocated_capital <= 0
+        or price <= 0
+        or signal_quantity <= 0
+    ):
+        return Decimal("0")
+
+    scale = allocated_capital / creator_capital_base
+    qty = signal_quantity * scale
+
+    cap_price = price * (Decimal("1") + safety_margin)
+    max_qty_by_capital = allocated_capital / cap_price
+    if qty > max_qty_by_capital:
+        qty = max_qty_by_capital
+
+    if whole_shares:
+        qty = Decimal(int(qty))  # floor to a whole share
+
+    return qty if qty > 0 else Decimal("0")
+
+
+async def fan_out_to_subscribers(
+    pool,
+    *,
+    creator_tenant_id: str,
+    strategy_id: str,
+    exchange: str,
+    signal,
+    creator_risk,
+    dry_run: bool,
+    log=None,
+) -> list[dict]:
+    """
+    Replicate a creator's signal to every active subscriber of the strategy.
+
+    Thread/concurrency safety: each subscriber's order is placed inside its OWN
+    transaction guarded by a per-(subscriber, strategy) Postgres advisory lock, so
+    two concurrent creator runs can never double-place a copied trade (the same
+    TOCTOU defence the creator path uses). Subscribers are processed independently —
+    one subscriber's failure (bad broker creds, risk rejection) never affects another.
+
+    Each copy:
+      * is sized by copy_order_quantity() from the subscriber's allocated_capital,
+      * passes through verify_order_intent() with a risk profile capped to that
+        allocation,
+      * executes in the subscriber's own broker account (live) or as a dry-run
+        (paper, or when the subscriber has no live broker for this exchange).
+    """
+    from uuid import UUID
+
+    from app.db.repositories.brokers import BrokerRepo
+    from app.domain.broker_routing import allows_fractional_shares, broker_for_exchange
+    from app.domain.market_data import MarketState
+    from app.domain.market_hours import exchange_timezone, get_session_status
+    from app.domain.models import OrderIntent, OrderResult, StrategyRiskConfig
+    from app.domain.risk import verify_order_intent
+    from app.services.broker_crypto import decrypt_key
+    from app.services.notifications import create_notification
+    from app.worker.tasks import _write_order_async
+
+    subs = await pool.fetch(
+        """
+        SELECT ss.subscriber_tenant_id, ss.subscriber_user_id, ss.allocated_capital
+        FROM strategy_subscriptions ss
+        JOIN public_strategies ps ON ps.id = ss.public_strategy_id
+        WHERE ps.strategy_id = $1
+          AND ss.is_active = TRUE
+          AND ss.subscriber_tenant_id <> $2
+        """,
+        UUID(strategy_id), UUID(creator_tenant_id),
+    )
+    if not subs:
+        return []
+
+    required_broker = broker_for_exchange(exchange)
+    whole_shares = not allows_fractional_shares(exchange)
+    exchange_tz = exchange_timezone(exchange)
+    session = get_session_status(exchange)
+    creator_base = Decimal(str(creator_risk.max_position_notional))
+    price = Decimal(str(signal.estimated_price))
+    symbol = signal.symbol.upper()
+
+    results: list[dict] = []
+
+    for sub in subs:
+        sub_tenant = str(sub["subscriber_tenant_id"])
+        sub_user = str(sub["subscriber_user_id"]) if sub["subscriber_user_id"] else None
+        allocated = Decimal(str(sub["allocated_capital"]))
+
+        try:
+            qty = copy_order_quantity(
+                signal_quantity=Decimal(str(signal.quantity)),
+                creator_capital_base=creator_base,
+                allocated_capital=allocated,
+                price=price,
+                whole_shares=whole_shares,
+            )
+            if qty <= 0:
+                results.append({"tenant_id": sub_tenant, "action": "skipped",
+                                "reason": "allocation too small to size a whole-share order"})
+                continue
+
+            # Resolve the subscriber's broker creds for this exchange. Missing creds
+            # (or a paper connection) demote the copy to a dry-run rather than failing
+            # — a subscriber without the live broker still gets a paper copy.
+            broker_rows = await BrokerRepo(pool, UUID(sub_tenant)).get_all()
+            broker_row = next((b for b in broker_rows if b["broker"] == required_broker), None)
+            subscriber_paper = dry_run or broker_row is None or bool(broker_row.get("is_paper"))
+
+            copy_risk = creator_risk.model_copy(update={
+                "max_order_notional": allocated,
+                "max_position_notional": allocated,
+                "max_daily_notional": allocated,
+                "allowed_symbols": sorted({*(s.upper() for s in creator_risk.allowed_symbols), symbol}),
+                "paper_trading_only": subscriber_paper,
+            })
+
+            copy_signal = OrderIntent(
+                strategy_id=strategy_id,
+                symbol=symbol,
+                exchange=exchange,
+                side=signal.side,
+                quantity=qty,
+                order_type=signal.order_type,
+                estimated_price=price,
+                is_paper=subscriber_paper,
+            )
+
+            executor = None
+            if not subscriber_paper and broker_row is not None:
+                access_token = decrypt_key(broker_row["access_token"]) if broker_row.get("access_token") else None
+                executor = get_executor(
+                    required_broker,
+                    api_key=decrypt_key(broker_row["key_encrypted"]) if broker_row.get("key_encrypted") else "",
+                    secret_key=decrypt_key(broker_row["secret_encrypted"]) if broker_row.get("secret_encrypted") else "",
+                    paper=bool(broker_row.get("is_paper")),
+                    access_token=access_token,
+                )
+
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    # Per-(subscriber, strategy) advisory lock — serialize concurrent
+                    # copies so two creator runs can't both pass the caps and double-place.
+                    await conn.execute(
+                        "SELECT pg_advisory_xact_lock(('x' || substr(md5($1::text), 1, 16))::bit(64)::bigint)",
+                        f"{sub_tenant}:{strategy_id}",
+                    )
+
+                    pos_row = await conn.fetchrow(
+                        "SELECT quantity FROM positions WHERE tenant_id = $1 AND strategy_id = $2 AND symbol = $3",
+                        UUID(sub_tenant), UUID(strategy_id), symbol,
+                    )
+                    cur_qty = Decimal(str(pos_row["quantity"])) if pos_row else Decimal("0")
+                    cur_pos = float(cur_qty) if cur_qty != 0 else None
+                    cur_val = float(abs(cur_qty)) * float(price)
+
+                    open_count = await conn.fetchval(
+                        "SELECT COUNT(*) FROM positions WHERE tenant_id = $1 AND strategy_id = $2 AND quantity <> 0",
+                        UUID(sub_tenant), UUID(strategy_id),
+                    ) or 0
+
+                    today_row = await conn.fetchrow(
+                        """
+                        SELECT COALESCE(SUM(estimated_notional), 0) AS total
+                        FROM orders
+                        WHERE tenant_id = $1 AND strategy_id = $2
+                          AND broker_status IN ('filled','open','pending','accepted','partially_filled','dry_run')
+                          AND created_at >= (date_trunc('day', now() AT TIME ZONE $3) AT TIME ZONE $3)
+                        """,
+                        UUID(sub_tenant), UUID(strategy_id), exchange_tz,
+                    )
+                    today_notional = Decimal(str(today_row["total"])) if today_row else Decimal("0")
+
+                    market_state = MarketState(
+                        exchange=exchange,
+                        is_open=True if subscriber_paper else session == "open",
+                        session_status="paper" if subscriber_paper else session,
+                        today_executed_notional=today_notional,
+                    )
+
+                    risk_result = verify_order_intent(
+                        copy_signal, copy_risk, market_state,
+                        current_position=cur_pos,
+                        current_position_value=cur_val,
+                        open_positions_count=int(open_count),
+                    )
+                    if not risk_result.approved:
+                        results.append({"tenant_id": sub_tenant, "action": "rejected",
+                                        "reason": risk_result.reason})
+                        continue
+
+                    if subscriber_paper:
+                        order_result = OrderResult(
+                            order_id=None, symbol=symbol, side=copy_signal.side,
+                            quantity=qty, fill_price=None, estimated_price=price,
+                            broker_status="dry_run", is_paper=True,
+                        )
+                    else:
+                        order_result = executor.place_order(copy_signal, None)
+
+                    await _write_order_async(
+                        conn, sub_tenant, strategy_id, None,
+                        copy_signal, order_result, "approved", risk_result.reason,
+                    )
+
+                    try:
+                        await create_notification(
+                            conn,
+                            tenant_id=sub_tenant,
+                            user_id=sub_user,
+                            type="trade_executed",
+                            title=f"Copied {copy_signal.side.value.upper()} {symbol} × {qty}",
+                            body=(
+                                f"Copy-trade {order_result.broker_status} @ ~{price} "
+                                f"(allocation {allocated})"
+                            ),
+                            entity_type="strategy",
+                            entity_id=strategy_id,
+                        )
+                    except Exception as _nexc:
+                        logger.warning("copy-trade notification failed for %s: %s", sub_tenant, _nexc)
+
+                    results.append({
+                        "tenant_id": sub_tenant,
+                        "action": copy_signal.side.value,
+                        "quantity": str(qty),
+                        "broker_status": order_result.broker_status,
+                    })
+
+        except Exception as exc:
+            logger.warning("copy-trade fan-out to subscriber %s failed: %s", sub_tenant, exc)
+            results.append({"tenant_id": sub_tenant, "action": "error", "reason": str(exc)})
+
+    return results
+
+
 def get_executor(
     broker: str,
     *,

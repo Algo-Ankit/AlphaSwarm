@@ -226,6 +226,69 @@ CREATE TABLE portfolio_snapshots (
 CREATE INDEX idx_portfolio_snapshots_tenant_time
     ON portfolio_snapshots(tenant_id, snapshot_time DESC);
 
+-- Consolidated multi-broker holdings parsed from an NSDL/CDSL Consolidated
+-- Account Statement. Read-only display aggregate — the platform holds no funds.
+CREATE TABLE unified_holdings (
+    id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id     UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    isin          TEXT,
+    symbol        TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    asset_class   TEXT NOT NULL DEFAULT 'equity', -- equity | mutual_fund | etf | bond | other
+    broker        TEXT NOT NULL,                  -- depository participant / broker
+    quantity      NUMERIC(20, 8) NOT NULL,
+    avg_cost      NUMERIC(20, 8) NOT NULL DEFAULT 0,
+    current_price NUMERIC(20, 8),
+    current_value NUMERIC(20, 8) NOT NULL DEFAULT 0,
+    statement_date DATE,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_unified_holdings_tenant ON unified_holdings(tenant_id);
+
+-- ============================================================
+-- SOCIAL — "SWARM" LEADERBOARD & COPY TRADING
+-- ============================================================
+
+-- A creator publishes a private strategy to the public leaderboard. The platform
+-- holds no funds: management_fee_bps is informational and copied trades execute in
+-- each subscriber's OWN externally-custodied broker account. UNIQUE(strategy_id)
+-- lists a strategy at most once.
+CREATE TABLE public_strategies (
+    id                 UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    strategy_id        UUID NOT NULL REFERENCES strategies(id) ON DELETE CASCADE,
+    creator_tenant_id  UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    creator_user_id    UUID REFERENCES users(id) ON DELETE SET NULL,
+    title              TEXT NOT NULL,
+    description        TEXT NOT NULL DEFAULT '',
+    management_fee_bps INT  NOT NULL DEFAULT 0 CHECK (management_fee_bps BETWEEN 0 AND 10000),
+    subscriber_count   INT  NOT NULL DEFAULT 0 CHECK (subscriber_count >= 0),
+    is_verified        BOOLEAN NOT NULL DEFAULT false,
+    is_listed          BOOLEAN NOT NULL DEFAULT true,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (strategy_id)
+);
+CREATE INDEX idx_public_strategies_creator ON public_strategies(creator_tenant_id);
+CREATE INDEX idx_public_strategies_listed  ON public_strategies(is_listed) WHERE is_listed;
+
+-- A subscriber (tenant) copies a published strategy, dedicating allocated_capital
+-- to it. The execution engine fans every generated signal out to all active
+-- subscriptions, sizing each copied order proportionally to allocated_capital.
+CREATE TABLE strategy_subscriptions (
+    id                   UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    public_strategy_id   UUID NOT NULL REFERENCES public_strategies(id) ON DELETE CASCADE,
+    subscriber_tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    subscriber_user_id   UUID REFERENCES users(id) ON DELETE SET NULL,
+    allocated_capital    NUMERIC(18, 2) NOT NULL CHECK (allocated_capital > 0),
+    is_active            BOOLEAN NOT NULL DEFAULT true,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (public_strategy_id, subscriber_tenant_id)
+);
+CREATE INDEX idx_strategy_subscriptions_public     ON strategy_subscriptions(public_strategy_id);
+CREATE INDEX idx_strategy_subscriptions_subscriber ON strategy_subscriptions(subscriber_tenant_id);
+
 -- ============================================================
 -- BACKTESTING
 -- ============================================================

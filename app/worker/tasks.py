@@ -75,12 +75,15 @@ async def _write_order_async(
     conn,
     tenant_id: str,
     strategy_id: str,
-    run_id: str,
+    run_id: str | None,
     intent: OrderIntent,
     result: OrderResult,
     risk_status: str,
     risk_reason: str,
 ) -> None:
+    # run_id is NULL for copy-trade fan-out orders (a subscriber's copied trade has
+    # no strategy_run of its own — it is driven by the creator's run). orders.run_id
+    # is a nullable FK, so this is a valid audit row either way.
     side_sign = Decimal("1") if intent.side == OrderSide.buy else Decimal("-1")
     delta = intent.quantity * side_sign
     fill = result.fill_price or intent.estimated_price
@@ -98,7 +101,7 @@ async def _write_order_async(
                     CASE WHEN $15 = 'filled' THEN now() ELSE NULL END)
             """,
             UUID(tenant_id), UUID(strategy_id),
-            UUID(run_id),
+            UUID(run_id) if run_id else None,
             result.order_id,
             intent.symbol, intent.exchange,
             intent.side.value, intent.order_type.value,
@@ -547,6 +550,34 @@ async def _execute_async(
                             "broker_status": order_result.broker_status,
                             "order_id": order_result.order_id,
                         })
+
+                # ── Social copy-trade fan-out ─────────────────────────────────
+                # Replicate this signal to every subscriber copying the strategy.
+                # Runs OUTSIDE the creator's advisory-locked transaction (above) so
+                # subscriber broker round-trips never extend the creator's lock —
+                # each copied order is independently locked + risk-checked inside
+                # fan_out_to_subscribers. Best-effort: a copy failure never fails
+                # the creator's run.
+                if order_result.broker_status in (
+                    "filled", "partially_filled", "pending", "accepted", "dry_run"
+                ):
+                    try:
+                        from app.services.execution import fan_out_to_subscribers
+                        copy_results = await fan_out_to_subscribers(
+                            pool,
+                            creator_tenant_id=tenant_id,
+                            strategy_id=strategy_id,
+                            exchange=exchange,
+                            signal=signal,
+                            creator_risk=risk_profile,
+                            dry_run=dry_run,
+                            log=log,
+                        )
+                        if copy_results and log:
+                            _placed = sum(1 for c in copy_results if c.get("action") in ("buy", "sell"))
+                            log.info(f"{symbol}: copy-trade fan-out → {_placed}/{len(copy_results)} subscriber order(s) placed")
+                    except Exception as _fexc:
+                        logger.warning("copy-trade fan-out failed for %s: %s", symbol, _fexc)
 
             except Exception as exc:
                 logger.exception("Symbol %s failed: %s", symbol, exc)

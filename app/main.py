@@ -20,6 +20,7 @@ from app.api.market import router as market_router
 from app.api.notifications import router as notifications_router
 from app.api.portfolio import router as portfolio_router
 from app.api.routes import router as strategy_router
+from app.api.social import router as social_router
 from app.api.ws import router as ws_router
 from app.core.config import get_settings
 from app.core.rate_limit import limiter
@@ -133,6 +134,7 @@ app.include_router(portfolio_router)
 app.include_router(notifications_router)
 app.include_router(billing_router)
 app.include_router(ai_advisor_router)
+app.include_router(social_router)
 
 
 # ── Health checks ─────────────────────────────────────────────

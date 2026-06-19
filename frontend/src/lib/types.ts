@@ -207,6 +207,78 @@ export interface BacktestSummary {
   sharpe_ratio: number
   max_drawdown_pct: number
   total_trades: number
+  cagr_pct?: number
+  sortino_ratio?: number
+  calmar_ratio?: number
+  profit_factor?: number
+}
+
+// ── Unified portfolio (multi-broker CAS ingestion) ─────────────────────────────
+
+export interface UnifiedHolding {
+  isin: string | null
+  symbol: string
+  name: string
+  asset_class: string
+  broker: string
+  quantity: number
+  avg_cost: number
+  current_price: number | null
+  current_value: number
+}
+
+export interface UnifiedPortfolio {
+  statement_date: string | null
+  holdings_count: number
+  total_value: number
+  total_cost: number
+  unrealized_pnl: number
+  unrealized_pnl_pct: number
+  by_broker: Record<string, number>
+  by_asset_class: Record<string, number>
+  holdings: UnifiedHolding[]
+}
+
+export interface CasHoldingInput {
+  symbol: string
+  name?: string
+  isin?: string | null
+  asset_class?: string
+  broker?: string
+  quantity: number
+  avg_cost?: number
+  current_price?: number | null
+}
+
+// ── Monte Carlo wealth forecast ────────────────────────────────────────────────
+
+export interface ForecastYearProjection {
+  year: number
+  contributed: number
+  pessimistic: number
+  median: number
+  optimistic: number
+}
+
+export interface WealthForecast {
+  current_portfolio_value: number
+  monthly_contribution: number
+  expected_cagr: number
+  annual_volatility: number
+  years: number
+  simulations: number
+  total_contributed: number
+  projections: ForecastYearProjection[]
+  disclaimer: string
+}
+
+export interface ForecastRequest {
+  current_portfolio_value: number
+  monthly_contribution: number
+  expected_cagr: number
+  annual_volatility: number
+  years_to_forecast: number
+  simulations?: number
 }
 
 // ── Phase 6: Trading Terminal ──────────────────────────────────────────────
@@ -332,6 +404,51 @@ export interface NotificationTick {
 }
 
 export type PortfolioWsMessage = PortfolioTick | NotificationTick | { type: 'pong' }
+
+// ── Social copy trading ────────────────────────────────────────────────────────
+
+export interface LeaderboardEntry {
+  public_strategy_id: string
+  strategy_id: string
+  title: string
+  description: string
+  creator_name: string
+  symbols: string[]
+  exchange: string
+  management_fee_bps: number
+  subscriber_count: number
+  is_verified: boolean
+  cagr_pct: number | null
+  total_return_pct: number | null
+  sharpe_ratio: number | null
+  max_drawdown_pct: number | null
+  win_rate_pct: number | null
+  total_trades: number | null
+}
+
+export interface PublishRequest {
+  strategy_id: string
+  title: string
+  description?: string
+  management_fee_bps?: number
+}
+
+export interface SubscribeResponse {
+  subscription_id: string
+  public_strategy_id: string
+  allocated_capital: number
+  is_active: boolean
+}
+
+export interface SubscriptionEntry {
+  subscription_id: string
+  public_strategy_id: string
+  strategy_id: string
+  title: string
+  allocated_capital: number
+  management_fee_bps: number
+  subscriber_count: number
+}
 
 // ── Billing (dual gateway) ─────────────────────────────────────────────────────
 

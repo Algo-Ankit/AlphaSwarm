@@ -6,12 +6,17 @@ which also publishes a live update to /v1/ws/portfolio. The platform never holds
 funds — total_equity/open_pnl are display aggregates derived from positions and
 the user's own broker account; cash_balance is a nullable display snapshot.
 """
+from datetime import date
+
 import asyncpg
-from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentUser, get_current_user, get_db_pool
 from app.db.repositories.portfolio import PortfolioRepo
+from app.db.repositories.unified_holdings import UnifiedHoldingsRepo
+from app.services.forecasting import run_monte_carlo
+from app.services.portfolio_parser import parse_cas, summarize
 
 router = APIRouter(prefix="/v1/portfolio", tags=["portfolio"])
 
@@ -127,3 +132,150 @@ async def get_snapshots(
         )
         for r in rows
     ]
+
+
+# ── Unified multi-broker holdings (CAS ingestion) ──────────────────────────────
+
+class CasHolding(BaseModel):
+    symbol: str = Field(min_length=1, max_length=64)
+    name: str = ""
+    isin: str | None = None
+    asset_class: str = "equity"   # equity | mutual_fund | etf | bond | other
+    broker: str = "Unknown"       # depository participant / broker
+    quantity: float = Field(gt=0)
+    avg_cost: float = Field(ge=0, default=0)
+    current_price: float | None = None
+
+
+class CasUploadRequest(BaseModel):
+    statement_date: date | None = None
+    holdings: list[CasHolding] = Field(default_factory=list)
+
+
+class UnifiedHolding(BaseModel):
+    isin: str | None
+    symbol: str
+    name: str
+    asset_class: str
+    broker: str
+    quantity: float
+    avg_cost: float
+    current_price: float | None
+    current_value: float
+
+
+class UnifiedPortfolioResponse(BaseModel):
+    statement_date: str | None
+    holdings_count: int
+    total_value: float
+    total_cost: float
+    unrealized_pnl: float
+    unrealized_pnl_pct: float
+    by_broker: dict[str, float]
+    by_asset_class: dict[str, float]
+    holdings: list[UnifiedHolding]
+
+
+def _record_to_holding(r: asyncpg.Record) -> UnifiedHolding:
+    cp = r["current_price"]
+    return UnifiedHolding(
+        isin=r["isin"],
+        symbol=r["symbol"],
+        name=r["name"],
+        asset_class=r["asset_class"],
+        broker=r["broker"],
+        quantity=float(r["quantity"]),
+        avg_cost=float(r["avg_cost"]),
+        current_price=float(cp) if cp is not None else None,
+        current_value=float(r["current_value"]),
+    )
+
+
+@router.post("/upload-cas", response_model=UnifiedPortfolioResponse)
+async def upload_cas(
+    request: CasUploadRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> UnifiedPortfolioResponse:
+    """
+    Ingest a (simulated) parsed NSDL/CDSL Consolidated Account Statement.
+    Replaces the tenant's prior holdings with this statement's snapshot.
+    """
+    try:
+        parsed = parse_cas([h.model_dump() for h in request.holdings])
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+    repo = UnifiedHoldingsRepo(pool, current_user.tenant_id)
+    await repo.replace_all(parsed, request.statement_date)
+    return await _build_unified_response(repo, request.statement_date)
+
+
+@router.get("/unified", response_model=UnifiedPortfolioResponse)
+async def get_unified(
+    current_user: CurrentUser = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> UnifiedPortfolioResponse:
+    """Consolidated view of all imported multi-broker holdings."""
+    repo = UnifiedHoldingsRepo(pool, current_user.tenant_id)
+    return await _build_unified_response(repo, None)
+
+
+async def _build_unified_response(
+    repo: UnifiedHoldingsRepo, statement_date: date | None
+) -> UnifiedPortfolioResponse:
+    rows = await repo.list_all()
+    # Re-summarise from the persisted rows so the response is consistent whether it
+    # follows an upload or a plain read. statement_date is read off the rows.
+    parsed = [
+        {
+            "symbol": r["symbol"],
+            "asset_class": r["asset_class"],
+            "broker": r["broker"],
+            "quantity": r["quantity"],
+            "avg_cost": r["avg_cost"],
+            "current_value": r["current_value"],
+        }
+        for r in rows
+    ]
+    row_date = rows[0]["statement_date"] if rows else None
+    summary = summarize(parsed, statement_date or row_date)
+    return UnifiedPortfolioResponse(
+        **summary,
+        holdings=[_record_to_holding(r) for r in rows],
+    )
+
+
+# ── Monte Carlo wealth forecast ────────────────────────────────────────────────
+
+class ForecastRequest(BaseModel):
+    current_portfolio_value: float = Field(ge=0)
+    monthly_contribution: float = Field(ge=0, description="Monthly SIP amount")
+    expected_cagr: float = Field(description="Annual CAGR as a fraction, e.g. 0.12 for 12%")
+    annual_volatility: float = Field(ge=0, description="Annual volatility as a fraction")
+    years_to_forecast: int = Field(ge=1, le=40)
+    simulations: int = Field(default=1000, ge=1000, le=50000)
+
+
+@router.post("/forecast")
+async def forecast(
+    request: ForecastRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Run a Monte Carlo (GBM) wealth projection — P10/P50/P90 per year."""
+    try:
+        result = run_monte_carlo(
+            current_portfolio_value=request.current_portfolio_value,
+            monthly_contribution=request.monthly_contribution,
+            expected_cagr=request.expected_cagr,
+            annual_volatility=request.annual_volatility,
+            years_to_forecast=request.years_to_forecast,
+            simulations=request.simulations,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    return result.to_dict()

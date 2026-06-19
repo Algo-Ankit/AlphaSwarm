@@ -9,4 +9,4 @@ COPY . .
 
 EXPOSE 3000
 
-CMD ["npm", "run", "dev"]
+CMD ["npx", "next", "dev", "--port", "3000", "--hostname", "0.0.0.0"]
