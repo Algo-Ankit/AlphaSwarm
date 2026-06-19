@@ -500,10 +500,14 @@ async def fan_out_to_subscribers(
             broker_row = next((b for b in broker_rows if b["broker"] == required_broker), None)
             subscriber_paper = dry_run or broker_row is None or bool(broker_row.get("is_paper"))
 
+            # Scale daily notional so high-turnover strategies don't strand subscribers
+            scale = allocated / creator_base if creator_base > 0 else Decimal("0")
+            scaled_daily = Decimal(str(creator_risk.max_daily_notional)) * scale
+
             copy_risk = creator_risk.model_copy(update={
                 "max_order_notional": allocated,
                 "max_position_notional": allocated,
-                "max_daily_notional": allocated,
+                "max_daily_notional": scaled_daily,
                 "allowed_symbols": sorted({*(s.upper() for s in creator_risk.allowed_symbols), symbol}),
                 "paper_trading_only": subscriber_paper,
             })
@@ -515,6 +519,9 @@ async def fan_out_to_subscribers(
                 side=signal.side,
                 quantity=qty,
                 order_type=signal.order_type,
+                limit_price=signal.limit_price,
+                stop_loss_price=signal.stop_loss_price,
+                take_profit_price=signal.take_profit_price,
                 estimated_price=price,
                 is_paper=subscriber_paper,
             )
