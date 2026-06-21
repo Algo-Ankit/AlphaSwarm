@@ -6,6 +6,7 @@ Broker selection is exchange-driven (see app/domain/broker_routing.py). Use
 get_executor(broker, ...) rather than instantiating a concrete executor, so a
 strategy on NSE/BSE never silently routes to a US broker.
 """
+
 import logging
 from decimal import Decimal
 from typing import Protocol
@@ -18,7 +19,9 @@ logger = logging.getLogger(__name__)
 class BrokerExecutor(Protocol):
     """Minimal contract every broker executor must satisfy."""
 
-    def place_order(self, order: OrderIntent, client_order_id: str | None = None) -> OrderResult: ...
+    def place_order(
+        self, order: OrderIntent, client_order_id: str | None = None
+    ) -> OrderResult: ...
     def get_positions(self) -> dict[str, Decimal]: ...
     def get_account(self) -> dict: ...
     def cancel_order(self, order_id: str) -> None: ...
@@ -42,22 +45,24 @@ def bracket_order_class(symbol: str, stop_loss_price, take_profit_price) -> str 
 
 
 class AlpacaExecutor:
-
     def __init__(self, api_key: str, secret_key: str, paper: bool = True):
         from alpaca.trading.client import TradingClient
+
         self._client = TradingClient(api_key, secret_key, paper=paper)
         self._paper = paper
 
     def place_order(self, order: OrderIntent, client_order_id: str | None = None) -> OrderResult:
         import time
-        from alpaca.trading.enums import OrderSide as AlpacaSide, TimeInForce
+
+        from alpaca.trading.enums import OrderSide as AlpacaSide
+        from alpaca.trading.enums import TimeInForce
         from alpaca.trading.requests import LimitOrderRequest, MarketOrderRequest
 
         side = AlpacaSide.BUY if order.side == OrderSide.buy else AlpacaSide.SELL
         tif = TimeInForce.GTC if "-" in order.symbol else TimeInForce.DAY
-        
+
         # Format as string to preserve precision up to 9 decimals, avoiding Python float math errors
-        qty_str = f"{order.quantity:.9f}".rstrip('0').rstrip('.')
+        qty_str = f"{order.quantity:.9f}".rstrip("0").rstrip(".")
 
         req_kwargs = {
             "symbol": order.symbol,
@@ -70,24 +75,32 @@ class AlpacaExecutor:
 
         # Broker-side exit legs (bracket/OTO) so stop-loss / take-profit survive a
         # server or worker crash. Skipped for crypto (unsupported by Alpaca).
-        leg_class = bracket_order_class(order.symbol, order.stop_loss_price, order.take_profit_price)
-        if leg_class is None and (order.stop_loss_price is not None or order.take_profit_price is not None):
+        leg_class = bracket_order_class(
+            order.symbol, order.stop_loss_price, order.take_profit_price
+        )
+        if leg_class is None and (
+            order.stop_loss_price is not None or order.take_profit_price is not None
+        ):
             logger.warning(
                 "Exit legs requested for %s but not supported (crypto) — placing plain order without "
-                "broker-side stop/take.", order.symbol,
+                "broker-side stop/take.",
+                order.symbol,
             )
         if leg_class is not None:
             from alpaca.trading.enums import OrderClass
-            from alpaca.trading.requests import TakeProfitRequest, StopLossRequest
-            req_kwargs["order_class"] = OrderClass.BRACKET if leg_class == "bracket" else OrderClass.OTO
+            from alpaca.trading.requests import StopLossRequest, TakeProfitRequest
+
+            req_kwargs["order_class"] = (
+                OrderClass.BRACKET if leg_class == "bracket" else OrderClass.OTO
+            )
             # Preserve up to 4 decimals (FIX-API standard). round(x, 2) truncates
             # sub-dollar/penny-stock stops & takes to zero precision, mispricing legs
             # on instruments quoted in sub-penny increments.
             if order.take_profit_price is not None:
-                tp_str = f"{float(order.take_profit_price):.4f}".rstrip('0').rstrip('.')
+                tp_str = f"{float(order.take_profit_price):.4f}".rstrip("0").rstrip(".")
                 req_kwargs["take_profit"] = TakeProfitRequest(limit_price=tp_str)
             if order.stop_loss_price is not None:
-                sl_str = f"{float(order.stop_loss_price):.4f}".rstrip('0').rstrip('.')
+                sl_str = f"{float(order.stop_loss_price):.4f}".rstrip("0").rstrip(".")
                 req_kwargs["stop_loss"] = StopLossRequest(stop_price=sl_str)
 
         if order.order_type == OrderType.market:
@@ -95,7 +108,7 @@ class AlpacaExecutor:
         else:
             if order.limit_price is None:
                 raise ValueError("limit_price required for limit orders")
-            limit_str = f"{order.limit_price:.9f}".rstrip('0').rstrip('.')
+            limit_str = f"{order.limit_price:.9f}".rstrip("0").rstrip(".")
             req = LimitOrderRequest(**req_kwargs, limit_price=limit_str)
 
         max_retries = 3
@@ -105,11 +118,13 @@ class AlpacaExecutor:
                 break
             except Exception as exc:
                 if "429" in str(exc) and attempt < max_retries - 1:
-                    time.sleep(2 ** attempt)
+                    time.sleep(2**attempt)
                     continue
                 # If it's a conflict (409) for client_order_id, it means we already placed it.
                 # Unfortunately Alpaca SDK might just throw a generic APIError, but let's re-raise.
-                raise RuntimeError(f"Alpaca order submission failed for {order.symbol}: {exc}") from exc
+                raise RuntimeError(
+                    f"Alpaca order submission failed for {order.symbol}: {exc}"
+                ) from exc
 
         fill_price = None
         if result.filled_avg_price is not None:
@@ -175,7 +190,9 @@ class AlpacaExecutor:
 # Upstox places orders by instrument_key (e.g. "NSE_EQ|INE002A01018"), not by
 # trading symbol. We resolve symbol → instrument_key from Upstox's published
 # instrument master, cached process-wide (it changes at most daily).
-_UPSTOX_INSTRUMENTS_URL = "https://assets.upstox.com/market-quote/instruments/exchange/{exchange}.json.gz"
+_UPSTOX_INSTRUMENTS_URL = (
+    "https://assets.upstox.com/market-quote/instruments/exchange/{exchange}.json.gz"
+)
 # exchange (NSE/BSE) → {TRADING_SYMBOL: instrument_key}
 _UPSTOX_INSTRUMENT_CACHE: dict[str, dict[str, str]] = {}
 
@@ -267,7 +284,9 @@ class UpstoxExecutor:
         # upstream, but Upstox also requires an integer quantity.
         quantity = int(order.quantity)
         if quantity <= 0:
-            raise ValueError(f"Upstox order quantity must be a positive integer, got {order.quantity}")
+            raise ValueError(
+                f"Upstox order quantity must be a positive integer, got {order.quantity}"
+            )
 
         is_limit = order.order_type == OrderType.limit
         price = float(order.limit_price) if (is_limit and order.limit_price is not None) else 0.0
@@ -316,7 +335,7 @@ class UpstoxExecutor:
             raise RuntimeError(f"Upstox get_positions failed: {exc}") from exc
 
         positions: dict[str, Decimal] = {}
-        for p in (getattr(resp, "data", None) or []):
+        for p in getattr(resp, "data", None) or []:
             symbol = getattr(p, "trading_symbol", None) or getattr(p, "tradingsymbol", None)
             qty = getattr(p, "quantity", None)
             if symbol is not None and qty is not None:
@@ -334,7 +353,9 @@ class UpstoxExecutor:
         data = getattr(resp, "data", None) or {}
         # Upstox returns a dict keyed by segment ('equity', 'commodity').
         equity_seg = data.get("equity") if isinstance(data, dict) else None
-        available = getattr(equity_seg, "available_margin", None) if equity_seg is not None else None
+        available = (
+            getattr(equity_seg, "available_margin", None) if equity_seg is not None else None
+        )
         if available is None and isinstance(equity_seg, dict):
             available = equity_seg.get("available_margin")
         cash = str(available) if available is not None else "0"
@@ -390,12 +411,7 @@ def copy_order_quantity(
     forbid fractional equity (NSE/BSE). Returns Decimal("0") when no valid order can
     be sized (which the caller skips).
     """
-    if (
-        creator_capital_base <= 0
-        or allocated_capital <= 0
-        or price <= 0
-        or signal_quantity <= 0
-    ):
+    if creator_capital_base <= 0 or allocated_capital <= 0 or price <= 0 or signal_quantity <= 0:
         return Decimal("0")
 
     scale = allocated_capital / creator_capital_base
@@ -445,7 +461,7 @@ async def fan_out_to_subscribers(
     from app.domain.broker_routing import allows_fractional_shares, broker_for_exchange
     from app.domain.market_data import MarketState
     from app.domain.market_hours import exchange_timezone, get_session_status
-    from app.domain.models import OrderIntent, OrderResult, StrategyRiskConfig
+    from app.domain.models import OrderIntent, OrderResult
     from app.domain.risk import verify_order_intent
     from app.services.broker_crypto import decrypt_key
     from app.services.notifications import create_notification
@@ -460,7 +476,8 @@ async def fan_out_to_subscribers(
           AND ss.is_active = TRUE
           AND ss.subscriber_tenant_id <> $2
         """,
-        UUID(strategy_id), UUID(creator_tenant_id),
+        UUID(strategy_id),
+        UUID(creator_tenant_id),
     )
     if not subs:
         return []
@@ -489,8 +506,13 @@ async def fan_out_to_subscribers(
                 whole_shares=whole_shares,
             )
             if qty <= 0:
-                results.append({"tenant_id": sub_tenant, "action": "skipped",
-                                "reason": "allocation too small to size a whole-share order"})
+                results.append(
+                    {
+                        "tenant_id": sub_tenant,
+                        "action": "skipped",
+                        "reason": "allocation too small to size a whole-share order",
+                    }
+                )
                 continue
 
             # Resolve the subscriber's broker creds for this exchange. Missing creds
@@ -504,13 +526,17 @@ async def fan_out_to_subscribers(
             scale = allocated / creator_base if creator_base > 0 else Decimal("0")
             scaled_daily = Decimal(str(creator_risk.max_daily_notional)) * scale
 
-            copy_risk = creator_risk.model_copy(update={
-                "max_order_notional": allocated,
-                "max_position_notional": allocated,
-                "max_daily_notional": scaled_daily,
-                "allowed_symbols": sorted({*(s.upper() for s in creator_risk.allowed_symbols), symbol}),
-                "paper_trading_only": subscriber_paper,
-            })
+            copy_risk = creator_risk.model_copy(
+                update={
+                    "max_order_notional": allocated,
+                    "max_position_notional": allocated,
+                    "max_daily_notional": scaled_daily,
+                    "allowed_symbols": sorted(
+                        {*(s.upper() for s in creator_risk.allowed_symbols), symbol}
+                    ),
+                    "paper_trading_only": subscriber_paper,
+                }
+            )
 
             copy_signal = OrderIntent(
                 strategy_id=strategy_id,
@@ -528,11 +554,19 @@ async def fan_out_to_subscribers(
 
             executor = None
             if not subscriber_paper and broker_row is not None:
-                access_token = decrypt_key(broker_row["access_token"]) if broker_row.get("access_token") else None
+                access_token = (
+                    decrypt_key(broker_row["access_token"])
+                    if broker_row.get("access_token")
+                    else None
+                )
                 executor = get_executor(
                     required_broker,
-                    api_key=decrypt_key(broker_row["key_encrypted"]) if broker_row.get("key_encrypted") else "",
-                    secret_key=decrypt_key(broker_row["secret_encrypted"]) if broker_row.get("secret_encrypted") else "",
+                    api_key=decrypt_key(broker_row["key_encrypted"])
+                    if broker_row.get("key_encrypted")
+                    else "",
+                    secret_key=decrypt_key(broker_row["secret_encrypted"])
+                    if broker_row.get("secret_encrypted")
+                    else "",
                     paper=bool(broker_row.get("is_paper")),
                     access_token=access_token,
                 )
@@ -548,16 +582,22 @@ async def fan_out_to_subscribers(
 
                     pos_row = await conn.fetchrow(
                         "SELECT quantity FROM positions WHERE tenant_id = $1 AND strategy_id = $2 AND symbol = $3",
-                        UUID(sub_tenant), UUID(strategy_id), symbol,
+                        UUID(sub_tenant),
+                        UUID(strategy_id),
+                        symbol,
                     )
                     cur_qty = Decimal(str(pos_row["quantity"])) if pos_row else Decimal("0")
                     cur_pos = float(cur_qty) if cur_qty != 0 else None
                     cur_val = float(abs(cur_qty)) * float(price)
 
-                    open_count = await conn.fetchval(
-                        "SELECT COUNT(*) FROM positions WHERE tenant_id = $1 AND strategy_id = $2 AND quantity <> 0",
-                        UUID(sub_tenant), UUID(strategy_id),
-                    ) or 0
+                    open_count = (
+                        await conn.fetchval(
+                            "SELECT COUNT(*) FROM positions WHERE tenant_id = $1 AND strategy_id = $2 AND quantity <> 0",
+                            UUID(sub_tenant),
+                            UUID(strategy_id),
+                        )
+                        or 0
+                    )
 
                     today_row = await conn.fetchrow(
                         """
@@ -567,7 +607,9 @@ async def fan_out_to_subscribers(
                           AND broker_status IN ('filled','open','pending','accepted','partially_filled','dry_run')
                           AND created_at >= (date_trunc('day', now() AT TIME ZONE $3) AT TIME ZONE $3)
                         """,
-                        UUID(sub_tenant), UUID(strategy_id), exchange_tz,
+                        UUID(sub_tenant),
+                        UUID(strategy_id),
+                        exchange_tz,
                     )
                     today_notional = Decimal(str(today_row["total"])) if today_row else Decimal("0")
 
@@ -579,28 +621,46 @@ async def fan_out_to_subscribers(
                     )
 
                     risk_result = verify_order_intent(
-                        copy_signal, copy_risk, market_state,
+                        copy_signal,
+                        copy_risk,
+                        market_state,
                         current_position=cur_pos,
                         current_position_value=cur_val,
                         open_positions_count=int(open_count),
                     )
                     if not risk_result.approved:
-                        results.append({"tenant_id": sub_tenant, "action": "rejected",
-                                        "reason": risk_result.reason})
+                        results.append(
+                            {
+                                "tenant_id": sub_tenant,
+                                "action": "rejected",
+                                "reason": risk_result.reason,
+                            }
+                        )
                         continue
 
                     if subscriber_paper:
                         order_result = OrderResult(
-                            order_id=None, symbol=symbol, side=copy_signal.side,
-                            quantity=qty, fill_price=None, estimated_price=price,
-                            broker_status="dry_run", is_paper=True,
+                            order_id=None,
+                            symbol=symbol,
+                            side=copy_signal.side,
+                            quantity=qty,
+                            fill_price=None,
+                            estimated_price=price,
+                            broker_status="dry_run",
+                            is_paper=True,
                         )
                     else:
                         order_result = executor.place_order(copy_signal, None)
 
                     await _write_order_async(
-                        conn, sub_tenant, strategy_id, None,
-                        copy_signal, order_result, "approved", risk_result.reason,
+                        conn,
+                        sub_tenant,
+                        strategy_id,
+                        None,
+                        copy_signal,
+                        order_result,
+                        "approved",
+                        risk_result.reason,
                     )
 
                     try:
@@ -618,14 +678,18 @@ async def fan_out_to_subscribers(
                             entity_id=strategy_id,
                         )
                     except Exception as _nexc:
-                        logger.warning("copy-trade notification failed for %s: %s", sub_tenant, _nexc)
+                        logger.warning(
+                            "copy-trade notification failed for %s: %s", sub_tenant, _nexc
+                        )
 
-                    results.append({
-                        "tenant_id": sub_tenant,
-                        "action": copy_signal.side.value,
-                        "quantity": str(qty),
-                        "broker_status": order_result.broker_status,
-                    })
+                    results.append(
+                        {
+                            "tenant_id": sub_tenant,
+                            "action": copy_signal.side.value,
+                            "quantity": str(qty),
+                            "broker_status": order_result.broker_status,
+                        }
+                    )
 
         except Exception as exc:
             logger.warning("copy-trade fan-out to subscriber %s failed: %s", sub_tenant, exc)

@@ -27,6 +27,7 @@ class PortfolioRepo(BaseRepo):
             ORDER BY snapshot_time DESC
             LIMIT $2
             """,
-            self.tenant_id, limit,
+            self.tenant_id,
+            limit,
         )
         return list(reversed(rows))

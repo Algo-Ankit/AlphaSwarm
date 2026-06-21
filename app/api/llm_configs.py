@@ -3,11 +3,12 @@ LLM Configs API — POST/GET/DELETE /v1/llm-configs
 Users bring their own LLM API keys for NL strategy generation.
 Keys are encrypted at rest with the same Fernet key used for broker keys.
 """
+
 from uuid import UUID
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentUser, get_current_user, get_db_pool
 from app.db.repositories.llm_configs import LLMConfigRepo
@@ -16,31 +17,33 @@ from app.services.broker_crypto import decrypt_key, encrypt_key
 router = APIRouter(prefix="/v1/llm-configs", tags=["llm-configs"])
 
 _PROVIDER_BASE_URLS: dict[str, str] = {
-    "groq":       "https://api.groq.com/openai/v1",
-    "gemini":     "https://generativelanguage.googleapis.com/v1beta/openai/",
+    "groq": "https://api.groq.com/openai/v1",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/",
     "openrouter": "https://openrouter.ai/api/v1",
-    "openai":     "https://api.openai.com/v1",
-    "together":   "https://api.together.xyz/v1",
-    "anthropic":  "https://api.anthropic.com/v1",
+    "openai": "https://api.openai.com/v1",
+    "together": "https://api.together.xyz/v1",
+    "anthropic": "https://api.anthropic.com/v1",
 }
 
 
 class LLMConfigCreate(BaseModel):
-    label:    str  = Field(min_length=1, max_length=80)
-    provider: str  = Field(default="custom", pattern="^(groq|gemini|openrouter|openai|together|anthropic|custom)$")
-    base_url: str  = Field(min_length=5, max_length=512)
-    api_key:  str  = Field(min_length=1, max_length=512)
-    model:    str  = Field(min_length=1, max_length=120)
+    label: str = Field(min_length=1, max_length=80)
+    provider: str = Field(
+        default="custom", pattern="^(groq|gemini|openrouter|openai|together|anthropic|custom)$"
+    )
+    base_url: str = Field(min_length=5, max_length=512)
+    api_key: str = Field(min_length=1, max_length=512)
+    model: str = Field(min_length=1, max_length=120)
 
 
 class LLMConfigResponse(BaseModel):
-    id:          str
-    label:       str
-    provider:    str
-    base_url:    str
-    model:       str
+    id: str
+    label: str
+    provider: str
+    base_url: str
+    model: str
     key_preview: str
-    created_at:  str
+    created_at: str
 
 
 def _row_to_response(row: asyncpg.Record) -> LLMConfigResponse:

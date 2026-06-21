@@ -5,6 +5,7 @@ Secondary source: Alpha Vantage NEWS_SENTIMENT
 Sentiment + category: Claude Haiku batch classification (one API call per symbol refresh).
 Results cached in news_items table (stale after 1 hour).
 """
+
 import json
 import logging
 from dataclasses import dataclass
@@ -35,9 +36,9 @@ class NewsItem:
     summary: str | None
     source: str
     url: str | None
-    sentiment: str | None    # positive | negative | neutral
-    category: str | None     # earnings | regulatory | political | product | macro | other
-    published_at: str        # ISO datetime string
+    sentiment: str | None  # positive | negative | neutral
+    category: str | None  # earnings | regulatory | political | product | macro | other
+    published_at: str  # ISO datetime string
 
     def to_dict(self) -> dict:
         return {
@@ -54,9 +55,7 @@ class NewsItem:
 
 async def _fetch_newsapi(symbol: str, days: int, limit: int) -> list[dict]:
     """Raises IntelligenceServiceError on HTTP or network failure."""
-    from_date = (
-        datetime.now(timezone.utc) - timedelta(days=days)
-    ).strftime("%Y-%m-%d")
+    from_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
@@ -88,9 +87,7 @@ async def _fetch_newsapi(symbol: str, days: int, limit: int) -> list[dict]:
             f"NewsAPI returned {exc.response.status_code} for {symbol}"
         ) from exc
     except httpx.RequestError as exc:
-        raise IntelligenceServiceError(
-            f"NewsAPI network error for {symbol}: {exc}"
-        ) from exc
+        raise IntelligenceServiceError(f"NewsAPI network error for {symbol}: {exc}") from exc
 
 
 async def _fetch_alpha_vantage(symbol: str) -> list[dict]:
@@ -127,9 +124,7 @@ async def _fetch_alpha_vantage(symbol: str) -> list[dict]:
             f"Alpha Vantage returned {exc.response.status_code} for {symbol}"
         ) from exc
     except httpx.RequestError as exc:
-        raise IntelligenceServiceError(
-            f"Alpha Vantage network error for {symbol}: {exc}"
-        ) from exc
+        raise IntelligenceServiceError(f"Alpha Vantage network error for {symbol}: {exc}") from exc
 
 
 async def _classify_batch(symbol: str, articles: list[dict]) -> list[dict]:
@@ -139,22 +134,19 @@ async def _classify_batch(symbol: str, articles: list[dict]) -> list[dict]:
     Raises IntelligenceServiceError if the API call fails or returns malformed output.
     """
     if not _settings.anthropic_api_key:
-        raise RuntimeError(
-            "ANTHROPIC_API_KEY is not configured — cannot classify news sentiment"
-        )
+        raise RuntimeError("ANTHROPIC_API_KEY is not configured — cannot classify news sentiment")
     if not articles:
         return []
 
     try:
         import anthropic
     except ModuleNotFoundError:
-        raise RuntimeError(
-            "anthropic package is not installed — run: pip install anthropic"
-        )
+        raise RuntimeError("anthropic package is not installed — run: pip install anthropic")
 
     client = anthropic.AsyncAnthropic(api_key=_settings.anthropic_api_key)
     headline_list = "\n".join(
-        f"{i + 1}. {a['headline']} (Summary: {a.get('summary', 'N/A')})" for i, a in enumerate(articles)
+        f"{i + 1}. {a['headline']} (Summary: {a.get('summary', 'N/A')})"
+        for i, a in enumerate(articles)
     )
     prompt = (
         f"Classify each news headline about the stock ticker {symbol}.\n\n"
@@ -186,9 +178,7 @@ async def _classify_batch(symbol: str, articles: list[dict]) -> list[dict]:
     try:
         classifications = json.loads(text[start:end])
     except json.JSONDecodeError as exc:
-        raise IntelligenceServiceError(
-            f"Haiku response is not valid JSON: {exc}"
-        ) from exc
+        raise IntelligenceServiceError(f"Haiku response is not valid JSON: {exc}") from exc
 
     result = []
     for i, article in enumerate(articles):
@@ -206,10 +196,10 @@ async def _classify_batch(symbol: str, articles: list[dict]) -> list[dict]:
 def _parse_published_at(raw: str) -> datetime:
     """Parse datetime strings from NewsAPI and Alpha Vantage; falls back to now()."""
     for fmt in (
-        "%Y-%m-%dT%H:%M:%SZ",   # NewsAPI: 2024-06-01T12:34:00Z
-        "%Y%m%dT%H%M%S",         # Alpha Vantage: 20240601T123400
+        "%Y-%m-%dT%H:%M:%SZ",  # NewsAPI: 2024-06-01T12:34:00Z
+        "%Y%m%dT%H%M%S",  # Alpha Vantage: 20240601T123400
         "%Y-%m-%dT%H:%M:%S%z",  # RFC 3339 with offset
-        "%Y-%m-%dT%H:%M:%S",    # no timezone
+        "%Y-%m-%dT%H:%M:%S",  # no timezone
     ):
         try:
             dt = datetime.strptime(raw, fmt)
@@ -252,9 +242,7 @@ async def get_news(
 
     # Guard: at least one news source must be configured
     if not _settings.news_api_key and not _settings.alpha_vantage_key:
-        raise RuntimeError(
-            "No news API keys configured — set NEWS_API_KEY or ALPHA_VANTAGE_KEY"
-        )
+        raise RuntimeError("No news API keys configured — set NEWS_API_KEY or ALPHA_VANTAGE_KEY")
 
     # Fetch from each configured source independently;
     # collect errors so we can raise if ALL sources fail.

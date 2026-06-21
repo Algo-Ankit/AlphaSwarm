@@ -2,6 +2,7 @@
 Plain-English strategy explanation tests — pure helpers only (no Agent Framework / network).
 Runnable with pytest OR directly:  python tests/test_strategy_explanation.py
 """
+
 from app.services.strategy_builder import (
     _build_explain_message,
     _fallback_explanation,
@@ -36,6 +37,7 @@ def test_explain_message_includes_prompt_and_code():
 
 if __name__ == "__main__":
     import traceback
+
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
     for fn in fns:

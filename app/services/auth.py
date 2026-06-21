@@ -12,6 +12,7 @@ from app.core.config import get_settings
 # passlib is unmaintained and throws deprecation crashes on modern bcrypt      #
 # --------------------------------------------------------------------------- #
 
+
 def hash_password(plain: str) -> str:
     return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
 
@@ -28,6 +29,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 # python-jose is abandoned and has CVE-2022-29217 (algorithm confusion)       #
 # PyJWT is actively maintained and correctly refuses alg=none attacks          #
 # --------------------------------------------------------------------------- #
+
 
 def _sign_key() -> tuple[str | bytes, str]:
     settings = get_settings()
@@ -75,6 +77,7 @@ def decode_access_token(token: str) -> dict | None:
 # --------------------------------------------------------------------------- #
 # Refresh tokens                                                               #
 # --------------------------------------------------------------------------- #
+
 
 def create_refresh_token() -> str:
     return secrets.token_urlsafe(32)

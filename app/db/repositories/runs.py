@@ -26,7 +26,10 @@ class RunRepo(BaseRepo):
             )
             RETURNING *
             """,
-            self.tenant_id, strategy_id, version_id, dry_run,
+            self.tenant_id,
+            strategy_id,
+            version_id,
+            dry_run,
         )
         if row is None:
             raise ValueError(
@@ -41,7 +44,9 @@ class RunRepo(BaseRepo):
             SET celery_task_id = $1, status = 'queued', updated_at = now()
             WHERE id = $2 AND tenant_id = $3
             """,
-            celery_task_id, run_id, self.tenant_id,
+            celery_task_id,
+            run_id,
+            self.tenant_id,
         )
 
     async def mark_failed(self, run_id: UUID, error: str) -> None:
@@ -51,13 +56,16 @@ class RunRepo(BaseRepo):
             SET status = 'failed', error = $1, ended_at = now(), updated_at = now()
             WHERE id = $2 AND tenant_id = $3
             """,
-            error, run_id, self.tenant_id,
+            error,
+            run_id,
+            self.tenant_id,
         )
 
     async def get_by_id(self, run_id: UUID) -> asyncpg.Record | None:
         return await self.fetchrow(
             "SELECT * FROM strategy_runs WHERE id = $1 AND tenant_id = $2",
-            run_id, self.tenant_id,
+            run_id,
+            self.tenant_id,
         )
 
     async def list_by_strategy(self, strategy_id: UUID) -> list[asyncpg.Record]:
@@ -68,7 +76,8 @@ class RunRepo(BaseRepo):
             ORDER BY created_at DESC
             LIMIT 50
             """,
-            strategy_id, self.tenant_id,
+            strategy_id,
+            self.tenant_id,
         )
 
     async def mark_running(self, run_id: UUID) -> None:
@@ -78,7 +87,8 @@ class RunRepo(BaseRepo):
             SET status = 'running', started_at = now(), updated_at = now()
             WHERE id = $1 AND tenant_id = $2
             """,
-            run_id, self.tenant_id,
+            run_id,
+            self.tenant_id,
         )
 
     async def touch(self, run_id: UUID) -> None:
@@ -90,18 +100,22 @@ class RunRepo(BaseRepo):
             SET updated_at = now()
             WHERE id = $1 AND tenant_id = $2 AND status = 'running'
             """,
-            run_id, self.tenant_id,
+            run_id,
+            self.tenant_id,
         )
 
     async def mark_completed(self, run_id: UUID, result: dict) -> None:
         import json
+
         await self.execute(
             """
             UPDATE strategy_runs
             SET status = 'completed', result = $1, ended_at = now(), updated_at = now()
             WHERE id = $2 AND tenant_id = $3
             """,
-            json.dumps(result), run_id, self.tenant_id,
+            json.dumps(result),
+            run_id,
+            self.tenant_id,
         )
 
     async def mark_crashed(self, run_id: UUID, reason: str) -> None:
@@ -111,7 +125,9 @@ class RunRepo(BaseRepo):
             SET status = 'failed', error = $1, ended_at = now(), updated_at = now()
             WHERE id = $2 AND tenant_id = $3
             """,
-            reason, run_id, self.tenant_id,
+            reason,
+            run_id,
+            self.tenant_id,
         )
 
     async def get_stale_running_runs(self, stale_seconds: int = 90) -> list[asyncpg.Record]:
@@ -123,5 +139,6 @@ class RunRepo(BaseRepo):
               AND status = 'running'
               AND updated_at < now() - ($2 * INTERVAL '1 second')
             """,
-            self.tenant_id, stale_seconds,
+            self.tenant_id,
+            stale_seconds,
         )

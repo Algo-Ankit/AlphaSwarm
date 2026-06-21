@@ -8,6 +8,7 @@ LLM key is the default path for everyone. The platform-level .env key is a
 FOUNDER-ONLY fallback (FOUNDER_EMAIL) — every other account is rejected with a
 strict-BYOK error, so the platform never pays for API usage.
 """
+
 from __future__ import annotations
 
 import inspect

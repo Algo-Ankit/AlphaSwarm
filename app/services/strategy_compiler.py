@@ -2,6 +2,7 @@
 Strategy compiler — converts NL prompt to Python BaseStrategy subclass via the
 Microsoft Agent Framework strategy builder.
 """
+
 from __future__ import annotations
 
 import logging
@@ -58,8 +59,9 @@ async def compile_strategy_prompt(
     api_key = base_url = model = None
     if request.llm_config_id and pool is not None:
         from uuid import UUID
-        from app.db.repositories.llm_configs import LLMConfigRepo
+
         from app.services.broker_crypto import decrypt_key
+
         # tenant_id not available here — repo fetch by id only; route already validated ownership
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -68,9 +70,9 @@ async def compile_strategy_prompt(
             )
         if row:
             try:
-                api_key  = decrypt_key(row["key_encrypted"])
+                api_key = decrypt_key(row["key_encrypted"])
                 base_url = row["base_url"]
-                model    = row["model"]
+                model = row["model"]
             except ValueError:
                 logger.warning("LLM config %s key decryption failed", request.llm_config_id)
 
@@ -79,9 +81,9 @@ async def compile_strategy_prompt(
         if not _is_founder(user_email, settings.founder_email):
             raise ValueError(_STRICT_BYOK_MESSAGE)
         logger.info("Founder account — using platform LLM key fallback.")
-        api_key  = settings.llm_api_key
+        api_key = settings.llm_api_key
         base_url = settings.llm_base_url
-        model    = settings.llm_model
+        model = settings.llm_model
 
     try:
         code = await build_strategy_async(
@@ -96,7 +98,9 @@ async def compile_strategy_prompt(
         logger.error("StrategyBuilderAgent failed for '%s': %s", request.name, exc)
         raise ValueError(f"Failed to generate strategy: {exc}") from exc
 
-    logger.info("StrategyBuilderAgent generated code for strategy '%s' via model %s", request.name, model)
+    logger.info(
+        "StrategyBuilderAgent generated code for strategy '%s' via model %s", request.name, model
+    )
 
     # Separate pass: plain-English explanation (best-effort, never blocks creation).
     explanation = await explain_strategy_async(

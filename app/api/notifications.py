@@ -4,6 +4,7 @@ Notifications API — GET list / unread-count, POST mark-read / read-all.
 Real-time delivery is over /v1/ws/portfolio (see app/services/notifications.py);
 this router serves history and read-state for the notification panel.
 """
+
 from uuid import UUID
 
 import asyncpg

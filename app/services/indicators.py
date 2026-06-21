@@ -5,6 +5,7 @@ Spec format: "rsi(14),macd(12,26,9),bb(20,2),ema(20),ema(50),ema(200),vwap,atr(1
 Returns a flat dict of {key: float|None} for the most recent bar.
 Keys follow pandas-ta uppercase convention: RSI_14, MACD_12_26_9, EMA_20, etc.
 """
+
 import asyncio
 import logging
 import re
@@ -23,8 +24,8 @@ def parse_specs(raw: str) -> list[tuple[str, list[float]]]:
     Uses findall so commas inside parentheses are not treated as spec separators.
     """
     result = []
-    for part in re.findall(r'\w+(?:\([^)]*\))?', raw.lower()):
-        m = re.match(r'^(\w+)(?:\(([^)]*)\))?$', part)
+    for part in re.findall(r"\w+(?:\([^)]*\))?", raw.lower()):
+        m = re.match(r"^(\w+)(?:\(([^)]*)\))?$", part)
         if not m:
             logger.debug("Ignoring invalid indicator spec: %r", part)
             continue
@@ -36,13 +37,15 @@ def parse_specs(raw: str) -> list[tuple[str, list[float]]]:
 
 
 def _to_df(bars: list[Bar]) -> pd.DataFrame:
-    df = pd.DataFrame({
-        "open":   [float(b.open)   for b in bars],
-        "high":   [float(b.high)   for b in bars],
-        "low":    [float(b.low)    for b in bars],
-        "close":  [float(b.close)  for b in bars],
-        "volume": [float(b.volume) for b in bars],
-    })
+    df = pd.DataFrame(
+        {
+            "open": [float(b.open) for b in bars],
+            "high": [float(b.high) for b in bars],
+            "low": [float(b.low) for b in bars],
+            "close": [float(b.close) for b in bars],
+            "volume": [float(b.volume) for b in bars],
+        }
+    )
     df.index = pd.DatetimeIndex([b.timestamp for b in bars])
     if df.index.tz is None:
         df.index = df.index.tz_localize("UTC").tz_convert("America/New_York")
@@ -71,8 +74,8 @@ def _compute(df: pd.DataFrame, name: str, args: list[float], out: dict) -> None:
             out[f"RSI_{n}"] = _last(result)
 
     elif name == "macd":
-        fast   = int(args[0]) if len(args) > 0 else 12
-        slow   = int(args[1]) if len(args) > 1 else 26
+        fast = int(args[0]) if len(args) > 0 else 12
+        slow = int(args[1]) if len(args) > 1 else 26
         signal = int(args[2]) if len(args) > 2 else 9
         result = ta.macd(df["close"], fast=fast, slow=slow, signal=signal)
         if result is not None and not result.empty:
@@ -81,7 +84,7 @@ def _compute(df: pd.DataFrame, name: str, args: list[float], out: dict) -> None:
 
     elif name in ("bb", "bbands"):
         length = int(args[0]) if len(args) > 0 else 20
-        std    = float(args[1]) if len(args) > 1 else 2.0
+        std = float(args[1]) if len(args) > 1 else 2.0
         result = ta.bbands(df["close"], length=length, std=std)
         if result is not None and not result.empty:
             for col in result.columns:

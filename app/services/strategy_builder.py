@@ -15,6 +15,7 @@ old hand-rolled "regenerate from scratch" loop. An outer bounded loop remains as
 a safety net for models that ignore the tool. Migrated off Microsoft AutoGen,
 which entered maintenance mode after Agent Framework 1.0 (GA April 2026).
 """
+
 from __future__ import annotations
 
 import inspect
@@ -183,7 +184,10 @@ async def _close_client(client) -> None:
 
 
 def validate_strategy_code(
-    code: Annotated[str, Field(description="The complete Python source of the BaseStrategy subclass to validate.")]
+    code: Annotated[
+        str,
+        Field(description="The complete Python source of the BaseStrategy subclass to validate."),
+    ],
 ) -> str:
     """Compile a candidate strategy in the secure sandbox.
 
@@ -214,12 +218,12 @@ async def _run_agent(agent, task: str, *, timeout: float, label: str) -> str:
             if net_attempt == 3:
                 raise ValueError(f"{label} timed out after 3 network attempts.")
             logger.warning("%s timeout, retrying %d/3...", label, net_attempt)
-            await asyncio.sleep(2 ** net_attempt)
+            await asyncio.sleep(2**net_attempt)
         except Exception as exc:
             if net_attempt == 3:
                 raise ValueError(f"{label} failed after 3 network attempts: {exc}") from exc
             logger.warning("%s error: %s, retrying %d/3...", label, exc, net_attempt)
-            await asyncio.sleep(2 ** net_attempt)
+            await asyncio.sleep(2**net_attempt)
     return ""  # unreachable; loop either returns or raises
 
 

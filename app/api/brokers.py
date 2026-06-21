@@ -6,20 +6,20 @@ from uuid import UUID
 
 import asyncpg
 import httpx
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentUser, get_current_user, get_db_pool
 from app.core.config import get_settings
 from app.db.repositories.brokers import BrokerRepo
-from app.services.broker_crypto import decrypt_key, encrypt_key
 from app.services import oauth_manager as oauth
+from app.services.broker_crypto import decrypt_key, encrypt_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/brokers", tags=["brokers"])
 
 _ALPACA_PAPER_URL = "https://paper-api.alpaca.markets"
-_ALPACA_LIVE_URL  = "https://api.alpaca.markets"
+_ALPACA_LIVE_URL = "https://api.alpaca.markets"
 
 # Brokers that use OAuth redirect flows
 _OAUTH_REDIRECT_BROKERS = {"upstox", "zerodha"}
@@ -49,6 +49,7 @@ def _oauth_redirect_uri(broker: str) -> str:
 
 # ── Pydantic models ────────────────────────────────────────────────────────────
 
+
 class BrokerConnectRequest(BaseModel):
     broker: str = Field(default="alpaca", pattern="^(alpaca|upstox|zerodha|angelone)$")
     api_key: str = Field(min_length=1, max_length=256)
@@ -65,7 +66,7 @@ class BrokerConnectionResponse(BaseModel):
     is_active: bool
     key_preview: str
     oauth_connected: bool
-    token_status: str       # 'connected' | 'expired' | 'none'
+    token_status: str  # 'connected' | 'expired' | 'none'
     token_expires_at: str | None
     created_at: str
     updated_at: str
@@ -97,6 +98,7 @@ class AngelOneLoginRequest(BaseModel):
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+
 def _token_status(row: asyncpg.Record) -> str:
     access_token = row.get("access_token")
     if not access_token:
@@ -115,17 +117,24 @@ async def _test_alpaca(api_key: str, api_secret: str, base_url: str) -> TestConn
     url = f"{base_url.rstrip('/')}/v2/account"
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(url, headers={
-                "APCA-API-KEY-ID": api_key,
-                "APCA-API-SECRET-KEY": api_secret,
-            })
+            resp = await client.get(
+                url,
+                headers={
+                    "APCA-API-KEY-ID": api_key,
+                    "APCA-API-SECRET-KEY": api_secret,
+                },
+            )
         if resp.status_code == 200:
             data = resp.json()
             acct_id = data.get("account_number") or data.get("id")
             acct_status = data.get("status")
             if acct_status and acct_status != "ACTIVE":
-                return TestConnectionResponse(ok=False, message=f"Alpaca account is not active (status: {acct_status})")
-            return TestConnectionResponse(ok=True, message="Connected successfully", account_id=acct_id)
+                return TestConnectionResponse(
+                    ok=False, message=f"Alpaca account is not active (status: {acct_status})"
+                )
+            return TestConnectionResponse(
+                ok=True, message="Connected successfully", account_id=acct_id
+            )
         if resp.status_code in (401, 403):
             return TestConnectionResponse(ok=False, message="Invalid API key or secret")
         return TestConnectionResponse(ok=False, message=f"Alpaca returned HTTP {resp.status_code}")
@@ -135,7 +144,9 @@ async def _test_alpaca(api_key: str, api_secret: str, base_url: str) -> TestConn
         return TestConnectionResponse(ok=False, message=f"Network error: {exc}")
     except Exception:
         logger.exception("Unexpected error in Alpaca connection test")
-        return TestConnectionResponse(ok=False, message="Internal server error during connection test")
+        return TestConnectionResponse(
+            ok=False, message="Internal server error during connection test"
+        )
 
 
 def _row_to_response(row: asyncpg.Record, key_plain: str | None) -> BrokerConnectionResponse:
@@ -160,6 +171,7 @@ def _row_to_response(row: asyncpg.Record, key_plain: str | None) -> BrokerConnec
 
 # ── Standard API-key endpoints ─────────────────────────────────────────────────
 
+
 @router.post("", response_model=BrokerConnectionResponse, status_code=status.HTTP_201_CREATED)
 async def connect_broker(
     body: BrokerConnectRequest,
@@ -170,7 +182,9 @@ async def connect_broker(
         base_url = body.base_url or (_ALPACA_PAPER_URL if body.is_paper else _ALPACA_LIVE_URL)
         test = await _test_alpaca(body.api_key, body.api_secret, base_url)
         if not test.ok:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=test.message)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=test.message
+            )
     else:
         base_url = body.base_url or ""
         if base_url:
@@ -215,7 +229,9 @@ async def delete_broker(
     repo = BrokerRepo(pool, current_user.tenant_id)
     row = await repo.get_by_id(connection_id)
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Broker connection not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Broker connection not found"
+        )
     await repo.delete(connection_id)
 
 
@@ -228,21 +244,28 @@ async def test_broker(
     repo = BrokerRepo(pool, current_user.tenant_id)
     row = await repo.get_by_id(connection_id)
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Broker connection not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Broker connection not found"
+        )
 
     try:
-        key_plain    = decrypt_key(row["key_encrypted"])
+        key_plain = decrypt_key(row["key_encrypted"])
         secret_plain = decrypt_key(row["secret_encrypted"])
     except ValueError:
-        return TestConnectionResponse(ok=False, message="Key decryption failed — re-enter credentials")
+        return TestConnectionResponse(
+            ok=False, message="Key decryption failed — re-enter credentials"
+        )
 
     if row["broker"] == "alpaca":
         return await _test_alpaca(key_plain, secret_plain, row["base_url"] or _ALPACA_PAPER_URL)
 
-    return TestConnectionResponse(ok=False, message=f"Live-test not implemented for {row['broker']}")
+    return TestConnectionResponse(
+        ok=False, message=f"Live-test not implemented for {row['broker']}"
+    )
 
 
 # ── OAuth login-URL endpoint ───────────────────────────────────────────────────
+
 
 @router.get("/oauth/{broker}/login-url", response_model=OAuthLoginUrlResponse)
 async def get_oauth_login_url(
@@ -295,6 +318,7 @@ async def get_oauth_login_url(
 
 # ── OAuth callback (code exchange) ────────────────────────────────────────────
 
+
 @router.post("/oauth/callback", response_model=BrokerConnectionResponse)
 async def oauth_callback(
     body: OAuthCallbackRequest,
@@ -311,13 +335,16 @@ async def oauth_callback(
     if body.broker == "upstox":
         if not body.code:
             raise HTTPException(status_code=400, detail="Missing 'code' for Upstox OAuth callback")
-        client_id     = getattr(settings, "upstox_client_id", "")
+        client_id = getattr(settings, "upstox_client_id", "")
         client_secret = getattr(settings, "upstox_client_secret", "")
         if not client_id:
             raise HTTPException(status_code=503, detail="Upstox OAuth not configured")
         try:
             token_data = await oauth.upstox_exchange_code(
-                client_id, client_secret, body.code, _oauth_redirect_uri("upstox"),
+                client_id,
+                client_secret,
+                body.code,
+                _oauth_redirect_uri("upstox"),
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
@@ -328,7 +355,9 @@ async def oauth_callback(
             key_encrypted=encrypt_key(client_id),
             secret_encrypted=encrypt_key(client_secret),
             access_token=encrypt_key(token_data["access_token"]),
-            refresh_token=encrypt_key(token_data["refresh_token"]) if token_data["refresh_token"] else None,
+            refresh_token=encrypt_key(token_data["refresh_token"])
+            if token_data["refresh_token"]
+            else None,
             token_expires_at=expires_at,
             is_paper=False,
         )
@@ -337,11 +366,13 @@ async def oauth_callback(
     if body.broker == "zerodha":
         token = body.request_token or body.code
         if not token:
-            raise HTTPException(status_code=400, detail="Missing 'request_token' for Zerodha OAuth callback")
+            raise HTTPException(
+                status_code=400, detail="Missing 'request_token' for Zerodha OAuth callback"
+            )
         existing = await repo.get_by_broker("zerodha")
         if not existing:
             raise HTTPException(status_code=422, detail="Zerodha API key not found — connect first")
-        api_key    = decrypt_key(existing["key_encrypted"])
+        api_key = decrypt_key(existing["key_encrypted"])
         api_secret = decrypt_key(existing["secret_encrypted"])
         try:
             token_data = await oauth.zerodha_exchange_code(api_key, api_secret, token)
@@ -358,10 +389,13 @@ async def oauth_callback(
         row = await repo.get_by_broker("zerodha")
         return _row_to_response(row, api_key)
 
-    raise HTTPException(status_code=400, detail=f"Unknown broker for OAuth callback: {body.broker!r}")
+    raise HTTPException(
+        status_code=400, detail=f"Unknown broker for OAuth callback: {body.broker!r}"
+    )
 
 
 # ── AngelOne credential login (no redirect) ───────────────────────────────────
+
 
 @router.post("/oauth/angelone/login", response_model=BrokerConnectionResponse)
 async def angelone_login(
@@ -385,7 +419,9 @@ async def angelone_login(
         key_encrypted=encrypt_key(body.client_id),
         secret_encrypted=encrypt_key(body.password),
         access_token=encrypt_key(token_data["access_token"]),
-        refresh_token=encrypt_key(token_data["refresh_token"]) if token_data["refresh_token"] else None,
+        refresh_token=encrypt_key(token_data["refresh_token"])
+        if token_data["refresh_token"]
+        else None,
         token_expires_at=expires_at,
         is_paper=False,
         base_url="https://apiconnect.angelbroking.com",

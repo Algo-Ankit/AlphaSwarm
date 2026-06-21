@@ -35,7 +35,7 @@ class MarketDataRepo:
         sql = f"""
             SELECT symbol, exchange, timeframe, bar_time, open, high, low, close, volume
             FROM market_data_cache
-            WHERE {' AND '.join(where)}
+            WHERE {" AND ".join(where)}
             ORDER BY bar_time DESC
             LIMIT ${i}
         """
@@ -43,16 +43,16 @@ class MarketDataRepo:
             rows = await conn.fetch(sql, *params)
         return list(reversed(rows))  # oldest-first
 
-    async def latest_bar_time(
-        self, symbol: str, exchange: str, timeframe: str
-    ) -> datetime | None:
+    async def latest_bar_time(self, symbol: str, exchange: str, timeframe: str) -> datetime | None:
         async with self._pool.acquire() as conn:
             val = await conn.fetchval(
                 """
                 SELECT MAX(bar_time) FROM market_data_cache
                 WHERE symbol = $1 AND exchange = $2 AND timeframe = $3
                 """,
-                symbol.upper(), exchange.upper(), timeframe,
+                symbol.upper(),
+                exchange.upper(),
+                timeframe,
             )
         if val is not None and val.tzinfo is None:
             val = val.replace(tzinfo=timezone.utc)
@@ -63,8 +63,15 @@ class MarketDataRepo:
             return
         rows = [
             (
-                b.symbol.upper(), b.exchange.upper(), b.timeframe, b.timestamp,
-                b.open, b.high, b.low, b.close, b.volume,
+                b.symbol.upper(),
+                b.exchange.upper(),
+                b.timeframe,
+                b.timestamp,
+                b.open,
+                b.high,
+                b.low,
+                b.close,
+                b.volume,
             )
             for b in bars
         ]

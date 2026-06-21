@@ -10,6 +10,7 @@ tests lock the correct contract.
 
 Runnable with pytest OR directly:  python tests/test_base_strategy_contract.py
 """
+
 import inspect
 
 from app.domain.base_strategy import BaseStrategy, StrategyContext
@@ -39,12 +40,14 @@ def test_docstring_example_uses_ctx_strategy_id():
 def test_system_prompt_uses_ctx_strategy_id():
     # The Agent Framework builder's template must also use the correct field.
     from app.services import strategy_builder
+
     src = inspect.getsource(strategy_builder)
     assert "self.ctx.risk.strategy_id" not in src
 
 
 if __name__ == "__main__":
     import traceback
+
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
     for fn in fns:

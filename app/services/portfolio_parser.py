@@ -8,6 +8,7 @@ rest of the platform sees one canonical holding shape regardless of the source
 broker. The platform never custodies these assets — rows are a read-only mirror
 of what the user holds at their own brokers/depositories.
 """
+
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
@@ -40,7 +41,7 @@ def normalize_holding(raw: dict) -> dict:
         asset_class = "other"
 
     broker = (raw.get("broker") or "Unknown").strip()
-    isin = (raw.get("isin") or None)
+    isin = raw.get("isin") or None
     if isin:
         isin = isin.strip().upper() or None
 
@@ -51,9 +52,7 @@ def normalize_holding(raw: dict) -> dict:
 
     current_price_raw = raw.get("current_price")
     current_price = (
-        _to_decimal(current_price_raw, "current_price")
-        if current_price_raw is not None
-        else None
+        _to_decimal(current_price_raw, "current_price") if current_price_raw is not None else None
     )
 
     price_for_value = current_price if current_price is not None else avg_cost

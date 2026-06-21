@@ -7,7 +7,6 @@ from app.db.base_repo import BaseRepo
 
 
 class BrokerRepo(BaseRepo):
-
     async def upsert(
         self,
         broker: str,
@@ -30,7 +29,12 @@ class BrokerRepo(BaseRepo):
                 updated_at       = now()
             RETURNING *
             """,
-            self.tenant_id, broker, key_encrypted, secret_encrypted, base_url, is_paper,
+            self.tenant_id,
+            broker,
+            key_encrypted,
+            secret_encrypted,
+            base_url,
+            is_paper,
         )
 
     async def upsert_oauth(
@@ -63,8 +67,15 @@ class BrokerRepo(BaseRepo):
                 updated_at       = now()
             RETURNING *
             """,
-            self.tenant_id, broker, key_encrypted, secret_encrypted, base_url, is_paper,
-            access_token, refresh_token, token_expires_at,
+            self.tenant_id,
+            broker,
+            key_encrypted,
+            secret_encrypted,
+            base_url,
+            is_paper,
+            access_token,
+            refresh_token,
+            token_expires_at,
         )
 
     async def update_oauth_tokens(
@@ -84,7 +95,11 @@ class BrokerRepo(BaseRepo):
                 updated_at       = now()
             WHERE tenant_id = $4 AND broker = $5
             """,
-            access_token, refresh_token, token_expires_at, self.tenant_id, broker,
+            access_token,
+            refresh_token,
+            token_expires_at,
+            self.tenant_id,
+            broker,
         )
 
     async def set_oauth_state(self, broker: str, state: str) -> None:
@@ -97,7 +112,9 @@ class BrokerRepo(BaseRepo):
             ON CONFLICT (tenant_id, broker)
             DO UPDATE SET oauth_state = EXCLUDED.oauth_state, updated_at = now()
             """,
-            self.tenant_id, broker, state,
+            self.tenant_id,
+            broker,
+            state,
         )
 
     async def get_by_broker(self, broker: str) -> asyncpg.Record | None:
@@ -106,7 +123,8 @@ class BrokerRepo(BaseRepo):
             SELECT * FROM broker_connections
             WHERE tenant_id = $1 AND broker = $2 AND is_active = true
             """,
-            self.tenant_id, broker,
+            self.tenant_id,
+            broker,
         )
 
     async def get_all(self) -> list[asyncpg.Record]:
@@ -125,11 +143,13 @@ class BrokerRepo(BaseRepo):
             SELECT * FROM broker_connections
             WHERE id = $1 AND tenant_id = $2 AND is_active = true
             """,
-            connection_id, self.tenant_id,
+            connection_id,
+            self.tenant_id,
         )
 
     async def delete(self, connection_id: UUID) -> None:
         await self.execute(
             "DELETE FROM broker_connections WHERE id = $1 AND tenant_id = $2",
-            connection_id, self.tenant_id,
+            connection_id,
+            self.tenant_id,
         )

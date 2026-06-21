@@ -7,6 +7,7 @@ SocialRepo. The platform never holds funds — a subscription dedicates the
 subscriber's OWN buying power, and copied trades fan out into their own broker
 account at signal time (see app/services/execution.fan_out_to_subscribers).
 """
+
 from uuid import UUID
 
 import asyncpg
@@ -20,6 +21,7 @@ router = APIRouter(prefix="/v1/social", tags=["social"])
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
+
 
 class LeaderboardEntry(BaseModel):
     public_strategy_id: str
@@ -58,7 +60,9 @@ class PublishResponse(BaseModel):
 
 
 class SubscribeRequest(BaseModel):
-    allocated_capital: float = Field(gt=0, description="Buying power to dedicate to this copied strategy")
+    allocated_capital: float = Field(
+        gt=0, description="Buying power to dedicate to this copied strategy"
+    )
 
 
 class SubscribeResponse(BaseModel):
@@ -79,6 +83,7 @@ class SubscriptionEntry(BaseModel):
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
+
 
 @router.get("/leaderboard", response_model=list[LeaderboardEntry])
 async def get_leaderboard(
@@ -122,7 +127,9 @@ async def publish_strategy(
     try:
         strategy_uuid = UUID(request.strategy_id)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid strategy_id") from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid strategy_id"
+        ) from exc
 
     repo = SocialRepo(pool, current_user.tenant_id)
     row = await repo.publish(
@@ -181,7 +188,9 @@ async def unsubscribe_strategy(
     repo = SocialRepo(pool, current_user.tenant_id)
     removed = await repo.unsubscribe(public_strategy_id)
     if not removed:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active subscription found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="No active subscription found."
+        )
 
 
 @router.get("/subscriptions", response_model=list[SubscriptionEntry])

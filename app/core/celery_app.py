@@ -35,23 +35,23 @@ celery_app.conf.update(
     accept_content=["json"],
     # ── Routing ──────────────────────────────────────────────
     task_routes={
-        "app.worker.tasks.*":      {"queue": "trading_tasks"},
+        "app.worker.tasks.*": {"queue": "trading_tasks"},
         "app.worker.beat_tasks.*": {"queue": "beat_tasks"},
     },
     task_default_queue="trading_tasks",
     # ── Reliability (critical for trading) ───────────────────
-    task_acks_late=True,               # ack only after task completes, not on receipt
-    task_reject_on_worker_lost=True,   # re-queue if worker process dies mid-task
-    worker_prefetch_multiplier=1,      # one task at a time per worker process
-                                       # (trading isolation — don't batch strategy tasks)
+    task_acks_late=True,  # ack only after task completes, not on receipt
+    task_reject_on_worker_lost=True,  # re-queue if worker process dies mid-task
+    worker_prefetch_multiplier=1,  # one task at a time per worker process
+    # (trading isolation — don't batch strategy tasks)
     # ── Worker lifecycle ─────────────────────────────────────
-    worker_max_tasks_per_child=50,     # recycle worker process every 50 tasks (prevents leaks)
+    worker_max_tasks_per_child=50,  # recycle worker process every 50 tasks (prevents leaks)
     worker_max_memory_per_child=400_000,  # kill worker if it exceeds 400MB RSS
     # ── Task timeouts ────────────────────────────────────────
-    task_soft_time_limit=3_600,        # 1 hour soft limit — task gets SoftTimeLimitExceeded
-    task_time_limit=3_660,             # 1 hour 1 min hard kill — SIGKILL
+    task_soft_time_limit=3_600,  # 1 hour soft limit — task gets SoftTimeLimitExceeded
+    task_time_limit=3_660,  # 1 hour 1 min hard kill — SIGKILL
     # ── Results ──────────────────────────────────────────────
-    result_expires=86_400,             # keep results in Redis for 24 hours
+    result_expires=86_400,  # keep results in Redis for 24 hours
     task_track_started=True,
     # ── Dev mode ─────────────────────────────────────────────
     task_always_eager=settings.celery_task_always_eager,

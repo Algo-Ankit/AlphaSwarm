@@ -3,6 +3,7 @@ Celery Beat periodic tasks.
 snapshot_portfolio and reconcile_positions implemented in Phase 4.
 refresh_active_symbols_news and refresh_stale_forecasts implemented here (Phase 3C).
 """
+
 import asyncio
 import logging
 
@@ -16,6 +17,7 @@ _settings = get_settings()
 def _get_pool():
     """Create a fresh asyncpg pool for use inside a sync Celery task."""
     import asyncpg
+
     return asyncpg.create_pool(
         _settings.database_url.replace("postgresql+asyncpg://", "postgresql://"),
         min_size=1,
@@ -28,6 +30,7 @@ def _publish_portfolio(tenant_id: str, payload: dict) -> None:
     import json
 
     from app.core.redis_pool import get_sync_redis
+
     try:
         # Shared process-wide client — reused across beats, never per-call created/closed.
         get_sync_redis().publish(f"portfolio:{tenant_id}", json.dumps(payload))
@@ -101,14 +104,17 @@ async def _snapshot_portfolio_async() -> None:
                     active,
                 )
                 # Live fan-out to /v1/ws/portfolio subscribers for this tenant.
-                _publish_portfolio(str(tenant_id), {
-                    "type": "portfolio",
-                    "snapshot_time": snap["snapshot_time"].isoformat(),
-                    "total_equity": total_equity,
-                    "open_pnl": float(open_pnl),
-                    "realized_pnl_today": float(realized_today),
-                    "active_strategies": active,
-                })
+                _publish_portfolio(
+                    str(tenant_id),
+                    {
+                        "type": "portfolio",
+                        "snapshot_time": snap["snapshot_time"].isoformat(),
+                        "total_equity": total_equity,
+                        "open_pnl": float(open_pnl),
+                        "realized_pnl_today": float(realized_today),
+                        "active_strategies": active,
+                    },
+                )
             except Exception as exc:
                 logger.warning("snapshot_portfolio: tenant %s failed: %s", tenant_id, exc)
     finally:
@@ -150,9 +156,7 @@ async def _refresh_news_async() -> None:
                     limit=20,
                     pool=pool,
                 )
-                logger.info(
-                    "  %s (%s): %d news items cached", symbol, exchange, len(items)
-                )
+                logger.info("  %s (%s): %d news items cached", symbol, exchange, len(items))
             except Exception as exc:
                 logger.warning("  %s (%s): news refresh failed: %s", symbol, exchange, exc)
     finally:
@@ -185,9 +189,7 @@ async def _refresh_forecasts_async() -> None:
             logger.info("refresh_stale_forecasts: no running strategies")
             return
 
-        logger.info(
-            "refresh_stale_forecasts: checking %d symbols", len(active)
-        )
+        logger.info("refresh_stale_forecasts: checking %d symbols", len(active))
         now = datetime.now(timezone.utc)
 
         for symbol, exchange in active:
@@ -198,9 +200,7 @@ async def _refresh_forecasts_async() -> None:
                     if gen_at.tzinfo is None:
                         gen_at = gen_at.replace(tzinfo=timezone.utc)
                     if (now - gen_at) < _STALE_THRESHOLD:
-                        logger.info(
-                            "  %s (%s): forecast fresh, skipping", symbol, exchange
-                        )
+                        logger.info("  %s (%s): forecast fresh, skipping", symbol, exchange)
                         continue
 
                 result = await get_forecast(
@@ -216,9 +216,7 @@ async def _refresh_forecasts_async() -> None:
                     result.mae or 0,
                 )
             except Exception as exc:
-                logger.warning(
-                    "  %s (%s): forecast refresh failed: %s", symbol, exchange, exc
-                )
+                logger.warning("  %s (%s): forecast refresh failed: %s", symbol, exchange, exc)
     finally:
         await pool.close()
 
@@ -230,8 +228,6 @@ def check_worker_heartbeats():
 
 
 async def _check_heartbeats_async() -> None:
-    from uuid import UUID
-
     pool = await _get_pool()
     try:
         # Find all stale running runs across all tenants
@@ -258,7 +254,8 @@ async def _check_heartbeats_async() -> None:
                     updated_at = now()
                 WHERE id = $1 AND tenant_id = $2
                 """,
-                run_id, tenant_id,
+                run_id,
+                tenant_id,
             )
             logger.warning("  marked run %s as failed (heartbeat timeout)", run_id)
     finally:
@@ -273,13 +270,10 @@ def reconcile_positions():
 
 async def _reconcile_positions_async() -> None:
     from decimal import Decimal
-    from uuid import UUID
 
     pool = await _get_pool()
     try:
-        brokers = await pool.fetch(
-            "SELECT * FROM broker_connections WHERE is_active = true"
-        )
+        brokers = await pool.fetch("SELECT * FROM broker_connections WHERE is_active = true")
         if not brokers:
             logger.info("reconcile_positions: no active broker connections")
             return
@@ -316,17 +310,26 @@ async def _reconcile_positions_async() -> None:
                         # Log discrepancy — cannot auto-correct since strategy_id is required
                         logger.warning(
                             "reconcile_positions: MISMATCH tenant=%s  %s  db=%s  broker=%s  diff=%s",
-                            tenant_id, symbol, db_qty, broker_qty, diff,
+                            tenant_id,
+                            symbol,
+                            db_qty,
+                            broker_qty,
+                            diff,
                         )
 
                 logger.info(
                     "reconcile_positions: tenant=%s  broker=%s  broker_positions=%d  db_positions=%d",
-                    tenant_id, broker, len(broker_positions), len(db_positions),
+                    tenant_id,
+                    broker,
+                    len(broker_positions),
+                    len(db_positions),
                 )
             except Exception as exc:
                 logger.warning(
                     "reconcile_positions: tenant %s broker %s failed: %s",
-                    tenant_id, broker, exc,
+                    tenant_id,
+                    broker,
+                    exc,
                 )
     finally:
         await pool.close()

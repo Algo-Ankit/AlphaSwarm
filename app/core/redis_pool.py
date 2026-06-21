@@ -14,6 +14,7 @@ Two flavours:
 Both are created lazily and cached. Do NOT .close() the returned client; it is
 shared for the lifetime of the process.
 """
+
 from __future__ import annotations
 
 from functools import lru_cache

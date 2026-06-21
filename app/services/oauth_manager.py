@@ -8,6 +8,7 @@ AngelOne — Credential-based TOTP API login (no redirect; user enters clientcod
 The 401-retry helper wraps any executor call: on HTTP 401 it refreshes the
 access token via refresh_fn, updates the DB, then retries once.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 # ── Upstox OAuth2 ─────────────────────────────────────────────────────────────
-_UPSTOX_AUTH_URL  = "https://api.upstox.com/v2/login/authorization/dialog"
+_UPSTOX_AUTH_URL = "https://api.upstox.com/v2/login/authorization/dialog"
 _UPSTOX_TOKEN_URL = "https://api.upstox.com/v2/login/authorization/token"
 
 
@@ -55,7 +56,9 @@ async def upstox_exchange_code(
             headers={"Accept": "application/json"},
         )
     if resp.status_code != 200:
-        raise ValueError(f"Upstox token exchange failed: HTTP {resp.status_code}: {resp.text[:200]}")
+        raise ValueError(
+            f"Upstox token exchange failed: HTTP {resp.status_code}: {resp.text[:200]}"
+        )
     data = resp.json()
     return {
         "access_token": data["access_token"],
@@ -94,7 +97,7 @@ async def upstox_refresh_access_token(
 
 # ── Zerodha Kite Connect ──────────────────────────────────────────────────────
 _ZERODHA_LOGIN_BASE = "https://kite.zerodha.com/connect/login"
-_ZERODHA_TOKEN_URL  = "https://api.kite.trade/session/token"
+_ZERODHA_TOKEN_URL = "https://api.kite.trade/session/token"
 
 
 def zerodha_login_url(api_key: str) -> str:
@@ -113,11 +116,13 @@ async def zerodha_exchange_code(api_key: str, api_secret: str, request_token: st
             headers={"X-Kite-Version": "3"},
         )
     if resp.status_code != 200:
-        raise ValueError(f"Zerodha token exchange failed: HTTP {resp.status_code}: {resp.text[:200]}")
+        raise ValueError(
+            f"Zerodha token exchange failed: HTTP {resp.status_code}: {resp.text[:200]}"
+        )
     data = resp.json().get("data", {})
     return {
         "access_token": data.get("access_token", ""),
-        "refresh_token": "",   # Zerodha tokens expire EOD; no server-side refresh
+        "refresh_token": "",  # Zerodha tokens expire EOD; no server-side refresh
         "expires_in": 86400,
     }
 
@@ -160,6 +165,7 @@ async def angelone_login(client_id: str, password: str, totp: str) -> dict:
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
+
 
 def token_expires_at(expires_in: int) -> datetime:
     """Return UTC datetime when a token with the given TTL (seconds) expires."""

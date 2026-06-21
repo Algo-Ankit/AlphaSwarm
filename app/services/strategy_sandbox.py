@@ -7,6 +7,7 @@ Strategy code receives ONLY these pre-injected symbols (no imports needed or all
 pd and np are intentionally excluded — strategies must use self.indicators and
 self.close / self.bars property accessors, not raw pandas/numpy computation.
 """
+
 from __future__ import annotations
 
 import ast
@@ -99,12 +100,12 @@ def _guarded_hasattr(obj, name):
 def _inplacevar(op: str, x, y):
     """Support augmented assignment operators (+=, -= etc.) in strategy code."""
     _ops = {
-        "+=":  operator.iadd,
-        "-=":  operator.isub,
-        "*=":  operator.imul,
-        "/=":  operator.itruediv,
+        "+=": operator.iadd,
+        "-=": operator.isub,
+        "*=": operator.imul,
+        "/=": operator.itruediv,
         "//=": operator.ifloordiv,
-        "%=":  operator.imod,
+        "%=": operator.imod,
         "**=": operator.ipow,
     }
     fn = _ops.get(op)
@@ -123,31 +124,37 @@ def _fix_indentation(source: str) -> str:
     line and strips its indentation level from every line in the source.
     """
     import textwrap
+
     source = textwrap.dedent(source)
     lines = source.splitlines()
     for line in lines:
         stripped = line.lstrip()
-        if not stripped or stripped.startswith('#'):
+        if not stripped or stripped.startswith("#"):
             continue  # skip blanks and comments when measuring class indent
-        if stripped.startswith('class ') and 'BaseStrategy' in stripped:
+        if stripped.startswith("class ") and "BaseStrategy" in stripped:
             indent = len(line) - len(stripped)
             if indent > 0:
-                prefix = ' ' * indent
+                prefix = " " * indent
                 lines = [ln[indent:] if ln.startswith(prefix) else ln for ln in lines]
             break
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
 _AUG_OPS = [
-    ("+=", "+"), ("-=", "-"), ("*=", "*"), ("/=", "/"),
-    ("//=", "//"), ("%=", "%"), ("**=", "**"),
+    ("+=", "+"),
+    ("-=", "-"),
+    ("*=", "*"),
+    ("/=", "/"),
+    ("//=", "//"),
+    ("%=", "%"),
+    ("**=", "**"),
 ]
 
 # Matches:  <indent>self.attr  <aug_op>  <expr>  <optional comment>
 _AUG_RE = __import__("re").compile(
-    r'^(?P<indent>\s*)(?P<attr>self\.\w+)\s*'
-    r'(?P<op>\*\*=|//=|\+=|-=|\*=|/=|%=)\s*'
-    r'(?P<expr>.+?)(?P<comment>\s*(?:#.*)?)$'
+    r"^(?P<indent>\s*)(?P<attr>self\.\w+)\s*"
+    r"(?P<op>\*\*=|//=|\+=|-=|\*=|/=|%=)\s*"
+    r"(?P<expr>.+?)(?P<comment>\s*(?:#.*)?)$"
 )
 
 
@@ -164,13 +171,13 @@ def _auto_correct(source: str) -> str:
     """
     import re
 
-    lines = source.split('\n')
+    lines = source.split("\n")
     out = []
     for line in lines:
         m = _AUG_RE.match(line)
         if m:
             op_map = dict(_AUG_OPS)
-            bin_op = op_map.get(m.group('op'))
+            bin_op = op_map.get(m.group("op"))
             if bin_op:
                 line = (
                     f"{m.group('indent')}{m.group('attr')} = "
@@ -178,18 +185,18 @@ def _auto_correct(source: str) -> str:
                     f"{m.group('comment')}"
                 )
         out.append(line)
-    source = '\n'.join(out)
+    source = "\n".join(out)
 
     # -> SomeType | None:  →  -> Optional[SomeType]:
     source = re.sub(
-        r'(->)\s*([\w][\w\[\], .]*?)\s*\|\s*None\s*(:)',
-        r'\1 Optional[\2]\3',
+        r"(->)\s*([\w][\w\[\], .]*?)\s*\|\s*None\s*(:)",
+        r"\1 Optional[\2]\3",
         source,
     )
     # -> None | SomeType:  →  -> Optional[SomeType]:
     source = re.sub(
-        r'(->)\s*None\s*\|\s*([\w][\w\[\], .]*?)\s*(:)',
-        r'\1 Optional[\2]\3',
+        r"(->)\s*None\s*\|\s*([\w][\w\[\], .]*?)\s*(:)",
+        r"\1 Optional[\2]\3",
         source,
     )
     return source
@@ -220,20 +227,40 @@ def compile_strategy_code(source: str) -> Type[BaseStrategy]:
     restricted_builtins = dict(safe_builtins)
     # safe_builtins omits several essential builtins (max, min, sum, list, etc.)
     # that strategy code needs. Add them explicitly — none expose dangerous capabilities.
-    restricted_builtins.update({
-        "max": max, "min": min, "sum": sum,
-        "list": list, "dict": dict, "set": set, "frozenset": frozenset,
-        "enumerate": enumerate, "map": map, "filter": filter, "reversed": reversed,
-        "any": any, "all": all, "print": print,
-        # Dunder-guarded — the real getattr/setattr/hasattr are a sandbox escape.
-        "getattr": _guarded_getattr, "hasattr": _guarded_hasattr, "setattr": _guarded_setattr,
-        "abs": abs, "round": round, "len": len, "range": range,
-        "int": int, "float": float, "str": str, "bool": bool,
-        # NOTE: iter/next are deliberately NOT exposed. The 2-arg form
-        # `iter(int, 1)` is an infinite loop the AST prescan can't catch
-        # (int() never reaches the sentinel). for-loops over real iterables
-        # still work via the internal `_getiter_` protocol below.
-    })
+    restricted_builtins.update(
+        {
+            "max": max,
+            "min": min,
+            "sum": sum,
+            "list": list,
+            "dict": dict,
+            "set": set,
+            "frozenset": frozenset,
+            "enumerate": enumerate,
+            "map": map,
+            "filter": filter,
+            "reversed": reversed,
+            "any": any,
+            "all": all,
+            "print": print,
+            # Dunder-guarded — the real getattr/setattr/hasattr are a sandbox escape.
+            "getattr": _guarded_getattr,
+            "hasattr": _guarded_hasattr,
+            "setattr": _guarded_setattr,
+            "abs": abs,
+            "round": round,
+            "len": len,
+            "range": range,
+            "int": int,
+            "float": float,
+            "str": str,
+            "bool": bool,
+            # NOTE: iter/next are deliberately NOT exposed. The 2-arg form
+            # `iter(int, 1)` is an infinite loop the AST prescan can't catch
+            # (int() never reaches the sentinel). for-loops over real iterables
+            # still work via the internal `_getiter_` protocol below.
+        }
+    )
     restricted_builtins["__import__"] = _blocked_import
 
     glb: dict = {
@@ -270,7 +297,8 @@ def compile_strategy_code(source: str) -> Type[BaseStrategy]:
         raise SandboxError(f"Strategy code raised error at load time: {exc}") from exc
 
     candidates = [
-        v for v in {**glb, **loc}.values()
+        v
+        for v in {**glb, **loc}.values()
         if isinstance(v, type)
         and issubclass(v, BaseStrategy)
         and v is not BaseStrategy

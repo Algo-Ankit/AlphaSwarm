@@ -11,6 +11,7 @@ snapshot inserted NULL — so "cash_balance" / "balance" are NOT flagged.
 
 Runnable with pytest OR directly:  python tests/test_no_fund_custody.py
 """
+
 import re
 from pathlib import Path
 
@@ -57,7 +58,7 @@ if __name__ == "__main__":
         print("FAIL  test_no_fund_custody_code")
         for v in found:
             print("  " + v)
-        print(f"\n0/1 passed")
+        print("\n0/1 passed")
         raise SystemExit(1)
     print("PASS  test_no_fund_custody_code")
     print("\n1/1 passed")

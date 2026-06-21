@@ -6,7 +6,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
-
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -57,9 +56,6 @@ def _build_cors_origins() -> list[str]:
     ]
 
 
-
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ── Startup ───────────────────────────────────────────────
@@ -77,15 +73,12 @@ async def lifespan(app: FastAPI):
 
     # Start Redis pub/sub → WebSocket bridge for all AlphaSwarm channels
     from app.ws.manager import ws_manager
-    listener_task = asyncio.create_task(
-        ws_manager.redis_listener(app.state.redis, "bars:*")
-    )
+
+    listener_task = asyncio.create_task(ws_manager.redis_listener(app.state.redis, "bars:*"))
     portfolio_listener_task = asyncio.create_task(
         ws_manager.redis_listener(app.state.redis, "portfolio:*")
     )
-    run_listener_task = asyncio.create_task(
-        ws_manager.redis_listener(app.state.redis, "run:*")
-    )
+    run_listener_task = asyncio.create_task(ws_manager.redis_listener(app.state.redis, "run:*"))
 
     yield
 

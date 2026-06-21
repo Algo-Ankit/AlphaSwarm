@@ -20,20 +20,28 @@ dunder-guarded. test_getattr_dunder_escape_blocked locks that shut.
 
 Runnable with pytest OR directly:  python tests/test_sandbox_security.py
 """
+
 import pandas as pd
 
 from app.domain.base_strategy import ReadOnlyDataFrame, StrategyContext
 from app.domain.models import StrategyRiskConfig
 from app.services.strategy_sandbox import SandboxError, compile_strategy_code
 
-_DF = pd.DataFrame([{"open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1} for _ in range(3)])
+_DF = pd.DataFrame(
+    [{"open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1} for _ in range(3)]
+)
 
 
 def _ctx() -> StrategyContext:
     return StrategyContext(
         strategy_id="00000000-0000-0000-0000-000000000001",
-        symbol="T", exchange="NASDAQ", timeframe="1d",
-        bars=ReadOnlyDataFrame(_DF), indicators={}, position=None, avg_cost=None,
+        symbol="T",
+        exchange="NASDAQ",
+        timeframe="1d",
+        bars=ReadOnlyDataFrame(_DF),
+        indicators={},
+        position=None,
+        avg_cost=None,
         risk=StrategyRiskConfig(allowed_symbols=["T"]),
     )
 
@@ -144,14 +152,16 @@ def test_setattr_dunder_blocked():
 
 def test_no_class_in_subclasses_reachable():
     # Belt-and-suspenders: the escape must not be able to enumerate Popen.
-    cls = compile_strategy_code(_strategy(
-        'try:\n'
-        '    o = getattr(getattr((), "__class__"), "__bases__")[0]\n'
-        '    subs = getattr(o, "__subclasses__")()\n'
-        '    return any(getattr(c, "__name__", "") == "Popen" for c in subs)\n'
-        'except Exception:\n'
-        '    return "blocked"'
-    ))
+    cls = compile_strategy_code(
+        _strategy(
+            "try:\n"
+            '    o = getattr(getattr((), "__class__"), "__bases__")[0]\n'
+            '    subs = getattr(o, "__subclasses__")()\n'
+            '    return any(getattr(c, "__name__", "") == "Popen" for c in subs)\n'
+            "except Exception:\n"
+            '    return "blocked"'
+        )
+    )
     assert cls(_ctx()).on_bar() == "blocked"
 
 
@@ -160,9 +170,9 @@ def test_str_subclass_startswith_override_blocked():
     # A str subclass that lies in startswith() must NOT smuggle "__class__"
     # past the getattr guard. _is_blocked_attr uses unbound str.startswith.
     _assert_blocked_at_runtime(
-        'class Evil(str):\n'
-        '    def startswith(self, *a):\n'
-        '        return False\n'
+        "class Evil(str):\n"
+        "    def startswith(self, *a):\n"
+        "        return False\n"
         'return getattr((), Evil("__class__"))'
     )
 
@@ -179,16 +189,17 @@ def test_format_map_via_guarded_getattr_blocked():
 # ── Runtime: iter(int, 1) infinite-loop vector removed ───────────────────────
 def test_iter_builtin_not_exposed():
     # iter/next are no longer in builtins → NameError, so iter(int, 1) can't hang.
-    _assert_blocked_at_runtime('return iter(int, 1)')
+    _assert_blocked_at_runtime("return iter(int, 1)")
 
 
 # ── Runtime: global-state pollution via module attribute write ───────────────
 def test_module_attribute_write_blocked():
     # Writing to the shared `math` module would pollute every other strategy in
     # the worker process. _write_guard must refuse it.
-    _assert_blocked_at_runtime('math.pi = 3\nreturn None')
+    _assert_blocked_at_runtime("math.pi = 3\nreturn None")
     # Sanity: the real math.pi is untouched.
     import math as _m
+
     assert _m.pi > 3.14
 
 
@@ -205,7 +216,9 @@ def test_guarded_getattr_allows_non_dunder():
 
 
 def test_guarded_hasattr_non_dunder_works_dunder_false():
-    cls = compile_strategy_code(_strategy('return [hasattr(self, "position"), hasattr((), "__class__")]'))
+    cls = compile_strategy_code(
+        _strategy('return [hasattr(self, "position"), hasattr((), "__class__")]')
+    )
     assert cls(_ctx()).on_bar() == [True, False]
 
 
@@ -224,6 +237,7 @@ def test_baseline_strategy_runs():
 if __name__ == "__main__":
     import os
     import traceback
+
     os.environ.setdefault("BROKER_KEY_ENCRYPTION_SECRET", "x" * 40)
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

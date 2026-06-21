@@ -2,6 +2,7 @@
 Broker routing + currency tests.
 Runnable with pytest OR directly:  python tests/test_broker_routing.py
 """
+
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -23,8 +24,8 @@ def test_exchange_to_broker():
     assert broker_for_exchange("CRYPTO") == "alpaca"
     assert broker_for_exchange("NSE") == "upstox"
     assert broker_for_exchange("BSE") == "upstox"
-    assert broker_for_exchange("nse") == "upstox"          # case-insensitive
-    assert broker_for_exchange("UNKNOWN") == "alpaca"      # safe default
+    assert broker_for_exchange("nse") == "upstox"  # case-insensitive
+    assert broker_for_exchange("UNKNOWN") == "alpaca"  # safe default
 
 
 def test_exchange_to_currency():
@@ -76,12 +77,17 @@ def test_upstox_without_access_token_fails_loudly():
 
 
 def test_inr_strategy_rejection_message_uses_rupee_symbol():
-    risk = StrategyRiskConfig(allowed_symbols=["RELIANCE"], currency="INR",
-                              max_order_notional=Decimal("1000"))
+    risk = StrategyRiskConfig(
+        allowed_symbols=["RELIANCE"], currency="INR", max_order_notional=Decimal("1000")
+    )
     order = OrderIntent(
         strategy_id="00000000-0000-0000-0000-000000000001",
-        symbol="RELIANCE", exchange="NSE", side=OrderSide.buy,
-        quantity=Decimal("100"), estimated_price=Decimal("100"), is_paper=True,  # 10_000 > 1_000
+        symbol="RELIANCE",
+        exchange="NSE",
+        side=OrderSide.buy,
+        quantity=Decimal("100"),
+        estimated_price=Decimal("100"),
+        is_paper=True,  # 10_000 > 1_000
     )
     res = verify_order_intent(order, risk, settings=_SETTINGS)
     assert not res.approved
@@ -90,6 +96,7 @@ def test_inr_strategy_rejection_message_uses_rupee_symbol():
 
 if __name__ == "__main__":
     import traceback
+
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
     for fn in fns:

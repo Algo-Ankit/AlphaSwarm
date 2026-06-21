@@ -16,7 +16,8 @@ class TenantRepo:
     async def create(self, name: str, plan: str = "founding_member") -> asyncpg.Record:
         return await self._pool.fetchrow(
             "INSERT INTO tenants (name, plan) VALUES ($1, $2) RETURNING *",
-            name, plan,
+            name,
+            plan,
         )
 
     async def get_by_id(self, tenant_id: UUID) -> asyncpg.Record | None:
@@ -73,9 +74,14 @@ class TenantRepo:
                 subscription_current_period_end = COALESCE($7, subscription_current_period_end)
             WHERE id = $8
             """,
-            status, plan, stripe_customer_id, stripe_subscription_id,
-            razorpay_customer_id, razorpay_subscription_id,
-            current_period_end, tenant_id,
+            status,
+            plan,
+            stripe_customer_id,
+            stripe_subscription_id,
+            razorpay_customer_id,
+            razorpay_subscription_id,
+            current_period_end,
+            tenant_id,
         )
 
 
@@ -102,7 +108,11 @@ class AuthUserRepo:
             VALUES ($1, $2, $3, $4, $5)
             RETURNING *
             """,
-            tenant_id, email, password_hash, display_name, role,
+            tenant_id,
+            email,
+            password_hash,
+            display_name,
+            role,
         )
 
     async def get_by_email(self, email: str) -> asyncpg.Record | None:
@@ -119,7 +129,6 @@ class AuthUserRepo:
 
 
 class RefreshTokenRepo:
-
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
 
@@ -140,7 +149,9 @@ class RefreshTokenRepo:
             VALUES ($1, $2, $3)
             RETURNING *
             """,
-            user_id, token_hash, expires_at,
+            user_id,
+            token_hash,
+            expires_at,
         )
 
     async def get_by_raw_token(self, raw_token: str) -> asyncpg.Record | None:
@@ -187,7 +198,9 @@ class RefreshTokenRepo:
                 rotated_to_hash    = $2
             WHERE token_hash = $3
             """,
-            grace_period_until, new_hash, old_hash,
+            grace_period_until,
+            new_hash,
+            old_hash,
         )
 
     async def delete_by_raw_token(self, raw_token: str) -> None:
@@ -210,7 +223,8 @@ class UserRepo(BaseRepo):
     async def get_by_id(self, user_id: UUID) -> asyncpg.Record | None:
         return await self.fetchrow(
             "SELECT * FROM users WHERE id = $1 AND tenant_id = $2 AND is_active = true",
-            user_id, self.tenant_id,
+            user_id,
+            self.tenant_id,
         )
 
     async def list_users(self) -> list[asyncpg.Record]:

@@ -1,7 +1,7 @@
 import base64
 from functools import lru_cache
 
-from pydantic import Field, computed_field
+from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -98,16 +98,18 @@ class Settings(BaseSettings):
 
     # Stripe (USD / Global)
     stripe_secret_key: str = ""
-    stripe_webhook_secret: str = ""        # whsec_... — verifies webhook signatures
-    stripe_price_quant: str = ""           # price_... for the Quant Tier subscription
-    stripe_success_url: str = "http://localhost:3000/settings/billing?status=success&session_id={CHECKOUT_SESSION_ID}"
+    stripe_webhook_secret: str = ""  # whsec_... — verifies webhook signatures
+    stripe_price_quant: str = ""  # price_... for the Quant Tier subscription
+    stripe_success_url: str = (
+        "http://localhost:3000/settings/billing?status=success&session_id={CHECKOUT_SESSION_ID}"
+    )
     stripe_cancel_url: str = "http://localhost:3000/settings/billing?status=cancel"
 
     # Razorpay (INR / India)
     razorpay_key_id: str = ""
     razorpay_key_secret: str = ""
-    razorpay_plan_quant: str = ""          # plan_... for the Quant Tier recurring plan
-    razorpay_webhook_secret: str = ""      # dashboard webhook secret (HMAC-SHA256)
+    razorpay_plan_quant: str = ""  # plan_... for the Quant Tier recurring plan
+    razorpay_webhook_secret: str = ""  # dashboard webhook secret (HMAC-SHA256)
     # Number of billing cycles a new subscription runs for (e.g. 12 monthly).
     razorpay_subscription_total_count: int = 12
 

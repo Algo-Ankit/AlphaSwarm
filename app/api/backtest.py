@@ -2,6 +2,7 @@
 Backtest API — POST /v1/strategies/{id}/backtest
 Runs a bar-by-bar simulation of the strategy's current generated_logic against historical data.
 """
+
 import logging
 from uuid import UUID
 
@@ -49,6 +50,7 @@ async def run_strategy_backtest(
         )
 
     import json as _json
+
     _rc = record["risk_config"]
     if isinstance(_rc, str):
         try:
@@ -59,6 +61,7 @@ async def run_strategy_backtest(
 
     # Fetch historical bars
     from app.services.market_data import get_bars
+
     bars = await get_bars(
         symbol=request.symbol.upper(),
         exchange=request.exchange.upper(),
@@ -76,7 +79,8 @@ async def run_strategy_backtest(
 
     # Run backtest in thread pool (CPU-bound pandas/numpy)
     import asyncio
-    from app.services.backtest import run_backtest, BacktestResult
+
+    from app.services.backtest import BacktestResult, run_backtest
     from app.services.strategy_sandbox import SandboxError
 
     try:

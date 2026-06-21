@@ -3,6 +3,7 @@ Centralized risk verification. Called before EVERY broker API call.
 This function is the safety wall. It must never be bypassed.
 Adding a new check: add it here, not in strategy code.
 """
+
 from decimal import Decimal
 
 from app.core.config import Settings, get_settings
@@ -13,7 +14,6 @@ from app.domain.broker_routing import (
     currency_symbol,
 )
 from app.domain.market_data import MarketState
-from app.domain.market_hours import is_market_open
 from app.domain.models import OrderIntent, OrderSide, RiskCheckResult, StrategyRiskConfig
 
 # When no real-time tick is available, the daily-notional cap must not blindly
@@ -97,7 +97,12 @@ def verify_order_intent(
             )
 
     # ── Determine safe cap price for ALL notional checks ─────────────────────
-    if reference_price is not None and reference_price > 0 and market_state is not None and market_state.is_open:
+    if (
+        reference_price is not None
+        and reference_price > 0
+        and market_state is not None
+        and market_state.is_open
+    ):
         cap_price = reference_price
     else:
         cap_price = order.estimated_price * (Decimal("1") + GAP_SAFETY_MARGIN)
@@ -114,11 +119,11 @@ def verify_order_intent(
 
     # ── Check 4a: Per-symbol position notional cap ────────────────────────────
     pos = current_position or 0.0
-    
+
     side_sign = Decimal("1") if order.side == OrderSide.buy else Decimal("-1")
     delta = order.quantity * side_sign
     projected_position_qty = Decimal(str(pos)) + delta
-    
+
     is_increasing_exposure = False
     if pos >= 0 and order.side == OrderSide.buy:
         is_increasing_exposure = True
@@ -126,7 +131,7 @@ def verify_order_intent(
         is_increasing_exposure = True
     elif abs(projected_position_qty) > abs(Decimal(str(pos))):
         is_increasing_exposure = True  # Stop-and-reverse overshoot
-        
+
     if current_position_value is not None and is_increasing_exposure:
         # If it was a stop-and-reverse, the new risk exposure is the absolute size of the new position.
         # If just adding to a position, it's the current value + new order value.
@@ -161,7 +166,7 @@ def verify_order_intent(
     clean_pos = Decimal(str(pos))
     if abs(clean_pos) < Decimal("0.0000001"):
         clean_pos = Decimal("0")
-        
+
     if order.side == OrderSide.sell and clean_pos > 0:
         closing_qty = min(order.quantity, clean_pos)
     elif order.side == OrderSide.buy and clean_pos < 0:
@@ -185,9 +190,7 @@ def verify_order_intent(
 
     # ── Check 6: Platform-level order notional cap ────────────────────────────
     platform_cap_usd = Decimal(str(settings.default_max_order_notional))
-    platform_cap = convert_amount(
-        platform_cap_usd, PLATFORM_CAP_CURRENCY, strategy_risk.currency
-    )
+    platform_cap = convert_amount(platform_cap_usd, PLATFORM_CAP_CURRENCY, strategy_risk.currency)
     if safe_notional > platform_cap:
         return RiskCheckResult(
             approved=False,

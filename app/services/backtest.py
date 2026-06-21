@@ -9,27 +9,28 @@ Design invariants:
   - Bankruptcy halts the simulation immediately
   - Sharpe annualization factor derived from timeframe, not hardcoded to sqrt(252)
 """
+
 from __future__ import annotations
 
 import logging
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from decimal import Decimal, ROUND_DOWN
-from typing import TYPE_CHECKING
+from decimal import ROUND_DOWN, Decimal
 
 import pandas as pd
+
+from app.core.config import get_settings
+
 # pandas_ta is imported lazily inside _precompute_indicators so the pure-math
 # parts of this module (e.g. _compute_metrics) can be imported/tested without it.
-
-from app.domain.base_strategy import BaseStrategy, ReadOnlyDataFrame, StrategyContext
+from app.domain.base_strategy import ReadOnlyDataFrame, StrategyContext
 from app.domain.broker_routing import allows_fractional_shares
 from app.domain.market_data import Bar, MarketState
 from app.domain.models import OrderIntent, OrderSide, OrderType, StrategyRiskConfig
 from app.domain.risk import verify_order_intent
-from app.core.config import get_settings
 from app.services.exec_timeout import time_limit
-from app.services.strategy_sandbox import SandboxError, compile_strategy_code
+from app.services.strategy_sandbox import compile_strategy_code
 
 logger = logging.getLogger(__name__)
 
@@ -46,18 +47,18 @@ _SHORT_BORROW_ANNUAL_RATE = 0.08
 
 # Trading-period annualization factor per timeframe
 _BARS_PER_YEAR: dict[str, float] = {
-    "1m":   252 * 390,
+    "1m": 252 * 390,
     "1min": 252 * 390,
-    "5m":   252 * 78,
+    "5m": 252 * 78,
     "5min": 252 * 78,
-    "15m":  252 * 26,
+    "15m": 252 * 26,
     "15min": 252 * 26,
-    "1h":   252 * 6.5,
-    "4h":   252 * 1.625,
-    "1d":   252.0,
-    "1D":   252.0,
-    "1w":   52.0,
-    "1W":   52.0,
+    "1h": 252 * 6.5,
+    "4h": 252 * 1.625,
+    "1d": 252.0,
+    "1D": 252.0,
+    "1w": 52.0,
+    "1W": 52.0,
 }
 
 
@@ -73,12 +74,12 @@ class BacktestBar:
 
 @dataclass
 class BacktestTrade:
-    bar_index: int       # index of the signal bar (fill is at bar_index+1 open)
+    bar_index: int  # index of the signal bar (fill is at bar_index+1 open)
     timestamp: datetime  # close timestamp of the signal bar
     symbol: str
     side: str
     quantity: Decimal
-    price: Decimal       # actual fill price = bars[bar_index+1].open
+    price: Decimal  # actual fill price = bars[bar_index+1].open
 
 
 @dataclass
@@ -180,8 +181,13 @@ def run_backtest(
         #    against this bar's high/low BEFORE any new signal so paper matches live.
         if position != 0:
             exit_fill = _bracket_exit_fill(
-                position, exit_stop_price, exit_take_price,
-                float(bars[i].open), float(bars[i].high), float(bars[i].low), slippage_bps,
+                position,
+                exit_stop_price,
+                exit_take_price,
+                float(bars[i].open),
+                float(bars[i].high),
+                float(bars[i].low),
+                slippage_bps,
             )
             if exit_fill is not None:
                 exit_side, exit_px = exit_fill
@@ -189,18 +195,20 @@ def run_backtest(
                 fill_price = Decimal(str(exit_px))
                 commission = commission_per_share * float(qty)
                 notional = float(qty) * float(fill_price)
-                if exit_side == OrderSide.sell:   # close long
-                    cash += (notional - commission)
-                else:                             # cover short
-                    cash -= (notional + commission)
-                trades.append(BacktestTrade(
-                    bar_index=i,
-                    timestamp=bars[i].timestamp,
-                    symbol=symbol,
-                    side=exit_side.value,
-                    quantity=qty,
-                    price=fill_price,
-                ))
+                if exit_side == OrderSide.sell:  # close long
+                    cash += notional - commission
+                else:  # cover short
+                    cash -= notional + commission
+                trades.append(
+                    BacktestTrade(
+                        bar_index=i,
+                        timestamp=bars[i].timestamp,
+                        symbol=symbol,
+                        side=exit_side.value,
+                        quantity=qty,
+                        price=fill_price,
+                    )
+                )
                 position = Decimal("0")
                 avg_cost = None
                 exit_stop_price = None
@@ -219,9 +227,7 @@ def run_backtest(
 
         # 2. Bankruptcy check — halt if equity wiped out
         if equity <= 0.0:
-            logger.warning(
-                "Backtest halted at bar %d: equity=%.2f (bankruptcy)", i, equity
-            )
+            logger.warning("Backtest halted at bar %d: equity=%.2f (bankruptcy)", i, equity)
             if position != 0:
                 cash += float(position) * close_price
                 position = Decimal("0")
@@ -310,11 +316,16 @@ def run_backtest(
         # Feed Checks 4a/4b their inputs so the per-symbol position cap and the
         # max-open-positions cap are rigorously enforced in simulation (not bypassed).
         # Single-symbol backtest: existing exposure is this position; open count is 0/1.
-        current_pos_value = abs(float(position)) * float(signal.estimated_price) if position else 0.0
+        current_pos_value = (
+            abs(float(position)) * float(signal.estimated_price) if position else 0.0
+        )
         open_positions_count = 1 if position != 0 else 0
 
         risk_result = verify_order_intent(
-            signal, risk_profile, market_state=mock_state, current_position=current_pos,
+            signal,
+            risk_profile,
+            market_state=mock_state,
+            current_position=current_pos,
             current_position_value=current_pos_value,
             open_positions_count=open_positions_count,
         )
@@ -334,7 +345,9 @@ def run_backtest(
         if is_limit:
             if signal.side == OrderSide.buy and float(bars[i + 1].low) > float(signal.limit_price):
                 continue
-            if signal.side == OrderSide.sell and float(bars[i + 1].high) < float(signal.limit_price):
+            if signal.side == OrderSide.sell and float(bars[i + 1].high) < float(
+                signal.limit_price
+            ):
                 continue
             # The better of the limit price or the opening price
             if signal.side == OrderSide.buy:
@@ -361,10 +374,12 @@ def run_backtest(
         notional = float(qty * fill_price)
 
         if signal.side == OrderSide.buy:
-            cash -= (notional + commission)
+            cash -= notional + commission
             if position >= 0:
                 new_qty = position + qty
-                avg_cost = float((Decimal(str(avg_cost or 0)) * position + fill_price * qty) / new_qty)
+                avg_cost = float(
+                    (Decimal(str(avg_cost or 0)) * position + fill_price * qty) / new_qty
+                )
                 position = new_qty
             else:
                 new_qty = position + qty
@@ -374,10 +389,12 @@ def run_backtest(
                     avg_cost = None
                 position = new_qty
         else:
-            cash += (notional - commission)
+            cash += notional - commission
             if position <= 0:
                 new_qty = position - qty
-                avg_cost = float((Decimal(str(avg_cost or 0)) * abs(position) + fill_price * qty) / abs(new_qty))
+                avg_cost = float(
+                    (Decimal(str(avg_cost or 0)) * abs(position) + fill_price * qty) / abs(new_qty)
+                )
                 position = new_qty
             else:
                 new_qty = position - qty
@@ -394,8 +411,10 @@ def run_backtest(
         flipped = (prev_pos > 0 and position < 0) or (prev_pos < 0 and position > 0)
         if position == 0:
             exit_stop_price = exit_take_price = None
-        elif (flat_entry or flipped) and exchange.upper() != "CRYPTO" and (
-            risk_profile.stop_loss_pct is not None or risk_profile.take_profit_pct is not None
+        elif (
+            (flat_entry or flipped)
+            and exchange.upper() != "CRYPTO"
+            and (risk_profile.stop_loss_pct is not None or risk_profile.take_profit_pct is not None)
         ):
             # Clean entry from flat OR a stop-and-reverse. On a flip the old brackets
             # belonged to the now-closed opposite side; we must attach FRESH legs to
@@ -405,21 +424,25 @@ def run_backtest(
             # the signal-bar estimate. Measuring the stop/take from a price we never
             # paid mis-sizes both legs, badly so on a gapped open.
             exit_stop_price, exit_take_price = _bracket_exit_levels(
-                position > 0, float(fill_price),
-                risk_profile.stop_loss_pct, risk_profile.take_profit_pct,
+                position > 0,
+                float(fill_price),
+                risk_profile.stop_loss_pct,
+                risk_profile.take_profit_pct,
             )
         elif flipped:
             # Flipped but no brackets attachable (crypto, or no SL/TP configured).
             exit_stop_price = exit_take_price = None
 
-        trades.append(BacktestTrade(
-            bar_index=i,
-            timestamp=bars[i].timestamp,
-            symbol=symbol,
-            side=signal.side.value,
-            quantity=qty,
-            price=fill_price,
-        ))
+        trades.append(
+            BacktestTrade(
+                bar_index=i,
+                timestamp=bars[i].timestamp,
+                symbol=symbol,
+                side=signal.side.value,
+                quantity=qty,
+                price=fill_price,
+            )
+        )
 
     # ── Liquidate any remaining open position at last available close ─────────
     # Formula: cash += position × last_close handles both long (+ cash) and short (- cash).
@@ -441,7 +464,12 @@ def run_backtest(
         equity_curve.append(final_equity)
 
     metrics = _compute_metrics(
-        equity_curve, trades, initial_equity, final_equity, timeframe, bars,
+        equity_curve,
+        trades,
+        initial_equity,
+        final_equity,
+        timeframe,
+        bars,
         commission_per_share=commission_per_share,
     )
 
@@ -472,6 +500,7 @@ def run_backtest(
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _bracket_exit_levels(
     is_long: bool,
@@ -530,7 +559,7 @@ def _bracket_exit_fill(
             return OrderSide.sell, ref * (1 - slip)
         if take_hit:
             return OrderSide.sell, take_price
-    else:             # short: stop above entry, take below
+    else:  # short: stop above entry, take below
         stop_hit = stop_price is not None and not math.isnan(bar_high) and bar_high >= stop_price
         take_hit = take_price is not None and not math.isnan(bar_low) and bar_low <= take_price
         if stop_hit:
@@ -542,13 +571,15 @@ def _bracket_exit_fill(
 
 
 def _bars_to_df(bars: list[Bar]) -> pd.DataFrame:
-    df = pd.DataFrame({
-        "open":   [float(b.open)   for b in bars],
-        "high":   [float(b.high)   for b in bars],
-        "low":    [float(b.low)    for b in bars],
-        "close":  [float(b.close)  for b in bars],
-        "volume": [float(b.volume) for b in bars],
-    })
+    df = pd.DataFrame(
+        {
+            "open": [float(b.open) for b in bars],
+            "high": [float(b.high) for b in bars],
+            "low": [float(b.low) for b in bars],
+            "close": [float(b.close) for b in bars],
+            "volume": [float(b.volume) for b in bars],
+        }
+    )
     df.index = pd.DatetimeIndex([b.timestamp for b in bars])
     return df
 
@@ -596,8 +627,7 @@ def _compute_metrics(
     import numpy as np
 
     total_return_pct = (
-        (final_equity - initial_equity) / initial_equity * 100.0
-        if initial_equity else 0.0
+        (final_equity - initial_equity) / initial_equity * 100.0 if initial_equity else 0.0
     )
 
     # Timeframe-correct Sharpe annualization
@@ -639,8 +669,8 @@ def _compute_metrics(
     # Simple Win Rate + gross P&L: Track Realized P&L on closing trades
     profitable = 0
     closing_trades = 0
-    gross_profit = 0.0   # sum of positive realised P&L (for profit factor)
-    gross_loss = 0.0     # sum of |negative realised P&L|
+    gross_profit = 0.0  # sum of positive realised P&L (for profit factor)
+    gross_loss = 0.0  # sum of |negative realised P&L|
     sim_pos = Decimal("0")
     sim_avg_cost = 0.0
     for t in trades:
@@ -650,7 +680,7 @@ def _compute_metrics(
                 closing_trades += 1
                 closed_qty = min(float(qty), float(abs(sim_pos)))
                 pnl = (sim_avg_cost - float(t.price)) * closed_qty  # short: profit when price falls
-                pnl -= 2.0 * commission_per_share * closed_qty       # entry + exit commission
+                pnl -= 2.0 * commission_per_share * closed_qty  # entry + exit commission
                 if pnl >= 0:
                     profitable += 1
                     gross_profit += pnl
@@ -663,14 +693,16 @@ def _compute_metrics(
                     sim_avg_cost = 0.0
             else:
                 new_pos = sim_pos + qty
-                sim_avg_cost = float((Decimal(str(sim_avg_cost)) * sim_pos + t.price * qty) / new_pos)
+                sim_avg_cost = float(
+                    (Decimal(str(sim_avg_cost)) * sim_pos + t.price * qty) / new_pos
+                )
                 sim_pos = new_pos
         else:
             if sim_pos > 0:
                 closing_trades += 1
                 closed_qty = min(float(qty), float(sim_pos))
                 pnl = (float(t.price) - sim_avg_cost) * closed_qty  # long: profit when price rises
-                pnl -= 2.0 * commission_per_share * closed_qty       # entry + exit commission
+                pnl -= 2.0 * commission_per_share * closed_qty  # entry + exit commission
                 if pnl >= 0:
                     profitable += 1
                     gross_profit += pnl
@@ -683,7 +715,9 @@ def _compute_metrics(
                     sim_avg_cost = 0.0
             else:
                 new_pos = sim_pos - qty
-                sim_avg_cost = float((Decimal(str(sim_avg_cost)) * abs(sim_pos) + t.price * qty) / abs(new_pos))
+                sim_avg_cost = float(
+                    (Decimal(str(sim_avg_cost)) * abs(sim_pos) + t.price * qty) / abs(new_pos)
+                )
                 sim_pos = new_pos
 
     win_rate = (profitable / closing_trades * 100.0) if closing_trades > 0 else 0.0

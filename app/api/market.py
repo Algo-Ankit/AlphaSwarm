@@ -16,7 +16,7 @@ from app.services.news_intel import IntelligenceServiceError
 router = APIRouter(prefix="/v1/market", tags=["market"])
 
 _VALID_TIMEFRAMES = {"1m", "5m", "15m", "1h", "4h", "1d", "1w"}
-_VALID_EXCHANGES   = {"NASDAQ", "NYSE", "NSE", "BSE", "CRYPTO"}
+_VALID_EXCHANGES = {"NASDAQ", "NYSE", "NSE", "BSE", "CRYPTO"}
 _DEFAULT_INDICATORS = "rsi(14),macd(12,26,9),bb(20,2),ema(20),ema(50),ema(200),vwap"
 
 
@@ -27,7 +27,9 @@ def _parse_dt(s: str | None, param: str) -> datetime | None:
         dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
         return dt.astimezone(timezone.utc)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid date for '{param}': {s!r}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid date for '{param}': {s!r}"
+        )
 
 
 def _validate_timeframe(tf: str) -> None:
@@ -84,7 +86,7 @@ async def get_bars(
     _validate_timeframe(timeframe)
     _validate_exchange(exchange)
     start_dt = _parse_dt(start, "start")
-    end_dt   = _parse_dt(end,   "end")
+    end_dt = _parse_dt(end, "end")
 
     bars = await md_svc.get_bars(
         symbol=symbol.upper(),
@@ -128,11 +130,11 @@ async def get_indicators(
 
     values = await ind_svc.compute_indicators(bars, indicators)
     return {
-        "symbol":     symbol.upper(),
-        "exchange":   exchange.upper(),
-        "timeframe":  timeframe,
-        "timestamp":  bars[-1].timestamp.isoformat(),
-        "close":      float(bars[-1].close),
+        "symbol": symbol.upper(),
+        "exchange": exchange.upper(),
+        "timeframe": timeframe,
+        "timestamp": bars[-1].timestamp.isoformat(),
+        "close": float(bars[-1].close),
         "indicators": values,
     }
 

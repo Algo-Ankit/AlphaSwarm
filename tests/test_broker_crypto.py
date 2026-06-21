@@ -6,6 +6,7 @@ the decrypt-only fallbacks — v2 (PBKDF2) and pre-v2 legacy static-salt ciphert
 — still decrypt. Runnable with pytest OR directly:
     python tests/test_broker_crypto.py
 """
+
 import base64
 import os
 
@@ -63,6 +64,7 @@ def test_corrupted_ciphertext_raises_valueerror():
 
 if __name__ == "__main__":
     import traceback
+
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
     for fn in fns:

@@ -103,7 +103,9 @@ async def login(
 
     user = await user_repo.get_by_email(body.email)
     if not user or not verify_password(body.password, user["password_hash"]):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
+        )
 
     tenant = await tenant_repo.get_by_id(user["tenant_id"])
 
@@ -138,7 +140,9 @@ async def refresh_token(
 
     record = await token_repo.get_by_raw_token(body.refresh_token)
     if not record:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token"
+        )
 
     raw_refresh = create_refresh_token()
 

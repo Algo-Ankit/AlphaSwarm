@@ -6,6 +6,7 @@ which also publishes a live update to /v1/ws/portfolio. The platform never holds
 funds — total_equity/open_pnl are display aggregates derived from positions and
 the user's own broker account; cash_balance is a nullable display snapshot.
 """
+
 from datetime import date
 
 import asyncpg
@@ -23,16 +24,16 @@ router = APIRouter(prefix="/v1/portfolio", tags=["portfolio"])
 # Asset class label by exchange
 _ASSET_CLASS: dict[str, str] = {
     "NASDAQ": "Equity (US)",
-    "NYSE":   "Equity (US)",
-    "NSE":    "Equity (IN)",
-    "BSE":    "Equity (IN)",
+    "NYSE": "Equity (US)",
+    "NSE": "Equity (IN)",
+    "BSE": "Equity (IN)",
     "CRYPTO": "Crypto",
 }
 _ALLOC_COLOR: dict[str, str] = {
     "Equity (US)": "#8b5cf6",
     "Equity (IN)": "#06b6d4",
-    "Crypto":      "#f59e0b",
-    "Other":       "#6b7280",
+    "Crypto": "#f59e0b",
+    "Other": "#6b7280",
 }
 
 
@@ -84,7 +85,7 @@ async def get_allocation(
         {
             "label": label,
             "value": round(value, 2),
-            "pct":   round(value / total * 100, 1),
+            "pct": round(value / total * 100, 1),
             "color": _ALLOC_COLOR.get(label, _ALLOC_COLOR["Other"]),
         }
         for label, value in buckets.items()
@@ -101,8 +102,12 @@ async def get_summary(
     row = await repo.latest()
     if not row:
         return PortfolioSummary(
-            snapshot_time=None, total_equity=0.0, open_pnl=0.0,
-            realized_pnl_today=0.0, active_strategies=0, has_data=False,
+            snapshot_time=None,
+            total_equity=0.0,
+            open_pnl=0.0,
+            realized_pnl_today=0.0,
+            active_strategies=0,
+            has_data=False,
         )
     return PortfolioSummary(
         snapshot_time=row["snapshot_time"].isoformat(),
@@ -136,12 +141,13 @@ async def get_snapshots(
 
 # ── Unified multi-broker holdings (CAS ingestion) ──────────────────────────────
 
+
 class CasHolding(BaseModel):
     symbol: str = Field(min_length=1, max_length=64)
     name: str = ""
     isin: str | None = None
-    asset_class: str = "equity"   # equity | mutual_fund | etf | bond | other
-    broker: str = "Unknown"       # depository participant / broker
+    asset_class: str = "equity"  # equity | mutual_fund | etf | bond | other
+    broker: str = "Unknown"  # depository participant / broker
     quantity: float = Field(gt=0)
     avg_cost: float = Field(ge=0, default=0)
     current_price: float | None = None
@@ -249,6 +255,7 @@ async def _build_unified_response(
 
 
 # ── Monte Carlo wealth forecast ────────────────────────────────────────────────
+
 
 class ForecastRequest(BaseModel):
     current_portfolio_value: float = Field(ge=0)

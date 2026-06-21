@@ -9,7 +9,9 @@ router = APIRouter(prefix="/v1/ai-advisor", tags=["ai-advisor"])
 
 
 class AdvisorQueryRequest(BaseModel):
-    query: str = Field(min_length=1, max_length=4000, description="Natural-language analysis or planning request.")
+    query: str = Field(
+        min_length=1, max_length=4000, description="Natural-language analysis or planning request."
+    )
 
 
 class AdvisorResponse(BaseModel):

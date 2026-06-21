@@ -12,6 +12,7 @@ median and optimistic outcomes.
 Pure-numpy and CPU-light (≤ 240 monthly steps × N sims, fully vectorised across
 sims), so it runs inline without a thread pool.
 """
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -26,10 +27,10 @@ _MONTHS_PER_YEAR = 12
 @dataclass
 class YearProjection:
     year: int
-    contributed: float   # cumulative capital invested by end of this year
-    pessimistic: float   # 10th percentile wealth
-    median: float        # 50th percentile wealth
-    optimistic: float    # 90th percentile wealth
+    contributed: float  # cumulative capital invested by end of this year
+    pessimistic: float  # 10th percentile wealth
+    median: float  # 50th percentile wealth
+    optimistic: float  # 90th percentile wealth
 
     def to_dict(self) -> dict:
         return {
@@ -45,8 +46,8 @@ class YearProjection:
 class MonteCarloResult:
     current_portfolio_value: float
     monthly_contribution: float
-    expected_cagr: float       # annual, as a fraction (0.12 == 12%)
-    annual_volatility: float   # annual, as a fraction
+    expected_cagr: float  # annual, as a fraction (0.12 == 12%)
+    annual_volatility: float  # annual, as a fraction
     years: int
     simulations: int
     total_contributed: float

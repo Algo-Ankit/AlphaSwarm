@@ -27,6 +27,7 @@ router = APIRouter(prefix="/v1", tags=["strategies"])
 
 def _record_to_response(record: asyncpg.Record) -> StrategyResponse:
     import json as _json
+
     risk_raw = record["risk_config"]
     if isinstance(risk_raw, str):
         try:
@@ -37,7 +38,7 @@ def _record_to_response(record: asyncpg.Record) -> StrategyResponse:
         risk = StrategyRiskConfig.model_validate(risk_raw if isinstance(risk_raw, dict) else {})
     except Exception:
         risk = StrategyRiskConfig()
-        
+
     try:
         status_val = StrategyStatus(record["status"])
     except Exception:
@@ -78,9 +79,16 @@ async def create_strategy(
     repo = StrategyRepo(pool, current_user.tenant_id)
     if request.creation_mode == "quant":
         if not request.code_source or len(request.code_source.strip()) < 20:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                                detail="code_source is required for quant strategies")
-        from app.services.strategy_sandbox import SandboxError, compile_strategy_code, normalize_strategy_code
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="code_source is required for quant strategies",
+            )
+        from app.services.strategy_sandbox import (
+            SandboxError,
+            compile_strategy_code,
+            normalize_strategy_code,
+        )
+
         normalized = normalize_strategy_code(request.code_source)
         try:
             compile_strategy_code(normalized)
@@ -95,7 +103,9 @@ async def create_strategy(
     else:
         try:
             generated_logic, explanation = await compile_strategy_prompt(
-                request, pool=pool, user_email=current_user.email,
+                request,
+                pool=pool,
+                user_email=current_user.email,
             )
         except ValueError as exc:
             raise HTTPException(
@@ -120,6 +130,7 @@ async def create_strategy(
     # Currency is a property of the market, not a user choice — derive it from the
     # exchange so notional limits are stored/displayed in ₹ for NSE/BSE, $ for US.
     from app.domain.broker_routing import currency_for_exchange
+
     risk_config = request.risk.model_dump(mode="json")
     risk_config["currency"] = currency_for_exchange(inferred_exchange)
 
@@ -172,7 +183,12 @@ async def update_strategy_code(
     current_user: CurrentUser = Depends(get_current_user),
     pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> StrategyResponse:
-    from app.services.strategy_sandbox import SandboxError, compile_strategy_code, normalize_strategy_code
+    from app.services.strategy_sandbox import (
+        SandboxError,
+        compile_strategy_code,
+        normalize_strategy_code,
+    )
+
     normalized = normalize_strategy_code(request.code_source)
     try:
         compile_strategy_code(normalized)
@@ -212,6 +228,7 @@ async def run_strategy(
 
     # asyncpg may return JSONB columns as str; parse defensively before dispatch
     import json as _json
+
     _rc = record["risk_config"]
     if isinstance(_rc, str):
         try:
@@ -319,6 +336,7 @@ async def lump_sum_boost(
     until the user explicitly clicks Approve in the notification center.
     """
     from app.db.repositories.notifications import NotificationRepo
+
     repo = StrategyRepo(pool, current_user.tenant_id)
     record = await repo.get_by_id(strategy_id)
     if not record:
@@ -340,8 +358,11 @@ async def lump_sum_boost(
     # Mirror the in-app notification to email so the user can act on the
     # rebalance approval without being logged in (no-op if SendGrid unconfigured).
     from app.services.email import send_rebalance_approval_email
+
     await send_rebalance_approval_email(
-        current_user.email, record["name"], notif["body"],
+        current_user.email,
+        record["name"],
+        notif["body"],
     )
 
     return {"notification_id": str(notif["id"]), "status": "pending_approval"}
@@ -356,7 +377,8 @@ async def get_task_status(
     # Verify the task belongs to a run owned by this tenant (IDOR prevention)
     run = await pool.fetchrow(
         "SELECT id FROM strategy_runs WHERE celery_task_id = $1 AND tenant_id = $2",
-        task_id, current_user.tenant_id,
+        task_id,
+        current_user.tenant_id,
     )
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")

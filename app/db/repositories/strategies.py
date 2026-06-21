@@ -31,8 +31,14 @@ class StrategyRepo(BaseRepo):
                     VALUES ($1, $2, $3, $4, $5::text[], $6, $7, $8, $9::jsonb)
                     RETURNING *
                     """,
-                    self.tenant_id, owner_user_id, name, prompt,
-                    symbols, exchange, timeframe, creation_mode,
+                    self.tenant_id,
+                    owner_user_id,
+                    name,
+                    prompt,
+                    symbols,
+                    exchange,
+                    timeframe,
+                    creation_mode,
                     risk_config,
                 )
                 version = await conn.fetchrow(
@@ -43,11 +49,16 @@ class StrategyRepo(BaseRepo):
                     VALUES ($1, 1, $2, $3, $4, $5)
                     RETURNING *
                     """,
-                    strategy["id"], generated_logic, explanation, prompt, owner_user_id,
+                    strategy["id"],
+                    generated_logic,
+                    explanation,
+                    prompt,
+                    owner_user_id,
                 )
                 await conn.execute(
                     "UPDATE strategies SET current_version_id = $1 WHERE id = $2",
-                    version["id"], strategy["id"],
+                    version["id"],
+                    strategy["id"],
                 )
                 return await conn.fetchrow(
                     """
@@ -67,7 +78,8 @@ class StrategyRepo(BaseRepo):
             LEFT JOIN strategy_versions sv ON sv.id = s.current_version_id
             WHERE s.id = $1 AND s.tenant_id = $2
             """,
-            strategy_id, self.tenant_id,
+            strategy_id,
+            self.tenant_id,
         )
 
     async def list_all(self, status: str | None = None) -> list[asyncpg.Record]:
@@ -80,7 +92,8 @@ class StrategyRepo(BaseRepo):
                 WHERE s.tenant_id = $1 AND s.status = $2
                 ORDER BY s.created_at DESC
                 """,
-                self.tenant_id, status,
+                self.tenant_id,
+                status,
             )
         return await self.fetch(
             """
@@ -99,7 +112,9 @@ class StrategyRepo(BaseRepo):
             UPDATE strategies SET sip_paused = $1, updated_at = now()
             WHERE id = $2 AND tenant_id = $3
             """,
-            paused, strategy_id, self.tenant_id,
+            paused,
+            strategy_id,
+            self.tenant_id,
         )
 
     async def update_status(self, strategy_id: UUID, new_status: str) -> None:
@@ -108,13 +123,16 @@ class StrategyRepo(BaseRepo):
             UPDATE strategies SET status = $1, updated_at = now()
             WHERE id = $2 AND tenant_id = $3
             """,
-            new_status, strategy_id, self.tenant_id,
+            new_status,
+            strategy_id,
+            self.tenant_id,
         )
 
     async def get_current_version_id(self, strategy_id: UUID) -> UUID | None:
         return await self.fetchval(
             "SELECT current_version_id FROM strategies WHERE id = $1 AND tenant_id = $2",
-            strategy_id, self.tenant_id,
+            strategy_id,
+            self.tenant_id,
         )
 
     async def update_logic(
@@ -133,7 +151,8 @@ class StrategyRepo(BaseRepo):
                     JOIN strategy_versions sv ON sv.id = s.current_version_id
                     WHERE s.id = $1 AND s.tenant_id = $2
                     """,
-                    strategy_id, self.tenant_id,
+                    strategy_id,
+                    self.tenant_id,
                 )
                 if not current:
                     return None
@@ -144,11 +163,15 @@ class StrategyRepo(BaseRepo):
                     VALUES ($1, $2, $3, '[edited]', $4)
                     RETURNING *
                     """,
-                    strategy_id, current["version_number"] + 1, new_logic, updated_by,
+                    strategy_id,
+                    current["version_number"] + 1,
+                    new_logic,
+                    updated_by,
                 )
                 await conn.execute(
                     "UPDATE strategies SET current_version_id = $1, updated_at = now() WHERE id = $2",
-                    version["id"], strategy_id,
+                    version["id"],
+                    strategy_id,
                 )
                 return await conn.fetchrow(
                     """

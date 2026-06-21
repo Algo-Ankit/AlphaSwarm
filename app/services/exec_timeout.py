@@ -13,6 +13,7 @@ case for Celery prefork workers (Linux/Docker), where strategy code runs. When
 unavailable (Windows dev, eager mode, a non-main thread) this degrades to a
 no-op and Celery's task_time_limit hard kill remains the backstop.
 """
+
 from __future__ import annotations
 
 import signal
@@ -25,10 +26,7 @@ class StrategyTimeout(Exception):
 
 
 def _can_use_sigalrm() -> bool:
-    return (
-        hasattr(signal, "SIGALRM")
-        and threading.current_thread() is threading.main_thread()
-    )
+    return hasattr(signal, "SIGALRM") and threading.current_thread() is threading.main_thread()
 
 
 @contextmanager
@@ -42,9 +40,7 @@ def time_limit(seconds: float):
         return
 
     def _handler(signum, frame):
-        raise StrategyTimeout(
-            f"strategy execution exceeded its {seconds:g}s budget"
-        )
+        raise StrategyTimeout(f"strategy execution exceeded its {seconds:g}s budget")
 
     previous = signal.signal(signal.SIGALRM, _handler)
     signal.setitimer(signal.ITIMER_REAL, seconds)

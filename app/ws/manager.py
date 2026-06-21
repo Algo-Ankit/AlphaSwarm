@@ -6,6 +6,7 @@ Channel naming:
   portfolio:{tenant_id}                  P&L updates + notifications
   run:{run_id}                           strategy run status
 """
+
 import asyncio
 import json
 import logging
@@ -65,7 +66,9 @@ class WebSocketManager:
                     data = json.loads(message["data"])
                     await self.broadcast(channel, data)
                 except Exception as exc:
-                    logger.error("Error processing Redis pub/sub message on channel %s: %s", channel, exc)
+                    logger.error(
+                        "Error processing Redis pub/sub message on channel %s: %s", channel, exc
+                    )
         finally:
             await pubsub.punsubscribe(channel_pattern)
 

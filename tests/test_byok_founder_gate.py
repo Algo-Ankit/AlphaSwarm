@@ -6,6 +6,7 @@ The platform LLM key is a paid/shared resource. Only the founder account
 These tests lock that policy + the timing-safe, default-deny email match.
 Runnable with pytest OR directly:  python tests/test_byok_founder_gate.py
 """
+
 import asyncio
 import os
 
@@ -27,7 +28,7 @@ def test_is_founder_matches_case_and_space_insensitive():
 def test_is_founder_default_deny():
     # Wrong email, unset founder, and blanks all grant NO exemption.
     assert not _is_founder("attacker@evil.com", "ankitanandat@gmail.com")
-    assert not _is_founder("ankitanandat@gmail.com", "")   # FOUNDER_EMAIL unset → locked
+    assert not _is_founder("ankitanandat@gmail.com", "")  # FOUNDER_EMAIL unset → locked
     assert not _is_founder(None, "ankitanandat@gmail.com")
     assert not _is_founder("", "ankitanandat@gmail.com")
 
@@ -67,13 +68,16 @@ def test_founder_uses_platform_fallback(monkeypatch):
     monkeypatch.setattr(sb, "build_strategy_async", fake_build)
     monkeypatch.setattr(sb, "explain_strategy_async", fake_explain)
 
-    req = StrategyCreateRequest(name="Founder Strat", prompt="buy low sell high signals", symbols=["SPY"])
+    req = StrategyCreateRequest(
+        name="Founder Strat", prompt="buy low sell high signals", symbols=["SPY"]
+    )
     code, expl = asyncio.run(compile_strategy_prompt(req, pool=None, user_email="founder@x.com"))
     assert "BaseStrategy" in code and expl == "explanation"
 
 
 if __name__ == "__main__":
     import traceback
+
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
     for fn in fns:

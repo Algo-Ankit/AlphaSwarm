@@ -11,6 +11,7 @@ the asyncpg-based worker loop), so the Redis fan-out uses the shared asyncio
 client — a blocking sync publish would stall the event loop. The DB insert is
 async (asyncpg).
 """
+
 import json
 import logging
 from datetime import datetime, timezone
@@ -75,7 +76,13 @@ async def create_notification(
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING *
         """,
-        tid, _to_uuid(user_id), type, title, body, entity_type, _to_uuid(entity_id),
+        tid,
+        _to_uuid(user_id),
+        type,
+        title,
+        body,
+        entity_type,
+        _to_uuid(entity_id),
     )
     payload = {
         "type": "notification",

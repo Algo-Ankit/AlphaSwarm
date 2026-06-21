@@ -8,6 +8,7 @@ Channels implemented:
   /v1/ws/portfolio       — P&L updates + notifications (receives Redis pushes)
   /v1/ws/run/{run_id}    — strategy run status updates
 """
+
 import asyncio
 import logging
 import uuid as _uuid
@@ -22,8 +23,8 @@ from app.ws.manager import ws_manager
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["websocket"])
 
-_HEARTBEAT_TIMEOUT = 90.0   # seconds before server closes idle connection
-_BAR_PUSH_INTERVAL = 5.0    # seconds between cached-bar pushes
+_HEARTBEAT_TIMEOUT = 90.0  # seconds before server closes idle connection
+_BAR_PUSH_INTERVAL = 5.0  # seconds between cached-bar pushes
 
 
 def _auth(token: str) -> dict | None:
@@ -55,7 +56,9 @@ async def ws_bars(
                 if bars:
                     await websocket.send_json({"type": "bar", **bars[-1].to_dict()})
             except Exception as exc:
-                logger.warning("push_latest failed for %s %s — closing connection: %s", symbol, timeframe, exc)
+                logger.warning(
+                    "push_latest failed for %s %s — closing connection: %s", symbol, timeframe, exc
+                )
                 try:
                     await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
                 except Exception:
@@ -68,9 +71,7 @@ async def ws_bars(
         while True:
             # Receive client messages (pings). Times out if client goes silent.
             try:
-                msg = await asyncio.wait_for(
-                    websocket.receive_text(), timeout=_HEARTBEAT_TIMEOUT
-                )
+                msg = await asyncio.wait_for(websocket.receive_text(), timeout=_HEARTBEAT_TIMEOUT)
                 if msg == "ping":
                     try:
                         await websocket.send_json({"type": "pong"})
@@ -116,9 +117,7 @@ async def ws_portfolio(
     try:
         while True:
             try:
-                msg = await asyncio.wait_for(
-                    websocket.receive_text(), timeout=_HEARTBEAT_TIMEOUT
-                )
+                msg = await asyncio.wait_for(websocket.receive_text(), timeout=_HEARTBEAT_TIMEOUT)
                 if msg == "ping":
                     # The socket may have closed between receive and send; a raw
                     # send then raises ConnectionClosed and crashes the handler.
@@ -162,7 +161,8 @@ async def ws_run(
     async with pool.acquire() as conn:
         exists = await conn.fetchval(
             "SELECT id FROM strategy_runs WHERE id = $1 AND tenant_id = $2",
-            run_uuid, tenant_uuid,
+            run_uuid,
+            tenant_uuid,
         )
     if not exists:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
@@ -174,9 +174,7 @@ async def ws_run(
     try:
         while True:
             try:
-                msg = await asyncio.wait_for(
-                    websocket.receive_text(), timeout=_HEARTBEAT_TIMEOUT
-                )
+                msg = await asyncio.wait_for(websocket.receive_text(), timeout=_HEARTBEAT_TIMEOUT)
                 if msg == "ping":
                     try:
                         await websocket.send_json({"type": "pong"})

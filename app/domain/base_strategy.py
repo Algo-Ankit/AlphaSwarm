@@ -2,9 +2,11 @@
 BaseStrategy — the contract every strategy (AI-generated or developer-written) must fulfill.
 This interface is used for both live execution and backtesting via BacktestRunner.
 """
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
+
 import pandas as pd
 
 if TYPE_CHECKING:
@@ -14,13 +16,14 @@ if TYPE_CHECKING:
 class ReadOnlyIloc:
     def __init__(self, data: list[dict]):
         self._data = data
-        
+
     def __getitem__(self, idx: int) -> dict:
         # Return a fresh dict so mutation by strategy code doesn't corrupt state
         return dict(self._data[idx])
-        
+
     def __len__(self) -> int:
         return len(self._data)
+
 
 class ReadOnlyDataFrame:
     """
@@ -28,35 +31,40 @@ class ReadOnlyDataFrame:
     No pandas or numpy objects are kept or returned. Data is converted to pure
     Python native types upon initialization to prevent sandbox escapes.
     """
+
     def __init__(self, df: pd.DataFrame):
         records = []
         if not df.empty:
             # Convert pandas index to native python datetime objects
-            timestamps = df.index.to_pydatetime() if hasattr(df.index, 'to_pydatetime') else df.index
-            
+            timestamps = (
+                df.index.to_pydatetime() if hasattr(df.index, "to_pydatetime") else df.index
+            )
+
             # Using tolist() on Series converts numpy scalars to pure Python float/int
-            opens = df['open'].tolist()
-            highs = df['high'].tolist()
-            lows = df['low'].tolist()
-            closes = df['close'].tolist()
-            volumes = df['volume'].tolist()
-            
+            opens = df["open"].tolist()
+            highs = df["high"].tolist()
+            lows = df["low"].tolist()
+            closes = df["close"].tolist()
+            volumes = df["volume"].tolist()
+
             for i in range(len(df)):
-                records.append({
-                    "timestamp": timestamps[i],
-                    "open": float(opens[i]),
-                    "high": float(highs[i]),
-                    "low": float(lows[i]),
-                    "close": float(closes[i]),
-                    "volume": int(volumes[i]),
-                })
+                records.append(
+                    {
+                        "timestamp": timestamps[i],
+                        "open": float(opens[i]),
+                        "high": float(highs[i]),
+                        "low": float(lows[i]),
+                        "close": float(closes[i]),
+                        "volume": int(volumes[i]),
+                    }
+                )
         self._data = records
         self._iloc = ReadOnlyIloc(self._data)
 
     @property
     def iloc(self) -> ReadOnlyIloc:
         return self._iloc
-        
+
     def __len__(self) -> int:
         return len(self._data)
 
@@ -67,14 +75,15 @@ class StrategyContext:
     Passed to BaseStrategy on every bar. Contains everything a strategy needs
     to make a trading decision — no external API calls needed inside on_bar().
     """
-    strategy_id: str     # UUID string — required for OrderIntent construction inside on_bar()
+
+    strategy_id: str  # UUID string — required for OrderIntent construction inside on_bar()
     symbol: str
-    exchange: str        # NASDAQ | NYSE | NSE | BSE | CRYPTO
-    timeframe: str       # 1m | 5m | 15m | 1h | 4h | 1d
-    bars: ReadOnlyDataFrame   # Safe wrapper to prevent RCE via pandas
-                         # Sorted ascending. Latest bar is bars.iloc[-1].
-    indicators: dict     # Computed by indicators.py. Keys use pandas-ta naming convention:
-                         # e.g. {"RSI_14": 42.3, "MACD_12_26_9": 0.12, "BBU_20_2.0": 185.4}
+    exchange: str  # NASDAQ | NYSE | NSE | BSE | CRYPTO
+    timeframe: str  # 1m | 5m | 15m | 1h | 4h | 1d
+    bars: ReadOnlyDataFrame  # Safe wrapper to prevent RCE via pandas
+    # Sorted ascending. Latest bar is bars.iloc[-1].
+    indicators: dict  # Computed by indicators.py. Keys use pandas-ta naming convention:
+    # e.g. {"RSI_14": 42.3, "MACD_12_26_9": 0.12, "BBU_20_2.0": 185.4}
     position: Optional[float]  # Current held quantity. None or 0 = flat. Positive = long.
     avg_cost: Optional[float]  # Average cost basis of current position. None if flat.
     risk: "StrategyRiskConfig"

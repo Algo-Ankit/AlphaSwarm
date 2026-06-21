@@ -6,7 +6,6 @@ from app.db.base_repo import BaseRepo
 
 
 class LLMConfigRepo(BaseRepo):
-
     async def create(
         self,
         owner_user_id: UUID,
@@ -23,7 +22,13 @@ class LLMConfigRepo(BaseRepo):
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING *
             """,
-            self.tenant_id, owner_user_id, label, provider, base_url, key_encrypted, model,
+            self.tenant_id,
+            owner_user_id,
+            label,
+            provider,
+            base_url,
+            key_encrypted,
+            model,
         )
 
     async def get_all(self) -> list[asyncpg.Record]:
@@ -42,11 +47,13 @@ class LLMConfigRepo(BaseRepo):
             SELECT * FROM llm_configs
             WHERE id = $1 AND tenant_id = $2 AND is_active = TRUE
             """,
-            config_id, self.tenant_id,
+            config_id,
+            self.tenant_id,
         )
 
     async def delete(self, config_id: UUID) -> None:
         await self.execute(
             "DELETE FROM llm_configs WHERE id = $1 AND tenant_id = $2",
-            config_id, self.tenant_id,
+            config_id,
+            self.tenant_id,
         )

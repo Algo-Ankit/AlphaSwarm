@@ -2,6 +2,7 @@
 Repositories for the intelligence layer — forecasts and news_items.
 Not tenant-scoped: market intelligence data is shared across all tenants.
 """
+
 import json
 from datetime import datetime, timezone
 from decimal import Decimal

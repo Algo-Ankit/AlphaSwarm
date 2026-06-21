@@ -3,10 +3,11 @@ Market hours and timezone awareness.
 Called by the Risk system as the first check before any order.
 NSEpy is BANNED. This module handles all exchange scheduling.
 """
+
 from datetime import datetime, time
 from typing import Literal
-import pytz
 
+import pytz
 
 SessionStatus = Literal["pre_market", "open", "after_hours", "closed"]
 
@@ -100,7 +101,7 @@ def next_open_time(exchange: str, now_utc: datetime | None = None) -> datetime |
     base = (now_utc or datetime.utcnow().replace(tzinfo=pytz.utc)).astimezone(tz)
 
     open_time = schedule["open"]
-    weekdays  = schedule["weekdays"]
+    weekdays = schedule["weekdays"]
 
     # Walk up to 7 days forward to find the next open
     for day_offset in range(8):
@@ -108,7 +109,10 @@ def next_open_time(exchange: str, now_utc: datetime | None = None) -> datetime |
         if candidate.weekday() not in weekdays:
             continue
         local_open = candidate.replace(
-            hour=open_time.hour, minute=open_time.minute, second=0, microsecond=0,
+            hour=open_time.hour,
+            minute=open_time.minute,
+            second=0,
+            microsecond=0,
         )
         if local_open > base:
             return local_open.astimezone(pytz.utc)

@@ -2,6 +2,7 @@
 Execution engine — on_bar() loop with Alpaca order placement.
 Loads AI-generated strategy code from DB; falls back to _DefaultRSIStrategy when none is stored.
 """
+
 import asyncio
 import logging
 from decimal import Decimal
@@ -10,14 +11,18 @@ from uuid import UUID
 import pandas as pd
 
 from app.core.celery_app import celery_app
+from app.core.config import get_settings
 from app.domain.base_strategy import BaseStrategy, ReadOnlyDataFrame, StrategyContext
 from app.domain.broker_routing import broker_for_exchange, currency_symbol
 from app.domain.market_data import MarketState
 from app.domain.models import (
-    OrderIntent, OrderResult, OrderSide, OrderType, StrategyRiskConfig,
+    OrderIntent,
+    OrderResult,
+    OrderSide,
+    OrderType,
+    StrategyRiskConfig,
 )
 from app.domain.risk import verify_order_intent
-from app.core.config import get_settings
 from app.services.exec_timeout import StrategyTimeout, time_limit
 from app.services.strategy_sandbox import SandboxError, compile_strategy_code
 from app.worker.run_logger import RunLogger
@@ -26,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 # ── Default strategy (fallback when no generated code is stored) ─────────────
+
 
 class _DefaultRSIStrategy(BaseStrategy):
     """RSI(14) momentum: BUY when RSI < 30 and flat; SELL when RSI > 70 and long."""
@@ -71,6 +77,7 @@ class _DefaultRSIStrategy(BaseStrategy):
 
 # ── DB write helper ───────────────────────────────────────────────────────────
 
+
 async def _write_order_async(
     conn,
     tenant_id: str,
@@ -100,15 +107,20 @@ async def _write_order_async(
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
                     CASE WHEN $15 = 'filled' THEN now() ELSE NULL END)
             """,
-            UUID(tenant_id), UUID(strategy_id),
+            UUID(tenant_id),
+            UUID(strategy_id),
             UUID(run_id) if run_id else None,
             result.order_id,
-            intent.symbol, intent.exchange,
-            intent.side.value, intent.order_type.value,
-            intent.quantity, intent.estimated_price,
+            intent.symbol,
+            intent.exchange,
+            intent.side.value,
+            intent.order_type.value,
+            intent.quantity,
+            intent.estimated_price,
             result.fill_price,
             intent.estimated_notional,
-            risk_status, risk_reason,
+            risk_status,
+            risk_reason,
             result.broker_status,
         )
         await conn.execute(
@@ -138,9 +150,12 @@ async def _write_order_async(
                 END,
                 updated_at = now()
             """,
-            UUID(tenant_id), UUID(strategy_id),
-            intent.symbol, intent.exchange,
-            delta, fill,
+            UUID(tenant_id),
+            UUID(strategy_id),
+            intent.symbol,
+            intent.exchange,
+            delta,
+            fill,
         )
 
 
@@ -163,7 +178,6 @@ async def _execute_async(
     global _pool
     import asyncpg
 
-    from app.core.config import get_settings
     from app.db.repositories.brokers import BrokerRepo
     from app.db.repositories.runs import RunRepo
     from app.domain.market_hours import exchange_timezone, get_session_status
@@ -213,7 +227,8 @@ async def _execute_async(
             JOIN strategy_versions sv ON sv.id = s.current_version_id
             WHERE s.id = $1 AND s.tenant_id = $2
             """,
-            UUID(strategy_id), UUID(tenant_id),
+            UUID(strategy_id),
+            UUID(tenant_id),
         )
         exchange = strategy_row["exchange"] if strategy_row else "NASDAQ"
         generated_logic = (strategy_row["generated_logic"] or "") if strategy_row else ""
@@ -239,8 +254,12 @@ async def _execute_async(
             if broker_row.get("access_token"):
                 access_token = decrypt_key(broker_row["access_token"])
             broker_creds = {
-                "api_key": decrypt_key(broker_row["key_encrypted"]) if broker_row.get("key_encrypted") else "",
-                "secret_key": decrypt_key(broker_row["secret_encrypted"]) if broker_row.get("secret_encrypted") else "",
+                "api_key": decrypt_key(broker_row["key_encrypted"])
+                if broker_row.get("key_encrypted")
+                else "",
+                "secret_key": decrypt_key(broker_row["secret_encrypted"])
+                if broker_row.get("secret_encrypted")
+                else "",
                 "access_token": access_token,
                 "paper": bool(broker_row["is_paper"]),
             }
@@ -256,13 +275,15 @@ async def _execute_async(
             )
             bars_by_symbol[symbol] = bars
             if bars:
-                df = pd.DataFrame({
-                    "open":   [float(b.open)   for b in bars],
-                    "high":   [float(b.high)   for b in bars],
-                    "low":    [float(b.low)    for b in bars],
-                    "close":  [float(b.close)  for b in bars],
-                    "volume": [float(b.volume) for b in bars],
-                })
+                df = pd.DataFrame(
+                    {
+                        "open": [float(b.open) for b in bars],
+                        "high": [float(b.high) for b in bars],
+                        "low": [float(b.low) for b in bars],
+                        "close": [float(b.close) for b in bars],
+                        "volume": [float(b.volume) for b in bars],
+                    }
+                )
                 df.index = pd.DatetimeIndex([b.timestamp for b in bars])
                 dfs_by_symbol[symbol] = df
                 indicators_by_symbol[symbol] = compute_indicators_sync(
@@ -281,7 +302,8 @@ async def _execute_async(
         avg_costs: dict[str, float | None] = {}
         pos_rows = await pool.fetch(
             "SELECT symbol, quantity, avg_cost FROM positions WHERE tenant_id = $1 AND strategy_id = $2",
-            UUID(tenant_id), UUID(strategy_id),
+            UUID(tenant_id),
+            UUID(strategy_id),
         )
         for row in pos_rows:
             sym = row["symbol"].upper()
@@ -291,6 +313,7 @@ async def _execute_async(
         executor = None
         if not dry_run and broker_creds:
             from app.services.execution import get_executor
+
             executor = get_executor(
                 required_broker,
                 api_key=broker_creds["api_key"],
@@ -340,8 +363,12 @@ async def _execute_async(
                 if log:
                     rsi_val = ind.get("RSI_14")
                     rsi_str = f"RSI={rsi_val:.1f}" if rsi_val is not None else "RSI=n/a"
-                    strat_name = _strategy_class.__name__ if _strategy_class else "_DefaultRSIStrategy"
-                    log.info(f"{symbol}  close=${close:.2f}  {rsi_str}  position={position_qty}  strategy={strat_name}")
+                    strat_name = (
+                        _strategy_class.__name__ if _strategy_class else "_DefaultRSIStrategy"
+                    )
+                    log.info(
+                        f"{symbol}  close=${close:.2f}  {rsi_str}  position={position_qty}  strategy={strat_name}"
+                    )
 
                 ctx = StrategyContext(
                     strategy_id=strategy_id,
@@ -354,7 +381,9 @@ async def _execute_async(
                     avg_cost=avg_cost,
                     risk=risk_profile,
                 )
-                active_class = _strategy_class if _strategy_class is not None else _DefaultRSIStrategy
+                active_class = (
+                    _strategy_class if _strategy_class is not None else _DefaultRSIStrategy
+                )
                 try:
                     with time_limit(get_settings().strategy_exec_timeout_seconds):
                         signal: OrderIntent | None = active_class(ctx).on_bar()
@@ -380,13 +409,14 @@ async def _execute_async(
                         f"Signal → {signal.side.value.upper()} {symbol}  "
                         f"qty={signal.quantity}  price≈${signal.estimated_price}  "
                         f"notional=${signal.estimated_notional:.2f}",
-                        side=signal.side.value, symbol=symbol,
+                        side=signal.side.value,
+                        symbol=symbol,
                         quantity=str(signal.quantity),
                         estimated_price=str(signal.estimated_price),
                     )
 
                 session = get_session_status(exchange)
-                
+
                 # Transactional advisory lock held across the ENTIRE read→check→place→persist
                 # sequence. pg_advisory_xact_lock releases on COMMIT, so the daily-notional
                 # read, the risk check, the broker placement, and the order write must all
@@ -410,10 +440,12 @@ async def _execute_async(
                         # daily-notional caps on stale data (TOCTOU position-limit bypass).
                         locked_pos_rows = await conn.fetch(
                             "SELECT symbol, quantity FROM positions WHERE tenant_id = $1 AND strategy_id = $2",
-                            UUID(tenant_id), UUID(strategy_id),
+                            UUID(tenant_id),
+                            UUID(strategy_id),
                         )
                         locked_positions = {
-                            r["symbol"].upper(): Decimal(str(r["quantity"])) for r in locked_pos_rows
+                            r["symbol"].upper(): Decimal(str(r["quantity"]))
+                            for r in locked_pos_rows
                         }
 
                         # Daily-notional window anchored to the EXCHANGE's local midnight,
@@ -431,9 +463,15 @@ async def _execute_async(
                                   AT TIME ZONE $3
                               )
                             """,
-                            UUID(tenant_id), UUID(strategy_id), exchange_tz,
+                            UUID(tenant_id),
+                            UUID(strategy_id),
+                            exchange_tz,
                         )
-                        today_notional = Decimal(str(today_notional_row["total"])) if today_notional_row else Decimal("0")
+                        today_notional = (
+                            Decimal(str(today_notional_row["total"]))
+                            if today_notional_row
+                            else Decimal("0")
+                        )
 
                         # Paper/dry-run is a strategy testing sandbox, not live trading: the
                         # market-hours gate (risk Check 1) must not block it, or users can only
@@ -457,22 +495,36 @@ async def _execute_async(
                         if (
                             current_pos_qty == 0
                             and exchange.upper() != "CRYPTO"
-                            and (risk_profile.stop_loss_pct is not None or risk_profile.take_profit_pct is not None)
+                            and (
+                                risk_profile.stop_loss_pct is not None
+                                or risk_profile.take_profit_pct is not None
+                            )
                         ):
                             price_val = float(signal.estimated_price)
                             if signal.side == OrderSide.buy:
                                 if risk_profile.stop_loss_pct is not None:
-                                    signal.stop_loss_price = Decimal(str(price_val * (1 - risk_profile.stop_loss_pct / 100.0)))
+                                    signal.stop_loss_price = Decimal(
+                                        str(price_val * (1 - risk_profile.stop_loss_pct / 100.0))
+                                    )
                                 if risk_profile.take_profit_pct is not None:
-                                    signal.take_profit_price = Decimal(str(price_val * (1 + risk_profile.take_profit_pct / 100.0)))
+                                    signal.take_profit_price = Decimal(
+                                        str(price_val * (1 + risk_profile.take_profit_pct / 100.0))
+                                    )
                             else:
                                 if risk_profile.stop_loss_pct is not None:
-                                    signal.stop_loss_price = Decimal(str(price_val * (1 + risk_profile.stop_loss_pct / 100.0)))
+                                    signal.stop_loss_price = Decimal(
+                                        str(price_val * (1 + risk_profile.stop_loss_pct / 100.0))
+                                    )
                                 if risk_profile.take_profit_pct is not None:
-                                    signal.take_profit_price = Decimal(str(price_val * (1 - risk_profile.take_profit_pct / 100.0)))
+                                    signal.take_profit_price = Decimal(
+                                        str(price_val * (1 - risk_profile.take_profit_pct / 100.0))
+                                    )
 
                         risk_result = verify_order_intent(
-                            signal, risk_profile, market_state, current_position=current_pos,
+                            signal,
+                            risk_profile,
+                            market_state,
+                            current_position=current_pos,
                             current_position_value=current_pos_value,
                             open_positions_count=open_pos_count,
                         )
@@ -480,7 +532,13 @@ async def _execute_async(
                         if not risk_result.approved:
                             if log:
                                 log.risk(f"REJECTED — {risk_result.reason}")
-                            results.append({"symbol": symbol, "action": "rejected", "reason": risk_result.reason})
+                            results.append(
+                                {
+                                    "symbol": symbol,
+                                    "action": "rejected",
+                                    "reason": risk_result.reason,
+                                }
+                            )
                             continue
 
                         if log:
@@ -505,7 +563,8 @@ async def _execute_async(
                         else:
                             client_order_id = (
                                 f"{str(run_id)[:8]}_{symbol}_{int(bars[-1].timestamp.timestamp())}"
-                                if run_id else None
+                                if run_id
+                                else None
                             )
                             order_result = executor.place_order(signal, client_order_id)
                             if log:
@@ -515,19 +574,34 @@ async def _execute_async(
                                 )
 
                         # Keep local position state current so subsequent symbols see correct exposure
-                        if order_result.broker_status in ("filled", "partially_filled", "pending", "accepted", "dry_run"):
-                            side_sign = Decimal("1") if signal.side == OrderSide.buy else Decimal("-1")
+                        if order_result.broker_status in (
+                            "filled",
+                            "partially_filled",
+                            "pending",
+                            "accepted",
+                            "dry_run",
+                        ):
+                            side_sign = (
+                                Decimal("1") if signal.side == OrderSide.buy else Decimal("-1")
+                            )
                             positions[symbol] = current_pos_qty + (signal.quantity * side_sign)
 
                         if run_id:
                             await _write_order_async(
-                                conn, tenant_id, strategy_id, run_id,
-                                signal, order_result, "approved", risk_result.reason,
+                                conn,
+                                tenant_id,
+                                strategy_id,
+                                run_id,
+                                signal,
+                                order_result,
+                                "approved",
+                                risk_result.reason,
                             )
                             # Surface the trade as a user notification (live fan-out
                             # over /v1/ws/portfolio). Best-effort — never block the run.
                             try:
                                 from app.services.notifications import create_notification
+
                                 _mode = "Dry run" if dry_run else "Live"
                                 await create_notification(
                                     conn,
@@ -542,14 +616,16 @@ async def _execute_async(
                             except Exception as _nexc:
                                 logger.warning("trade notification failed: %s", _nexc)
 
-                        results.append({
-                            "symbol": symbol,
-                            "action": signal.side.value,
-                            "quantity": str(signal.quantity),
-                            "estimated_price": str(signal.estimated_price),
-                            "broker_status": order_result.broker_status,
-                            "order_id": order_result.order_id,
-                        })
+                        results.append(
+                            {
+                                "symbol": symbol,
+                                "action": signal.side.value,
+                                "quantity": str(signal.quantity),
+                                "estimated_price": str(signal.estimated_price),
+                                "broker_status": order_result.broker_status,
+                                "order_id": order_result.order_id,
+                            }
+                        )
 
                 # ── Social copy-trade fan-out ─────────────────────────────────
                 # Replicate this signal to every subscriber copying the strategy.
@@ -559,10 +635,15 @@ async def _execute_async(
                 # fan_out_to_subscribers. Best-effort: a copy failure never fails
                 # the creator's run.
                 if order_result.broker_status in (
-                    "filled", "partially_filled", "pending", "accepted", "dry_run"
+                    "filled",
+                    "partially_filled",
+                    "pending",
+                    "accepted",
+                    "dry_run",
                 ):
                     try:
                         from app.services.execution import fan_out_to_subscribers
+
                         copy_results = await fan_out_to_subscribers(
                             pool,
                             creator_tenant_id=tenant_id,
@@ -574,8 +655,12 @@ async def _execute_async(
                             log=log,
                         )
                         if copy_results and log:
-                            _placed = sum(1 for c in copy_results if c.get("action") in ("buy", "sell"))
-                            log.info(f"{symbol}: copy-trade fan-out → {_placed}/{len(copy_results)} subscriber order(s) placed")
+                            _placed = sum(
+                                1 for c in copy_results if c.get("action") in ("buy", "sell")
+                            )
+                            log.info(
+                                f"{symbol}: copy-trade fan-out → {_placed}/{len(copy_results)} subscriber order(s) placed"
+                            )
                     except Exception as _fexc:
                         logger.warning("copy-trade fan-out failed for %s: %s", symbol, _fexc)
 
@@ -609,11 +694,13 @@ async def _execute_async(
         if run_id and _pool is not None:
             try:
                 from app.db.repositories.runs import RunRepo as _RunRepo
+
                 await _RunRepo(_pool, UUID(tenant_id)).mark_crashed(UUID(run_id), str(exc))
             except Exception:
                 pass
             try:
                 from app.services.notifications import create_notification
+
                 await create_notification(
                     _pool,
                     tenant_id=tenant_id,
@@ -634,6 +721,7 @@ async def _execute_async(
 
 
 # ── Celery task entry point ───────────────────────────────────────────────────
+
 
 @celery_app.task(name="app.worker.tasks.execute_trading_strategy")
 def execute_trading_strategy(
@@ -657,13 +745,15 @@ def execute_trading_strategy(
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-    return loop.run_until_complete(_execute_async(
-        strategy_id=strategy_id,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        run_id=run_id,
-        dry_run=dry_run,
-        symbols=symbols or ["SPY"],
-        timeframe=timeframe,
-        risk_config=risk_config or {},
-    ))
+    return loop.run_until_complete(
+        _execute_async(
+            strategy_id=strategy_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            run_id=run_id,
+            dry_run=dry_run,
+            symbols=symbols or ["SPY"],
+            timeframe=timeframe,
+            risk_config=risk_config or {},
+        )
+    )

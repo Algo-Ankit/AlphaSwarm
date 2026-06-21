@@ -2,6 +2,7 @@
 Executor bracket/OTO routing tests (pure logic — no Alpaca SDK needed).
 Runnable with pytest OR directly:  python tests/test_execution.py
 """
+
 from decimal import Decimal
 
 from app.services.execution import bracket_order_class
@@ -29,6 +30,7 @@ def test_crypto_skips_legs():
 
 if __name__ == "__main__":
     import traceback
+
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
     for fn in fns:

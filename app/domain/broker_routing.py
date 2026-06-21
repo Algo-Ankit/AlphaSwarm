@@ -6,6 +6,7 @@ Keeps broker selection out of the worker (was hardcoded to "alpaca") and currenc
 out of hardcoded "$" risk messages. A strategy on NSE must route to an Indian
 broker and quote limits in ₹, not be silently sent to a US broker in $.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

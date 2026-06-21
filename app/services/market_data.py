@@ -4,6 +4,7 @@ Alpaca Data API for US stocks/crypto (with yfinance fallback).
 yfinance for Indian (NSE/BSE) and global EOD data.
 All output is normalized to app.domain.market_data.Bar. Nothing raw leaks out.
 """
+
 import asyncio
 import logging
 from collections import OrderedDict
@@ -20,36 +21,37 @@ logger = logging.getLogger(__name__)
 _settings = get_settings()
 
 _STALE_AFTER: dict[str, timedelta] = {
-    "1m":  timedelta(minutes=2),
-    "5m":  timedelta(minutes=6),
+    "1m": timedelta(minutes=2),
+    "5m": timedelta(minutes=6),
     "15m": timedelta(minutes=20),
-    "1h":  timedelta(hours=2),
-    "4h":  timedelta(hours=5),
-    "1d":  timedelta(hours=25),
-    "1w":  timedelta(days=8),
+    "1h": timedelta(hours=2),
+    "4h": timedelta(hours=5),
+    "1d": timedelta(hours=25),
+    "1w": timedelta(days=8),
 }
 
 # yfinance (interval, period_fallback) — 4h has no native yfinance support; we aggregate from 1h
 _YF_PARAMS: dict[str, tuple[str, str]] = {
-    "1m":  ("1m",  "5d"),
-    "5m":  ("5m",  "60d"),
+    "1m": ("1m", "5d"),
+    "5m": ("5m", "60d"),
     "15m": ("15m", "60d"),
-    "1h":  ("1h",  "730d"),
-    "1d":  ("1d",  "max"),
-    "1w":  ("1wk", "max"),
+    "1h": ("1h", "730d"),
+    "1d": ("1d", "max"),
+    "1w": ("1wk", "max"),
 }
 
 
 def _alpaca_timeframe(tf: str):
     from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+
     return {
-        "1m":  TimeFrame.Minute,
-        "5m":  TimeFrame(5,  TimeFrameUnit.Minute),
+        "1m": TimeFrame.Minute,
+        "5m": TimeFrame(5, TimeFrameUnit.Minute),
         "15m": TimeFrame(15, TimeFrameUnit.Minute),
-        "1h":  TimeFrame.Hour,
-        "4h":  TimeFrame(4,  TimeFrameUnit.Hour),
-        "1d":  TimeFrame.Day,
-        "1w":  TimeFrame.Week,
+        "1h": TimeFrame.Hour,
+        "4h": TimeFrame(4, TimeFrameUnit.Hour),
+        "1d": TimeFrame.Day,
+        "1w": TimeFrame.Week,
     }[tf]
 
 
@@ -92,17 +94,19 @@ def _aggregate_to_4h(bars_1h: list[Bar], symbol: str, exchange: str) -> list[Bar
 
     result: list[Bar] = []
     for group_ts, group in groups.items():
-        result.append(Bar(
-            symbol=symbol.upper(),
-            exchange=exchange.upper(),
-            timeframe="4h",
-            timestamp=group_ts,
-            open=group[0].open,
-            high=max(b.high for b in group),
-            low=min(b.low for b in group),
-            close=group[-1].close,
-            volume=sum(b.volume for b in group),
-        ))
+        result.append(
+            Bar(
+                symbol=symbol.upper(),
+                exchange=exchange.upper(),
+                timeframe="4h",
+                timestamp=group_ts,
+                open=group[0].open,
+                high=max(b.high for b in group),
+                low=min(b.low for b in group),
+                close=group[-1].close,
+                volume=sum(b.volume for b in group),
+            )
+        )
     return result
 
 
@@ -120,7 +124,9 @@ async def _fetch_alpaca(
         logger.warning(
             "Alpaca API keys not configured — falling back to yfinance for %s %s %s. "
             "Set ALPACA_API_KEY and ALPACA_SECRET_KEY for real-time US market data.",
-            symbol, exchange, timeframe,
+            symbol,
+            exchange,
+            timeframe,
         )
         return []
 
@@ -132,6 +138,7 @@ async def _fetch_alpaca(
         if _is_crypto(exchange):
             from alpaca.data.historical import CryptoHistoricalDataClient
             from alpaca.data.requests import CryptoBarsRequest
+
             client = CryptoHistoricalDataClient(api_key, secret_key)
             req = CryptoBarsRequest(
                 symbol_or_symbols=symbol.upper(),
@@ -142,9 +149,10 @@ async def _fetch_alpaca(
             )
             resp = client.get_crypto_bars(req)
         else:
+            from alpaca.data.enums import Adjustment
             from alpaca.data.historical import StockHistoricalDataClient
             from alpaca.data.requests import StockBarsRequest
-            from alpaca.data.enums import Adjustment
+
             client = StockHistoricalDataClient(api_key, secret_key)
             req = StockBarsRequest(
                 symbol_or_symbols=symbol.upper(),
@@ -173,16 +181,22 @@ async def _fetch_alpaca(
         ]
 
     import time
+
     for attempt in range(3):
         try:
             return await asyncio.to_thread(_sync)
         except Exception as exc:
             err_str = str(exc).lower()
             if "401" in err_str or "auth" in err_str or "unauthorized" in err_str:
-                logger.warning("Alpaca auth failed for %s. Bypassing retries and falling back to yfinance.", symbol)
+                logger.warning(
+                    "Alpaca auth failed for %s. Bypassing retries and falling back to yfinance.",
+                    symbol,
+                )
                 return []
             if attempt == 2:
-                logger.warning("Alpaca fetch failed for %s %s %s: %s", symbol, exchange, timeframe, exc)
+                logger.warning(
+                    "Alpaca fetch failed for %s %s %s: %s", symbol, exchange, timeframe, exc
+                )
             else:
                 time.sleep(1)
     return []
@@ -196,7 +210,7 @@ async def _fetch_yfinance(
     start: datetime | None,
     end: datetime | None,
 ) -> list[Bar]:
-    is_4h_agg = (timeframe == "4h")
+    is_4h_agg = timeframe == "4h"
     fetch_tf = "1h" if is_4h_agg else timeframe
     yf_symbol = to_yfinance_symbol(symbol, exchange)
     yf_interval, yf_period = _YF_PARAMS.get(fetch_tf, ("1d", "max"))
@@ -211,7 +225,9 @@ async def _fetch_yfinance(
             try:
                 df = ticker.history(start=start, end=end, interval=yf_interval)
             except Exception as e:
-                logger.debug("yfinance history with start/end failed: %s. Falling back to period.", e)
+                logger.debug(
+                    "yfinance history with start/end failed: %s. Falling back to period.", e
+                )
 
         if df is None or df.empty:
             # Robust fallback: fetch default period if start fails or yields nothing
@@ -227,17 +243,19 @@ async def _fetch_yfinance(
 
         bars: list[Bar] = []
         for ts, row in df.iterrows():
-            bars.append(Bar(
-                symbol=symbol.upper(),
-                exchange=exchange.upper(),
-                timeframe=fetch_tf,
-                timestamp=ts.to_pydatetime(),
-                open=Decimal(str(row["open"])),
-                high=Decimal(str(row["high"])),
-                low=Decimal(str(row["low"])),
-                close=Decimal(str(row["close"])),
-                volume=int(row.get("volume", 0) or 0),
-            ))
+            bars.append(
+                Bar(
+                    symbol=symbol.upper(),
+                    exchange=exchange.upper(),
+                    timeframe=fetch_tf,
+                    timestamp=ts.to_pydatetime(),
+                    open=Decimal(str(row["open"])),
+                    high=Decimal(str(row["high"])),
+                    low=Decimal(str(row["low"])),
+                    close=Decimal(str(row["close"])),
+                    volume=int(row.get("volume", 0) or 0),
+                )
+            )
 
         if is_4h_agg:
             bars = _aggregate_to_4h(bars, symbol, exchange)
@@ -245,12 +263,15 @@ async def _fetch_yfinance(
         return bars
 
     import time
+
     for attempt in range(3):
         try:
             return await asyncio.to_thread(_sync)
         except Exception as exc:
             if attempt == 2:
-                logger.warning("yfinance fetch failed for %s %s %s: %s", symbol, exchange, timeframe, exc)
+                logger.warning(
+                    "yfinance fetch failed for %s %s %s: %s", symbol, exchange, timeframe, exc
+                )
             else:
                 time.sleep(1)
     return []
@@ -278,12 +299,16 @@ async def get_bars(
         stale_after = _STALE_AFTER.get(timeframe, timedelta(hours=25))
         latest = await repo.latest_bar_time(symbol, exchange, timeframe)
         if latest and (datetime.now(timezone.utc) - _utc(latest)) < stale_after:
-            rows = await repo.get_bars(symbol, exchange, timeframe, start=start, end=end, limit=limit)
+            rows = await repo.get_bars(
+                symbol, exchange, timeframe, start=start, end=end, limit=limit
+            )
             if rows:
                 return [_record_to_bar(r, symbol, exchange, timeframe) for r in rows]
         elif latest:
             # Cache exists but is stale — load as fallback in case external APIs fail
-            rows = await repo.get_bars(symbol, exchange, timeframe, start=start, end=end, limit=limit)
+            rows = await repo.get_bars(
+                symbol, exchange, timeframe, start=start, end=end, limit=limit
+            )
             cached_bars = [_record_to_bar(r, symbol, exchange, timeframe) for r in rows]
 
     # Fetch from source
@@ -298,7 +323,10 @@ async def get_bars(
         if cached_bars:
             logger.warning(
                 "External APIs unavailable for %s %s %s — returning %d stale cached bars",
-                symbol, exchange, timeframe, len(cached_bars),
+                symbol,
+                exchange,
+                timeframe,
+                len(cached_bars),
             )
         return cached_bars
 

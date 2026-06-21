@@ -3,6 +3,7 @@ Canonical market data models. All sources (Alpaca, yfinance, Zerodha)
 must be normalized to Bar before leaving the market_data service.
 Nothing outside app/services/market_data.py should import raw provider objects.
 """
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -33,10 +34,11 @@ class Bar:
     Canonical OHLCV bar. Immutable. All timestamps are UTC.
     This is the only market data representation used outside the market_data service.
     """
+
     symbol: str
     exchange: str
     timeframe: str
-    timestamp: datetime      # UTC bar close time
+    timestamp: datetime  # UTC bar close time
     open: Decimal
     high: Decimal
     low: Decimal
@@ -60,9 +62,10 @@ class Bar:
 @dataclass
 class MarketState:
     """Snapshot of market conditions at the moment of an order decision."""
+
     exchange: str
     is_open: bool
-    session_status: str        # pre_market | open | after_hours | closed
+    session_status: str  # pre_market | open | after_hours | closed
     today_executed_notional: Decimal = field(default_factory=lambda: Decimal("0"))
     total_open_position_value: Decimal = field(default_factory=lambda: Decimal("0"))
 
@@ -72,6 +75,7 @@ EXCHANGE_YFINANCE_SUFFIX: dict[str, str] = {
     "NSE": ".NS",
     "BSE": ".BO",
 }
+
 
 def to_yfinance_symbol(symbol: str, exchange: str) -> str:
     """Convert 'RELIANCE' + 'NSE' → 'RELIANCE.NS'; 'BTC/USD' + 'CRYPTO' → 'BTC-USD'"""

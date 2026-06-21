@@ -8,6 +8,7 @@ def _user_or_ip(request: Request) -> str:
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
         from app.services.auth import decode_access_token
+
         payload = decode_access_token(auth[7:])
         if payload and "sub" in payload:
             return f"user:{payload['sub']}"

@@ -4,6 +4,7 @@ Computes N-day price forecast with 80% confidence intervals.
 Results cached in `forecasts` table (stale after 1 hour).
 CPU-heavy Prophet/ARIMA computation runs in a thread pool.
 """
+
 import asyncio
 import logging
 from dataclasses import dataclass
@@ -66,13 +67,12 @@ class ForecastResult:
 
 def _silence_prophet_logging() -> None:
     import logging as _log
+
     for name in ("prophet", "cmdstanpy", "pystan"):
         _log.getLogger(name).setLevel(_log.ERROR)
 
 
-def _run_prophet(
-    df: pd.DataFrame, horizon: int
-) -> tuple[list[dict], float | None, float | None]:
+def _run_prophet(df: pd.DataFrame, horizon: int) -> tuple[list[dict], float | None, float | None]:
     """Returns (forecast_points, mae, mape). df must have columns: ds, y."""
     _silence_prophet_logging()
     from prophet import Prophet
@@ -100,9 +100,7 @@ def _run_prophet(
             mae = float(np.mean(errors))
             nonzero = actual != 0
             if nonzero.any():
-                mape = float(
-                    np.mean(np.abs(errors[nonzero] / actual[nonzero])) * 100
-                )
+                mape = float(np.mean(np.abs(errors[nonzero] / actual[nonzero])) * 100)
 
     m_full = Prophet(
         interval_width=0.80,
@@ -152,9 +150,7 @@ def _compute_ensemble_sync(
     df = df.sort_values("ds").drop_duplicates("ds")
 
     if len(df) < 30:
-        raise ValueError(
-            f"Insufficient price history: {len(df)} bars (need ≥ 30)"
-        )
+        raise ValueError(f"Insufficient price history: {len(df)} bars (need ≥ 30)")
 
     prophet_points, mae, mape = _run_prophet(df, horizon)
 
@@ -163,9 +159,7 @@ def _compute_ensemble_sync(
     except Exception as exc:
         # ARIMA failed (non-stationary series, convergence issue, etc.)
         # Use Prophet-only rather than averaging with a fake flat line.
-        logger.warning(
-            "ARIMA convergence failed (%s) — degrading to Prophet-only forecast", exc
-        )
+        logger.warning("ARIMA convergence failed (%s) — degrading to Prophet-only forecast", exc)
         return prophet_points, "prophet", mae, mape
 
     # Ensemble: average Prophet + ARIMA yhats; widen CI by model disagreement
@@ -173,11 +167,11 @@ def _compute_ensemble_sync(
     for i, pt in enumerate(prophet_points):
         arima_val = arima_preds[i] if i < len(arima_preds) else pt["yhat"]
         ens_yhat = round((pt["yhat"] + arima_val) / 2.0, 4)
-        
+
         half_width = (pt["yhat_upper"] - pt["yhat_lower"]) / 2.0
         disagreement = abs(pt["yhat"] - arima_val) / 2.0
         adjusted_half_width = half_width + disagreement
-        
+
         ensemble.append(
             {
                 "date": pt["date"],

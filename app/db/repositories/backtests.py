@@ -52,12 +52,29 @@ class BacktestRepo(BaseRepo):
             )
             RETURNING *
             """,
-            strategy_id, version_id, self.tenant_id, symbol, exchange, timeframe,
-            start_date, end_date, initial_capital, final_equity,
-            total_return_pct, sharpe_ratio, max_drawdown_pct, win_rate_pct,
-            total_trades, winning_trades, losing_trades,
-            sortino_ratio, profit_factor, calmar_ratio, annualized_return_pct,
-            _json.dumps(equity_curve), _json.dumps(trades),
+            strategy_id,
+            version_id,
+            self.tenant_id,
+            symbol,
+            exchange,
+            timeframe,
+            start_date,
+            end_date,
+            initial_capital,
+            final_equity,
+            total_return_pct,
+            sharpe_ratio,
+            max_drawdown_pct,
+            win_rate_pct,
+            total_trades,
+            winning_trades,
+            losing_trades,
+            sortino_ratio,
+            profit_factor,
+            calmar_ratio,
+            annualized_return_pct,
+            _json.dumps(equity_curve),
+            _json.dumps(trades),
         )
 
     async def get_latest(self, strategy_id: UUID) -> asyncpg.Record | None:
@@ -70,5 +87,6 @@ class BacktestRepo(BaseRepo):
             ORDER BY b.created_at DESC
             LIMIT 1
             """,
-            strategy_id, self.tenant_id,
+            strategy_id,
+            self.tenant_id,
         )

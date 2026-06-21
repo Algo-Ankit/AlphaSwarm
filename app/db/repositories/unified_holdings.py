@@ -8,9 +8,7 @@ from app.db.base_repo import BaseRepo
 class UnifiedHoldingsRepo(BaseRepo):
     """Tenant-scoped access to consolidated multi-broker holdings."""
 
-    async def replace_all(
-        self, holdings: list[dict], statement_date: date | None
-    ) -> int:
+    async def replace_all(self, holdings: list[dict], statement_date: date | None) -> int:
         """
         Replace the tenant's entire holdings set with a freshly-parsed CAS.
         A CAS is a full account statement, so an upload supersedes the previous

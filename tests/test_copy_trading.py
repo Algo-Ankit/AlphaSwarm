@@ -2,6 +2,7 @@
 Copy-trade position sizing tests (pure logic — no DB / broker needed).
 Runnable with pytest OR directly:  python tests/test_copy_trading.py
 """
+
 from decimal import Decimal
 
 from app.services.execution import copy_order_quantity
@@ -85,6 +86,7 @@ def test_zero_guards_on_bad_inputs():
 
 if __name__ == "__main__":
     import sys
+
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
     for fn in fns:
