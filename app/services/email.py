@@ -47,6 +47,33 @@ def _render_rebalance_approval(strategy_name: str, body_text: str) -> tuple[str,
     return subject, html
 
 
+def _render_password_reset(display_name: str, reset_link: str) -> tuple[str, str]:
+    subject = "Reset your AlphaSwarm password"
+    html = f"""
+    <h2>Password reset requested</h2>
+    <p>Hi {display_name}, we received a request to reset your AlphaSwarm password.</p>
+    <p><a href="{reset_link}">Click here to choose a new password</a> — this link
+    expires in 30 minutes and can be used once.</p>
+    <p>If you didn't request this, you can safely ignore this email; your
+    password will not change.</p>
+    <p>— AlphaSwarm</p>
+    """
+    return subject, html
+
+
+def _render_verify_email(display_name: str, verify_link: str) -> tuple[str, str]:
+    subject = "Verify your AlphaSwarm email"
+    html = f"""
+    <h2>Confirm it's you</h2>
+    <p>Hi {display_name}, please confirm this email address for your AlphaSwarm
+    account.</p>
+    <p><a href="{verify_link}">Verify my email</a> — the link expires in 7 days.</p>
+    <p>If you didn't create an AlphaSwarm account, ignore this email.</p>
+    <p>— AlphaSwarm</p>
+    """
+    return subject, html
+
+
 def send_email_sync(to_email: str, subject: str, html: str) -> bool:
     """
     Blocking SendGrid dispatch. Returns True if accepted (2xx) or stubbed.
@@ -95,4 +122,14 @@ async def send_welcome_email(to_email: str, display_name: str) -> bool:
 
 async def send_rebalance_approval_email(to_email: str, strategy_name: str, body_text: str) -> bool:
     subject, html = _render_rebalance_approval(strategy_name, body_text)
+    return await send_email(to_email, subject, html)
+
+
+async def send_password_reset_email(to_email: str, display_name: str, reset_link: str) -> bool:
+    subject, html = _render_password_reset(display_name, reset_link)
+    return await send_email(to_email, subject, html)
+
+
+async def send_verify_email(to_email: str, display_name: str, verify_link: str) -> bool:
+    subject, html = _render_verify_email(display_name, verify_link)
     return await send_email(to_email, subject, html)

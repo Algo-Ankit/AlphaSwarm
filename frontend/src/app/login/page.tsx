@@ -163,6 +163,14 @@ export default function LoginPage() {
               />
             </Field>
 
+            {mode === 'login' && (
+              <div className="text-right -mt-1">
+                <a href="/forgot-password" className="text-xs font-semibold text-violet-500 hover:text-violet-400">
+                  Forgot password?
+                </a>
+              </div>
+            )}
+
             {error && (
               <div className="rounded-xl px-4 py-3 bg-rose-500/10 border border-rose-500/20 text-sm text-rose-500 dark:text-rose-400">
                 {error}

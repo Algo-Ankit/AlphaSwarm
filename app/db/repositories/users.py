@@ -102,11 +102,13 @@ class AuthUserRepo:
         display_name: str,
         role: str = "owner",
         auth_provider: str = "password",
+        email_verified: bool = False,
     ) -> asyncpg.Record:
         return await self._pool.fetchrow(
             """
-            INSERT INTO users (tenant_id, email, password_hash, display_name, role, auth_provider)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO users
+                (tenant_id, email, password_hash, display_name, role, auth_provider, email_verified)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING *
             """,
             tenant_id,
@@ -115,6 +117,7 @@ class AuthUserRepo:
             display_name,
             role,
             auth_provider,
+            email_verified,
         )
 
     async def get_by_email(self, email: str) -> asyncpg.Record | None:
@@ -126,6 +129,19 @@ class AuthUserRepo:
     async def get_by_id(self, user_id: UUID) -> asyncpg.Record | None:
         return await self._pool.fetchrow(
             "SELECT * FROM users WHERE id = $1 AND is_active = true",
+            user_id,
+        )
+
+    async def update_password(self, user_id: UUID, password_hash: str) -> None:
+        await self._pool.execute(
+            "UPDATE users SET password_hash = $1 WHERE id = $2",
+            password_hash,
+            user_id,
+        )
+
+    async def mark_email_verified(self, user_id: UUID) -> None:
+        await self._pool.execute(
+            "UPDATE users SET email_verified = true WHERE id = $1",
             user_id,
         )
 
@@ -164,7 +180,7 @@ class RefreshTokenRepo:
         token_hash = self.hash_token(raw_token)
         return await self._pool.fetchrow(
             """
-            SELECT rt.*, u.tenant_id, u.email, u.role, u.display_name,
+            SELECT rt.*, u.tenant_id, u.email, u.role, u.display_name, u.email_verified,
                    t.name AS tenant_name, t.plan
             FROM refresh_tokens rt
             JOIN users u ON u.id = rt.user_id

@@ -78,6 +78,7 @@ export interface TokenResponse {
   display_name: string
   tenant_name: string
   plan: string
+  email_verified: boolean
 }
 
 export interface UserProfile {

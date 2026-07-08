@@ -1,3 +1,4 @@
+import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -114,6 +115,54 @@ def verify_state_token(token: str, purpose: str) -> bool:
     except InvalidTokenError:
         return False
     return payload.get("type") == "oauth_state" and payload.get("purpose") == purpose
+
+
+# --------------------------------------------------------------------------- #
+# Action tokens — stateless single-purpose links (password reset, email verify)#
+# --------------------------------------------------------------------------- #
+# Same signing key as access tokens but a distinct "type" claim, so an action
+# token can never be replayed as an API credential (decode_access_token checks
+# type == "access") and vice versa.
+#
+# Password-reset tokens embed a fingerprint of the CURRENT password hash: the
+# moment the password changes, every previously issued reset link stops
+# verifying — single-use semantics without a database table.
+
+
+def password_fingerprint(password_hash: str | None) -> str:
+    """Short non-reversible digest of a bcrypt hash, safe to embed in a JWT."""
+    return hashlib.sha256((password_hash or "").encode()).hexdigest()[:16]
+
+
+def create_action_token(
+    purpose: str,
+    user_id: str,
+    ttl_seconds: int,
+    extra_claims: dict | None = None,
+) -> str:
+    key, algorithm = _sign_key()
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": user_id,
+        "purpose": purpose,
+        "type": "action",
+        "iat": now,
+        "exp": now + timedelta(seconds=ttl_seconds),
+        **(extra_claims or {}),
+    }
+    return jwt.encode(payload, key, algorithm=algorithm)
+
+
+def verify_action_token(token: str, purpose: str) -> dict | None:
+    """Returns the token claims if valid for this purpose, else None."""
+    key, algorithm = _verify_key()
+    try:
+        payload = jwt.decode(token, key, algorithms=[algorithm])
+    except InvalidTokenError:
+        return None
+    if payload.get("type") != "action" or payload.get("purpose") != purpose:
+        return None
+    return payload
 
 
 # --------------------------------------------------------------------------- #

@@ -232,6 +232,33 @@ export const api = {
       body: JSON.stringify({ refresh_token: refreshToken }),
     }),
 
+  forgotPassword: (email: string) =>
+    req<{ detail: string }>('/v1/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    }),
+
+  resetPassword: (token: string, newPassword: string) =>
+    req<{ detail: string }>('/v1/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, new_password: newPassword }),
+    }),
+
+  verifyEmail: (token: string) =>
+    req<{ detail: string }>('/v1/auth/verify-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    }),
+
+  resendVerification: () =>
+    req<{ detail: string }>('/v1/auth/resend-verification', {
+      method: 'POST',
+      headers: authHeaders(),
+    }),
+
   // Broker-identity sign-in: one click authenticates AND connects the brokerage.
   getUpstoxLoginUrl: () =>
     req<{ login_url: string; state: string }>('/v1/auth/broker/upstox/login-url'),

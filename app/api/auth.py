@@ -1,4 +1,5 @@
 import logging
+from uuid import UUID
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -12,17 +13,24 @@ from app.db.repositories.users import AuthUserRepo, RefreshTokenRepo, TenantRepo
 from app.services import oauth_manager as oauth
 from app.services.auth import (
     create_access_token,
+    create_action_token,
     create_refresh_token,
     create_state_token,
     equalize_login_timing,
     get_grace_period_expiry,
     get_refresh_token_expiry,
     hash_password,
+    password_fingerprint,
+    verify_action_token,
     verify_password,
     verify_state_token,
 )
 from app.services.broker_crypto import encrypt_key
-from app.services.email import send_welcome_email
+from app.services.email import (
+    send_password_reset_email,
+    send_verify_email,
+    send_welcome_email,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +64,7 @@ class TokenResponse(BaseModel):
     display_name: str
     tenant_name: str
     plan: str
+    email_verified: bool = True
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
@@ -90,8 +99,11 @@ async def register(
     raw_refresh = create_refresh_token()
     await token_repo.create(user["id"], raw_refresh, get_refresh_token_expiry())
 
-    # Best-effort welcome/verification email (no-op if SendGrid unconfigured).
+    # Best-effort welcome + verification emails (no-op if SendGrid unconfigured).
     await send_welcome_email(body.email, user["display_name"])
+    await send_verify_email(
+        body.email, user["display_name"], _verify_email_link(str(user["id"]))
+    )
 
     return TokenResponse(
         access_token=access_token,
@@ -103,6 +115,7 @@ async def register(
         display_name=user["display_name"],
         tenant_name=tenant["name"],
         plan=tenant["plan"],
+        email_verified=False,
     )
 
 
@@ -159,6 +172,7 @@ async def login(
         display_name=user["display_name"],
         tenant_name=tenant["name"],
         plan=tenant["plan"],
+        email_verified=bool(user["email_verified"]),
     )
 
 
@@ -213,6 +227,7 @@ async def refresh_token(
             display_name=record["display_name"],
             tenant_name=record["tenant_name"],
             plan=record["plan"],
+            email_verified=bool(record["email_verified"]),
         )
 
     # Normal rotation path: mark old token with grace period, issue new token
@@ -239,6 +254,7 @@ async def refresh_token(
         display_name=record["display_name"],
         tenant_name=record["tenant_name"],
         plan=record["plan"],
+        email_verified=bool(record["email_verified"]),
     )
 
 
@@ -249,6 +265,139 @@ async def logout(
     pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> None:
     await RefreshTokenRepo(pool).delete_by_raw_token(body.refresh_token)
+
+
+# ── Password reset + email verification ──────────────────────────────────────
+# Both use stateless signed action tokens (services/auth.py) so there is no
+# token table to expire or clean up. Reset tokens carry a fingerprint of the
+# CURRENT password hash: once the password changes, all outstanding reset
+# links stop verifying — single-use without server-side state.
+
+RESET_TOKEN_TTL_SECONDS = 30 * 60
+VERIFY_TOKEN_TTL_SECONDS = 7 * 24 * 3600
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=2048)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=2048)
+
+
+class DetailResponse(BaseModel):
+    detail: str
+
+
+def _frontend_link(path: str, token: str) -> str:
+    base = get_settings().app_base_url.rstrip("/")
+    return f"{base}{path}?token={token}"
+
+
+def _verify_email_link(user_id: str) -> str:
+    token = create_action_token("verify-email", user_id, VERIFY_TOKEN_TTL_SECONDS)
+    return _frontend_link("/verify-email", token)
+
+
+@router.post("/forgot-password", response_model=DetailResponse, status_code=status.HTTP_202_ACCEPTED)
+@limiter.limit("5/minute")
+async def forgot_password(
+    request: Request,
+    body: ForgotPasswordRequest,
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> DetailResponse:
+    user = await AuthUserRepo(pool).get_by_email(body.email)
+    # Always 202 — the response never reveals whether the email exists.
+    # Broker/OAuth accounts (password_hash IS NULL) have no password to reset.
+    if user and user["password_hash"]:
+        token = create_action_token(
+            "password-reset",
+            str(user["id"]),
+            RESET_TOKEN_TTL_SECONDS,
+            {"pwd_fp": password_fingerprint(user["password_hash"])},
+        )
+        await send_password_reset_email(
+            body.email, user["display_name"], _frontend_link("/reset-password", token)
+        )
+    return DetailResponse(detail="If that email is registered, a reset link is on its way.")
+
+
+@router.post("/reset-password", response_model=DetailResponse)
+@limiter.limit("10/minute")
+async def reset_password(
+    request: Request,
+    body: ResetPasswordRequest,
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> DetailResponse:
+    claims = verify_action_token(body.token, "password-reset")
+    if not claims:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset link is invalid or has expired — request a new one.",
+        )
+
+    user_repo = AuthUserRepo(pool)
+    user = await user_repo.get_by_id(UUID(claims["sub"]))
+    if not user or claims.get("pwd_fp") != password_fingerprint(user["password_hash"]):
+        # Fingerprint mismatch = the password already changed since this link
+        # was issued (link already used, or superseded by a newer reset).
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset link is invalid or has expired — request a new one.",
+        )
+
+    await user_repo.update_password(user["id"], hash_password(body.new_password))
+    # Revoke every session — whoever held the old password is logged out.
+    await RefreshTokenRepo(pool).delete_all_for_user(user["id"])
+    logger.info("Password reset completed for user %s", user["id"])
+    return DetailResponse(detail="Password updated — sign in with your new password.")
+
+
+@router.post("/verify-email", response_model=DetailResponse)
+@limiter.limit("10/minute")
+async def verify_email(
+    request: Request,
+    body: VerifyEmailRequest,
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> DetailResponse:
+    claims = verify_action_token(body.token, "verify-email")
+    if not claims:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification link is invalid or has expired — request a new one.",
+        )
+    user_repo = AuthUserRepo(pool)
+    user = await user_repo.get_by_id(UUID(claims["sub"]))
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Account not found.")
+    if not user["email_verified"]:
+        await user_repo.mark_email_verified(user["id"])
+    return DetailResponse(detail="Email verified — you're all set.")
+
+
+@router.post(
+    "/resend-verification", response_model=DetailResponse, status_code=status.HTTP_202_ACCEPTED
+)
+@limiter.limit("3/minute")
+async def resend_verification(
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> DetailResponse:
+    user = await AuthUserRepo(pool).get_by_id(current_user.user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found.")
+    if user["email_verified"]:
+        return DetailResponse(detail="Your email is already verified.")
+    await send_verify_email(
+        user["email"], user["display_name"], _verify_email_link(str(user["id"]))
+    )
+    return DetailResponse(detail="Verification email sent — check your inbox.")
 
 
 # ── Broker-identity login ("Continue with Upstox") ────────────────────────────
@@ -348,6 +497,8 @@ async def upstox_login_callback(
             display_name=profile["user_name"],
             role="owner",
             auth_provider="upstox",
+            # The broker already KYC-verified this email.
+            email_verified=True,
         )
         await send_welcome_email(profile["email"], user["display_name"])
 
