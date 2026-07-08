@@ -193,6 +193,76 @@ async def _retrieve_commons_context(
         return ""
 
 
+def _render_holdings_review_prompt(risk: dict) -> str:
+    """Build a grounded prompt from the deterministic risk scorecard."""
+    lines = [
+        "You are reviewing a user's real, consolidated multi-broker holdings. Below is a "
+        "risk scorecard already computed deterministically — treat its numbers as ground "
+        "truth. Give concise, plain-English guidance: which positions to TRIM, which to "
+        "REVIEW/sell, and which to HOLD, and why. Be direct about concentration and losses. "
+        "End with 2-3 concrete next steps. Always add one line reminding the user this is "
+        "not personalised financial advice and the platform never sells on their behalf.",
+        "",
+        f"Portfolio: {risk['holdings_count']} holdings, total value {risk['total_value']:.0f}, "
+        f"diversification={risk['diversification']}, "
+        f"largest position {risk['top_weight_pct']:.0f}%, "
+        f"broker concentration {risk['broker_concentration_pct']:.0f}%.",
+        f"Overall: {risk['verdict']}",
+        "",
+        "Positions (symbol · weight · unrealized P&L · signal):",
+    ]
+    for h in risk["holdings"][:25]:
+        pnl = f"{h['unrealized_pnl_pct']:+.0f}%" if h["unrealized_pnl_pct"] is not None else "n/a"
+        lines.append(
+            f"- {h['symbol']} ({h['broker']}): {h['weight_pct']:.0f}% · {pnl} · {h['signal']}"
+        )
+    return "\n".join(lines)
+
+
+async def review_holdings(
+    risk: dict,
+    current_user: CurrentUser,
+    pool: "asyncpg.Pool | None" = None,
+) -> str:
+    """
+    Turn a deterministic risk scorecard (services/portfolio_risk.analyze_holdings)
+    into plain-English trim/sell/hold guidance via the user's BYOK model. Same
+    strict-BYOK enforcement as analyze_query. Raises ValueError on BYOK rejection
+    or agent failure so the route can map it to the right HTTP status.
+    """
+    import asyncio
+
+    from agent_framework import Agent
+
+    if not risk.get("holdings"):
+        return "No priced holdings to review yet — import a CAS statement first."
+
+    api_key, base_url, model = await _resolve_byok(pool, current_user)
+    client = _make_chat_client(api_key, base_url, model)
+    advisor = Agent(
+        client=client,
+        name="PortfolioRiskAdvisor",
+        instructions=ADVISOR_SYSTEM_PROMPT,
+    )
+    try:
+        result = await asyncio.wait_for(
+            advisor.run(_render_holdings_review_prompt(risk)), timeout=120.0
+        )
+        text = (result.text or "").strip()
+        if not text:
+            raise ValueError("The AI advisor returned an empty response. Please try again.")
+        return text
+    except asyncio.TimeoutError as exc:
+        raise ValueError("The AI advisor timed out. Please try again.") from exc
+    except ValueError:
+        raise
+    except Exception as exc:
+        logger.error("review_holdings failed: %s", exc)
+        raise ValueError(f"AI review failed: {exc}") from exc
+    finally:
+        await _close_client(client)
+
+
 async def analyze_query(
     query: str,
     current_user: CurrentUser,

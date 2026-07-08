@@ -31,6 +31,7 @@ import type {
   Subscription,
   TaskStatusResponse,
   TestConnectionResponse,
+  RiskReview,
   TickerSearchResult,
   TokenResponse,
   UnifiedPortfolio,
@@ -606,6 +607,12 @@ export const api = {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify(data),
+    }),
+
+  // Real-time holdings risk review (deterministic; set includeAi for a narrative)
+  getRiskReview: (includeAi = false) =>
+    req<RiskReview>(`/v1/portfolio/risk-review?include_ai=${includeAi}`, {
+      headers: authHeaders(),
     }),
 
   // ── Monte Carlo wealth forecast ───────────────────────────────

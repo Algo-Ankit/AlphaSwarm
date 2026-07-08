@@ -8,11 +8,15 @@ import { Button } from '@/components/ui/Button'
 import { WealthForecastChart } from '@/components/charts/WealthForecastChart'
 import { api, getAccessToken } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import rehypeSanitize from 'rehype-sanitize'
 import type {
-  BacktestSummary, Strategy, UnifiedPortfolio, WealthForecast,
+  BacktestSummary, RiskReview, Strategy, UnifiedPortfolio, WealthForecast,
 } from '@/lib/types'
 import {
   Wallet, Upload, TrendingUp, Building2, Layers, Sparkles, AlertCircle, Loader2,
+  ShieldAlert, ShieldCheck, Scissors, Eye, Check, Bot,
 } from 'lucide-react'
 
 /* A simulated parsed NSDL/CDSL CAS — lets a new user populate the unified view
@@ -59,6 +63,12 @@ export default function PortfolioPage() {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // ── Risk review state ────────────────────────────────────────
+  const [risk, setRisk] = useState<RiskReview | null>(null)
+  const [aiReview, setAiReview] = useState<string | null>(null)
+  const [aiReviewLoading, setAiReviewLoading] = useState(false)
+  const [aiReviewError, setAiReviewError] = useState<string | null>(null)
+
   // ── Simulator state ──────────────────────────────────────────
   const [strategyId, setStrategyId] = useState<string>('')
   const [backtest, setBacktest] = useState<BacktestSummary | null>(null)
@@ -83,6 +93,37 @@ export default function PortfolioPage() {
       }
     })()
   }, [router])
+
+  // Deterministic risk scorecard — refetched whenever holdings change. Cheap and
+  // key-free, so it loads eagerly; the AI narrative is fetched on demand below.
+  const holdingsCount = portfolio?.holdings.length ?? 0
+  useEffect(() => {
+    if (holdingsCount === 0) { setRisk(null); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const r = await api.getRiskReview(false)
+        if (!cancelled) { setRisk(r); setAiReview(null); setAiReviewError(null) }
+      } catch {
+        if (!cancelled) setRisk(null)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [holdingsCount])
+
+  const runAiReview = useCallback(async () => {
+    setAiReviewLoading(true); setAiReviewError(null)
+    try {
+      const r = await api.getRiskReview(true)
+      setRisk(r)
+      if (r.ai_narrative) setAiReview(r.ai_narrative)
+      else setAiReviewError(r.ai_error ?? 'AI review is unavailable. Add an API key in Settings → AI.')
+    } catch (e) {
+      setAiReviewError(e instanceof Error ? e.message : 'AI review failed')
+    } finally {
+      setAiReviewLoading(false)
+    }
+  }, [])
 
   // Pull the selected strategy's latest backtest so we can derive CAGR + σ.
   useEffect(() => {
@@ -284,6 +325,17 @@ export default function PortfolioPage() {
               </div>
             </GlassCard>
 
+            {/* ── AI Risk Review ───────────────────────────────── */}
+            {risk && (
+              <RiskReviewCard
+                risk={risk}
+                aiReview={aiReview}
+                aiLoading={aiReviewLoading}
+                aiError={aiReviewError}
+                onRunAi={runAiReview}
+              />
+            )}
+
             {/* ── Simulate Future ──────────────────────────────── */}
             <GlassCard padding="lg" glow>
               <div className="flex items-center gap-2 mb-1">
@@ -369,6 +421,128 @@ export default function PortfolioPage() {
         )}
       </div>
     </AppShell>
+  )
+}
+
+/* ── AI Risk Review ────────────────────────────────────────────────────────── */
+const SIGNAL_STYLE: Record<string, { cls: string; icon: typeof Scissors; label: string }> = {
+  Trim: { cls: 'text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/20', icon: Scissors, label: 'Trim' },
+  Review: { cls: 'text-rose-600 dark:text-rose-400 bg-rose-500/10 border-rose-500/20', icon: Eye, label: 'Review' },
+  Hold: { cls: 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20', icon: Check, label: 'Hold' },
+}
+
+const DIVERSIFICATION_STYLE: Record<string, string> = {
+  diversified: 'text-emerald-600 dark:text-emerald-400',
+  moderate: 'text-amber-600 dark:text-amber-400',
+  concentrated: 'text-rose-600 dark:text-rose-400',
+  unknown: 'text-zinc-400',
+}
+
+function SignalBadge({ signal }: { signal: string }) {
+  const s = SIGNAL_STYLE[signal] ?? SIGNAL_STYLE.Hold
+  const Icon = s.icon
+  return (
+    <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold border', s.cls)}>
+      <Icon className="w-3 h-3" /> {s.label}
+    </span>
+  )
+}
+
+function RiskReviewCard({
+  risk, aiReview, aiLoading, aiError, onRunAi,
+}: {
+  risk: RiskReview; aiReview: string | null; aiLoading: boolean
+  aiError: string | null; onRunAi: () => void
+}) {
+  const flagged = risk.flagged_count > 0
+  return (
+    <GlassCard padding="lg">
+      <div className="flex items-start justify-between gap-3 flex-wrap mb-1">
+        <div className="flex items-center gap-2">
+          {flagged
+            ? <ShieldAlert className="w-5 h-5 text-amber-500" />
+            : <ShieldCheck className="w-5 h-5 text-emerald-500" />}
+          <h3 className="text-lg font-bold text-zinc-900 dark:text-zinc-50">Risk Review</h3>
+        </div>
+        <Button variant="secondary" onClick={onRunAi} loading={aiLoading}>
+          <Bot className="w-4 h-4" /> Ask AI what to sell / hold
+        </Button>
+      </div>
+      <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-4">{risk.verdict}</p>
+
+      {/* Portfolio-level risk tiles */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        <RiskTile label="Diversification"
+          value={risk.diversification[0].toUpperCase() + risk.diversification.slice(1)}
+          cls={DIVERSIFICATION_STYLE[risk.diversification]} />
+        <RiskTile label="Largest position" value={`${risk.top_weight_pct.toFixed(0)}%`}
+          cls={risk.top_weight_pct >= 20 ? 'text-amber-600 dark:text-amber-400' : 'text-zinc-800 dark:text-zinc-200'} />
+        <RiskTile label="Top broker" value={`${risk.broker_concentration_pct.toFixed(0)}%`}
+          cls={risk.broker_concentration_pct >= 70 ? 'text-amber-600 dark:text-amber-400' : 'text-zinc-800 dark:text-zinc-200'} />
+        <RiskTile label="Flagged" value={`${risk.flagged_count} / ${risk.holdings_count}`}
+          cls={flagged ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'} />
+      </div>
+
+      {/* Per-holding signals */}
+      <div className="space-y-2">
+        {risk.holdings.map((h) => (
+          <div key={`${h.symbol}-${h.broker}`}
+            className="flex items-start justify-between gap-3 rounded-xl px-4 py-3
+              bg-black/[0.02] dark:bg-white/[0.03] border border-black/[0.05] dark:border-white/[0.05]">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-zinc-900 dark:text-zinc-100">{h.symbol}</span>
+                <SignalBadge signal={h.signal} />
+              </div>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1">{h.reasons[0]}</p>
+            </div>
+            <div className="text-right flex-shrink-0 tabular-nums">
+              <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{h.weight_pct.toFixed(0)}%</p>
+              {h.unrealized_pnl_pct != null && (
+                <p className={cn('text-[11px]',
+                  h.unrealized_pnl_pct >= 0 ? 'text-emerald-500' : 'text-rose-500')}>
+                  {fmtPct(h.unrealized_pnl_pct)}
+                </p>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* AI narrative */}
+      {aiError && (
+        <p className="mt-4 text-sm text-rose-500 flex items-center gap-1.5">
+          <AlertCircle className="w-4 h-4" /> {aiError}
+        </p>
+      )}
+      {aiReview && (
+        <div className="mt-5 rounded-xl px-5 py-4 bg-violet-500/[0.04] border border-violet-500/15">
+          <div className="flex items-center gap-2 mb-2 text-violet-600 dark:text-violet-400">
+            <Bot className="w-4 h-4" /> <span className="text-sm font-semibold">AI advisor</span>
+          </div>
+          <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1.5 prose-headings:mt-3">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+              {aiReview}
+            </ReactMarkdown>
+          </div>
+        </div>
+      )}
+
+      <p className="mt-4 text-[11px] text-zinc-400">
+        Signals are risk heuristics on your own holdings — not personalised financial advice.
+        AlphaSwarm never buys or sells on your behalf.
+      </p>
+    </GlassCard>
+  )
+}
+
+function RiskTile({ label, value, cls }: { label: string; value: string; cls: string }) {
+  return (
+    <div className="rounded-xl px-3 py-2.5 bg-black/[0.02] dark:bg-white/[0.03]
+      border border-black/[0.05] dark:border-white/[0.05]">
+      <p className="text-[10px] uppercase tracking-wider text-zinc-400">{label}</p>
+      <p className={cn('text-base font-bold mt-0.5', cls)}>{value}</p>
+    </div>
   )
 }
 

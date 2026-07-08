@@ -18,6 +18,7 @@ from app.db.repositories.portfolio import PortfolioRepo
 from app.db.repositories.unified_holdings import UnifiedHoldingsRepo
 from app.services.forecasting import run_monte_carlo
 from app.services.portfolio_parser import parse_cas, summarize
+from app.services.portfolio_risk import analyze_holdings
 
 router = APIRouter(prefix="/v1/portfolio", tags=["portfolio"])
 
@@ -251,6 +252,88 @@ async def _build_unified_response(
     return UnifiedPortfolioResponse(
         **summary,
         holdings=[_record_to_holding(r) for r in rows],
+    )
+
+
+# ── Holdings risk review (deterministic + optional AI narrative) ───────────────
+
+
+class HoldingRisk(BaseModel):
+    symbol: str
+    name: str
+    broker: str
+    value: float
+    weight_pct: float
+    unrealized_pnl_pct: float | None
+    signal: str  # Trim | Review | Hold
+    reasons: list[str]
+
+
+class RiskReviewResponse(BaseModel):
+    total_value: float
+    holdings_count: int
+    concentration_index: float
+    top_weight_pct: float
+    broker_concentration_pct: float
+    asset_class_concentration_pct: float
+    diversification: str  # diversified | moderate | concentrated | unknown
+    flagged_count: int
+    verdict: str
+    holdings: list[HoldingRisk]
+    # Present only when include_ai=true and the user has a usable BYOK key.
+    ai_narrative: str | None = None
+    ai_available: bool = False
+    ai_error: str | None = None
+
+
+@router.get("/risk-review", response_model=RiskReviewResponse)
+async def risk_review(
+    include_ai: bool = Query(False, description="Also generate a plain-English AI narrative"),
+    current_user: CurrentUser = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> RiskReviewResponse:
+    """
+    Real-time risk scorecard over the user's consolidated holdings: concentration,
+    drawdown and diversification signals per position (Trim / Review / Hold). The
+    deterministic analysis always runs; when include_ai is set we layer the BYOK
+    AI advisor on top for a narrative — best-effort, never blocking the scorecard.
+    """
+    repo = UnifiedHoldingsRepo(pool, current_user.tenant_id)
+    rows = await repo.list_all()
+    holdings = [
+        {
+            "symbol": r["symbol"],
+            "name": r["name"],
+            "broker": r["broker"],
+            "asset_class": r["asset_class"],
+            "quantity": float(r["quantity"]),
+            "avg_cost": float(r["avg_cost"]),
+            "current_price": float(r["current_price"]) if r["current_price"] is not None else None,
+            "current_value": float(r["current_value"]),
+        }
+        for r in rows
+    ]
+    risk = analyze_holdings(holdings)
+
+    ai_narrative: str | None = None
+    ai_available = False
+    ai_error: str | None = None
+    if include_ai and risk["holdings"]:
+        from app.services.ai_advisor import review_holdings
+
+        try:
+            ai_narrative = await review_holdings(risk, current_user, pool=pool)
+            ai_available = True
+        except ValueError as exc:
+            # BYOK missing or model error — the scorecard is still returned.
+            ai_error = str(exc)
+
+    return RiskReviewResponse(
+        **{k: risk[k] for k in risk if k != "holdings"},
+        holdings=[HoldingRisk(**h) for h in risk["holdings"]],
+        ai_narrative=ai_narrative,
+        ai_available=ai_available,
+        ai_error=ai_error,
     )
 
 

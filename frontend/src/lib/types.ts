@@ -240,6 +240,33 @@ export interface UnifiedPortfolio {
   holdings: UnifiedHolding[]
 }
 
+export interface HoldingRisk {
+  symbol: string
+  name: string
+  broker: string
+  value: number
+  weight_pct: number
+  unrealized_pnl_pct: number | null
+  signal: 'Trim' | 'Review' | 'Hold'
+  reasons: string[]
+}
+
+export interface RiskReview {
+  total_value: number
+  holdings_count: number
+  concentration_index: number
+  top_weight_pct: number
+  broker_concentration_pct: number
+  asset_class_concentration_pct: number
+  diversification: 'diversified' | 'moderate' | 'concentrated' | 'unknown'
+  flagged_count: number
+  verdict: string
+  holdings: HoldingRisk[]
+  ai_narrative: string | null
+  ai_available: boolean
+  ai_error: string | null
+}
+
 export interface CasHoldingInput {
   symbol: string
   name?: string
