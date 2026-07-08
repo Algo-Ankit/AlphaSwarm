@@ -20,12 +20,41 @@ from app.api.notifications import router as notifications_router
 from app.api.portfolio import router as portfolio_router
 from app.api.routes import router as strategy_router
 from app.api.social import router as social_router
+from app.api.social_feed import router as feed_router
 from app.api.ws import router as ws_router
 from app.core.config import get_settings
 from app.core.rate_limit import limiter
 from app.db.connection import close_pool, create_pool, get_pool
 
 settings = get_settings()
+
+
+# ── Production secret guard ─────────────────────────────────────────────────────
+# A production deployment with the dev JWT secret means anyone can mint a valid
+# token for ANY tenant (full auth bypass). Refuse to boot rather than run open.
+def _enforce_production_secrets() -> None:
+    if not settings.is_production:
+        return
+    problems: list[str] = []
+    if not settings.jwt_private_key_base64 and (
+        settings.jwt_secret_key == "dev-secret-key-change-in-production"
+        or len(settings.jwt_secret_key) < 32
+    ):
+        problems.append(
+            "JWT signing key is the dev default / too short — set JWT_PRIVATE_KEY_BASE64 "
+            "(RS256) or a 32+ char JWT_SECRET_KEY"
+        )
+    if not settings.broker_key_encryption_secret:
+        problems.append("BROKER_KEY_ENCRYPTION_SECRET is not set — broker keys cannot be stored")
+    if not settings.cors_origins:
+        problems.append("CORS_ORIGINS is empty — no browser origin will be able to call the API")
+    if problems:
+        raise RuntimeError(
+            "Refusing to start with APP_ENV=production:\n  - " + "\n  - ".join(problems)
+        )
+
+
+_enforce_production_secrets()
 
 # ── Sentry (production error + performance monitoring) ─────────────────────────
 # Initialised before the app is constructed so startup/import errors are captured.
@@ -128,6 +157,7 @@ app.include_router(notifications_router)
 app.include_router(billing_router)
 app.include_router(ai_advisor_router)
 app.include_router(social_router)
+app.include_router(feed_router)
 
 
 # ── Health checks ─────────────────────────────────────────────

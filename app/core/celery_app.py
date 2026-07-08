@@ -25,7 +25,7 @@ celery_app = Celery(
     "alphaswarm_worker",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["app.worker.tasks"],
+    include=["app.worker.tasks", "app.worker.beat_tasks", "app.worker.billing_tasks"],
 )
 
 celery_app.conf.update(
@@ -37,6 +37,7 @@ celery_app.conf.update(
     task_routes={
         "app.worker.tasks.*": {"queue": "trading_tasks"},
         "app.worker.beat_tasks.*": {"queue": "beat_tasks"},
+        "app.worker.billing_tasks.*": {"queue": "beat_tasks"},
     },
     task_default_queue="trading_tasks",
     # ── Reliability (critical for trading) ───────────────────
@@ -85,6 +86,19 @@ celery_app.conf.update(
         "reconcile-positions": {
             "task": "app.worker.beat_tasks.reconcile_positions",
             "schedule": crontab(hour=17, minute=10),
+            "options": {"queue": "beat_tasks"},
+        },
+        # Purge long-expired refresh tokens — daily at 03:15 UTC
+        "cleanup-refresh-tokens": {
+            "task": "app.worker.beat_tasks.cleanup_refresh_tokens",
+            "schedule": crontab(hour=3, minute=15),
+            "options": {"queue": "beat_tasks"},
+        },
+        # Swarm Tax — 1% of allocated_capital billed to every active copy-trade subscriber
+        # on the 1st of each month; revenue split 50/50 platform / creator.
+        "swarm-tax-billing": {
+            "task": "app.worker.billing_tasks.charge_swarm_tax",
+            "schedule": crontab(hour=0, minute=0, day_of_month=1),
             "options": {"queue": "beat_tasks"},
         },
     },

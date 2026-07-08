@@ -282,12 +282,42 @@ CREATE TABLE strategy_subscriptions (
     subscriber_user_id   UUID REFERENCES users(id) ON DELETE SET NULL,
     allocated_capital    NUMERIC(18, 2) NOT NULL CHECK (allocated_capital > 0),
     is_active            BOOLEAN NOT NULL DEFAULT true,
+    -- Swarm Tax billing columns (added migration 0008)
+    last_billed_at       TIMESTAMPTZ,
+    fee_status           TEXT NOT NULL DEFAULT 'unpaid'
+                         CHECK (fee_status IN ('unpaid', 'charged', 'failed', 'exempt')),
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (public_strategy_id, subscriber_tenant_id)
 );
 CREATE INDEX idx_strategy_subscriptions_public     ON strategy_subscriptions(public_strategy_id);
 CREATE INDEX idx_strategy_subscriptions_subscriber ON strategy_subscriptions(subscriber_tenant_id);
+
+-- Creator social feed — cross-tenant public posts linked optionally to a public strategy.
+CREATE TABLE social_posts (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id           UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    public_strategy_id  UUID REFERENCES public_strategies(id) ON DELETE SET NULL,
+    content_markdown    TEXT NOT NULL CHECK (char_length(content_markdown) BETWEEN 1 AND 5000),
+    likes_count         INT NOT NULL DEFAULT 0 CHECK (likes_count >= 0),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_social_posts_tenant   ON social_posts(tenant_id, created_at DESC);
+CREATE INDEX idx_social_posts_strategy ON social_posts(public_strategy_id) WHERE public_strategy_id IS NOT NULL;
+CREATE INDEX idx_social_posts_timeline ON social_posts(created_at DESC);
+
+-- Revenue ledger: records 50% creator + 50% platform splits from monthly Swarm Tax charges.
+CREATE TABLE creator_balances (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    creator_tenant_id   UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    subscription_id     UUID REFERENCES strategy_subscriptions(id) ON DELETE SET NULL,
+    amount              NUMERIC(18, 2) NOT NULL CHECK (amount > 0),
+    currency            TEXT NOT NULL DEFAULT 'USD',
+    credit_type         TEXT NOT NULL DEFAULT 'creator_share'
+                        CHECK (credit_type IN ('creator_share', 'platform_share')),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_creator_balances_tenant ON creator_balances(creator_tenant_id, created_at DESC);
 
 -- ============================================================
 -- BACKTESTING

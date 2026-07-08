@@ -75,7 +75,9 @@ class Settings(BaseSettings):
     broker_key_encryption_secret: str = ""
 
     # OAuth — broker-level credentials (platform-level, not per-user)
-    # Upstox: register a platform app at https://upstox.com/developer/
+    # Upstox: register a platform app at https://upstox.com/developer/ with BOTH
+    # redirect URIs: {app_base_url}/settings/brokers/oauth/callback (connect flow)
+    # and {app_base_url}/login/upstox/callback ("Continue with Upstox" sign-in).
     upstox_client_id: str = ""
     upstox_client_secret: str = ""
     # Base URL of the frontend — used to build OAuth redirect URIs
