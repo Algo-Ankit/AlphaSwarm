@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -14,7 +14,16 @@ import { api } from '@/lib/api'
  * We read the URL params, call the backend to exchange the code/token, then
  * redirect back to /settings/brokers.
  */
+// useSearchParams() requires a Suspense boundary in Next 14 static builds.
 export default function OAuthCallbackPage() {
+  return (
+    <Suspense fallback={null}>
+      <OAuthCallback />
+    </Suspense>
+  )
+}
+
+function OAuthCallback() {
   const router       = useRouter()
   const params       = useSearchParams()
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading')

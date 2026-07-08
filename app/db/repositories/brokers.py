@@ -64,6 +64,7 @@ class BrokerRepo(BaseRepo):
                 access_token     = EXCLUDED.access_token,
                 refresh_token    = EXCLUDED.refresh_token,
                 token_expires_at = EXCLUDED.token_expires_at,
+                oauth_state      = NULL,  -- state is one-time-use; clear on successful exchange
                 updated_at       = now()
             RETURNING *
             """,

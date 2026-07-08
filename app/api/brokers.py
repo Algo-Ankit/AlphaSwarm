@@ -41,6 +41,23 @@ def _validate_url(url: str, broker: str) -> None:
         )
 
 
+def _validate_alpaca_url(url: str) -> None:
+    """
+    Alpaca base_url must point at Alpaca. The connection test sends the user's
+    API key/secret to this URL — an arbitrary host would let a malicious value
+    exfiltrate credentials or probe internal services (SSRF) with our server.
+    """
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or not (
+        host == "alpaca.markets" or host.endswith(".alpaca.markets")
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Alpaca base_url must be an https://*.alpaca.markets URL",
+        )
+
+
 def _oauth_redirect_uri(broker: str) -> str:
     settings = get_settings()
     base = getattr(settings, "app_base_url", "http://localhost:3000").rstrip("/")
@@ -180,6 +197,7 @@ async def connect_broker(
 ) -> BrokerConnectionResponse:
     if body.broker == "alpaca":
         base_url = body.base_url or (_ALPACA_PAPER_URL if body.is_paper else _ALPACA_LIVE_URL)
+        _validate_alpaca_url(base_url)
         test = await _test_alpaca(body.api_key, body.api_secret, base_url)
         if not test.ok:
             raise HTTPException(
@@ -339,6 +357,18 @@ async def oauth_callback(
         client_secret = getattr(settings, "upstox_client_secret", "")
         if not client_id:
             raise HTTPException(status_code=503, detail="Upstox OAuth not configured")
+
+        # CSRF check: the state we generated at login-url time must round-trip.
+        # Without this, an attacker can complete the flow with THEIR authorization
+        # code and silently bind their brokerage to the victim's account.
+        existing = await repo.get_by_broker("upstox")
+        stored_state = existing.get("oauth_state") if existing else None
+        if not body.state or not stored_state or not secrets.compare_digest(stored_state, body.state):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="OAuth state mismatch — restart the Upstox connection flow.",
+            )
+
         try:
             token_data = await oauth.upstox_exchange_code(
                 client_id,

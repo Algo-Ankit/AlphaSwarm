@@ -98,14 +98,15 @@ class AuthUserRepo:
         self,
         tenant_id: UUID,
         email: str,
-        password_hash: str,
+        password_hash: str | None,
         display_name: str,
         role: str = "owner",
+        auth_provider: str = "password",
     ) -> asyncpg.Record:
         return await self._pool.fetchrow(
             """
-            INSERT INTO users (tenant_id, email, password_hash, display_name, role)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO users (tenant_id, email, password_hash, display_name, role, auth_provider)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING *
             """,
             tenant_id,
@@ -113,6 +114,7 @@ class AuthUserRepo:
             password_hash,
             display_name,
             role,
+            auth_provider,
         )
 
     async def get_by_email(self, email: str) -> asyncpg.Record | None:
@@ -173,6 +175,43 @@ class RefreshTokenRepo:
             """,
             token_hash,
         )
+
+    async def find_reused_token_user(self, raw_token: str) -> UUID | None:
+        """
+        Detect refresh-token reuse: the token exists but was already rotated and
+        its grace window has passed. That means TWO parties presented the same
+        token — the rotation-race grace path can no longer explain it, so treat
+        it as theft. Returns the owning user_id so the caller can revoke the
+        whole session family; None if the token is simply unknown/expired.
+        """
+        row = await self._pool.fetchrow(
+            """
+            SELECT user_id FROM refresh_tokens
+            WHERE token_hash = $1
+              AND rotated_to_hash IS NOT NULL
+              AND grace_period_until IS NOT NULL
+              AND grace_period_until <= now()
+            """,
+            self.hash_token(raw_token),
+        )
+        return row["user_id"] if row else None
+
+    async def delete_expired(self, older_than_days: int = 7) -> int:
+        """
+        Purge tokens that expired more than `older_than_days` ago (keeps the
+        reuse-detection window alive for recently-rotated tokens while stopping
+        unbounded table growth). Returns the number of rows deleted.
+        """
+        result = await self._pool.execute(
+            f"""
+            DELETE FROM refresh_tokens
+            WHERE expires_at < now() - INTERVAL '{int(older_than_days)} days'
+            """
+        )
+        try:
+            return int(result.split()[-1])
+        except (ValueError, IndexError):
+            return 0
 
     async def rotate(
         self,

@@ -17,9 +17,32 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
+  const [brokerLoading, setBrokerLoading] = useState(false)
+
   useEffect(() => {
     if (getAccessToken()) router.replace('/')
   }, [router])
+
+  async function handleUpstoxLogin() {
+    setError(null)
+    setBrokerLoading(true)
+    try {
+      const { login_url, state } = await api.getUpstoxLoginUrl()
+      // The callback page cross-checks this against the state Upstox echoes
+      // back, so a login-CSRF redirect from another browser session fails.
+      sessionStorage.setItem('upstox_login_state', state)
+      window.location.href = login_url
+    } catch (err: unknown) {
+      const raw = err instanceof Error ? err.message : 'Upstox sign-in unavailable'
+      try {
+        const parsed = JSON.parse(raw)
+        setError(parsed.detail ?? raw)
+      } catch {
+        setError(raw)
+      }
+      setBrokerLoading(false)
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -150,6 +173,36 @@ export default function LoginPage() {
               {mode === 'login' ? 'Sign In' : 'Create Account'}
             </Button>
           </form>
+
+          {/* ── Broker-identity sign-in ─────────────────────────────── */}
+          <div className="flex items-center gap-3 my-5">
+            <div className="flex-1 h-px bg-zinc-200 dark:bg-zinc-700" />
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">or</span>
+            <div className="flex-1 h-px bg-zinc-200 dark:bg-zinc-700" />
+          </div>
+
+          <button
+            type="button"
+            onClick={handleUpstoxLogin}
+            disabled={brokerLoading}
+            className="w-full h-12 flex items-center justify-center gap-2.5 rounded-xl text-sm font-semibold
+              bg-white dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700
+              text-zinc-800 dark:text-zinc-100
+              hover:border-violet-400/60 hover:shadow-[0_0_16px_rgba(139,92,246,0.15)]
+              disabled:opacity-60 transition-all duration-150"
+          >
+            {brokerLoading ? (
+              <span className="w-4 h-4 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <span className="w-5 h-5 rounded-md bg-[#5A2FD1] flex items-center justify-center text-[10px] font-black text-white">
+                UP
+              </span>
+            )}
+            Continue with Upstox
+          </button>
+          <p className="text-center text-[11px] text-zinc-400 dark:text-zinc-500 mt-3">
+            Signs you in <em>and</em> connects your brokerage — no API keys to copy.
+          </p>
         </div>
 
         <p className="text-center text-xs text-zinc-400 dark:text-zinc-500 mt-6">

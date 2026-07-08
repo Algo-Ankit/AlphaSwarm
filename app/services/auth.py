@@ -24,6 +24,17 @@ def verify_password(plain: str, hashed: str) -> bool:
         return False
 
 
+# Pre-computed hash used to equalize login timing when the email does not exist.
+# Without this, a missing-user login returns ~instantly while a wrong-password
+# login takes a full bcrypt verify — a timing oracle for email enumeration.
+_TIMING_EQUALIZER_HASH = bcrypt.hashpw(b"timing-equalizer", bcrypt.gensalt()).decode()
+
+
+def equalize_login_timing(plain: str) -> None:
+    """Burn one bcrypt verify so unknown-email and wrong-password take equal time."""
+    bcrypt.checkpw(plain.encode(), _TIMING_EQUALIZER_HASH.encode())
+
+
 # --------------------------------------------------------------------------- #
 # JWT — PyJWT, not python-jose                                                 #
 # python-jose is abandoned and has CVE-2022-29217 (algorithm confusion)       #
@@ -72,6 +83,37 @@ def decode_access_token(token: str) -> dict | None:
         return payload
     except InvalidTokenError:
         return None
+
+
+# --------------------------------------------------------------------------- #
+# OAuth state tokens — stateless CSRF protection for pre-auth broker login     #
+# --------------------------------------------------------------------------- #
+# The "Continue with Upstox" flow starts BEFORE any user session exists, so the
+# state can't be stored against a tenant row (unlike the broker-connect flow).
+# Instead the state is a short-lived signed JWT: the callback verifies the
+# signature and expiry, proving WE minted it minutes ago for this purpose.
+
+
+def create_state_token(purpose: str, ttl_seconds: int = 600) -> str:
+    key, algorithm = _sign_key()
+    now = datetime.now(timezone.utc)
+    payload = {
+        "purpose": purpose,
+        "nonce": secrets.token_urlsafe(16),
+        "type": "oauth_state",
+        "iat": now,
+        "exp": now + timedelta(seconds=ttl_seconds),
+    }
+    return jwt.encode(payload, key, algorithm=algorithm)
+
+
+def verify_state_token(token: str, purpose: str) -> bool:
+    key, algorithm = _verify_key()
+    try:
+        payload = jwt.decode(token, key, algorithms=[algorithm])
+    except InvalidTokenError:
+        return False
+    return payload.get("type") == "oauth_state" and payload.get("purpose") == purpose
 
 
 # --------------------------------------------------------------------------- #

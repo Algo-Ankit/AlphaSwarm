@@ -95,6 +95,30 @@ async def upstox_refresh_access_token(
     }
 
 
+_UPSTOX_PROFILE_URL = "https://api.upstox.com/v2/user/profile"
+
+
+async def upstox_get_profile(access_token: str) -> dict:
+    """
+    Fetch the authenticated Upstox user's profile.
+    Returns {email, user_name, broker_user_id}. Email is KYC-verified by the
+    broker, which is what makes broker-identity login safe to match on.
+    """
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            _UPSTOX_PROFILE_URL,
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+        )
+    if resp.status_code != 200:
+        raise ValueError(f"Upstox profile fetch failed: HTTP {resp.status_code}: {resp.text[:200]}")
+    data = resp.json().get("data", {})
+    return {
+        "email": (data.get("email") or "").strip().lower(),
+        "user_name": data.get("user_name") or "Upstox Trader",
+        "broker_user_id": data.get("user_id") or "",
+    }
+
+
 # ── Zerodha Kite Connect ──────────────────────────────────────────────────────
 _ZERODHA_LOGIN_BASE = "https://kite.zerodha.com/connect/login"
 _ZERODHA_TOKEN_URL = "https://api.kite.trade/session/token"
