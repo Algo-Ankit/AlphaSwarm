@@ -31,7 +31,6 @@ def get_sync_redis() -> redis.Redis:
     return redis.from_url(get_settings().redis_url, decode_responses=True)
 
 
-@lru_cache(maxsize=1)
 def get_async_redis() -> aioredis.Redis:
     """Shared asyncio Redis client (decoded responses)."""
     return aioredis.from_url(get_settings().redis_url, decode_responses=True)

@@ -434,12 +434,11 @@ async def _execute_async(
                 exchange_tz = exchange_timezone(exchange)
                 async with pool.acquire() as conn:
                     async with conn.transaction():
-                        # 64-bit advisory lock keyed on the strategy id. hashtext() returns
-                        # only int4, so distinct strategies collide ~1/4B and would serialize
-                        # against each other; the first 64 bits of an md5 give a full bigint
-                        # key with negligible collision probability.
+                        # Two-argument 32-bit integer advisory lock keyed on (tenant_id, strategy_id).
+                        # Native to Postgres, perfectly avoids the text-to-bit64 casting crash.
                         await conn.execute(
-                            "SELECT pg_advisory_xact_lock(('x' || substr(md5($1::text), 1, 16))::bit(64)::bigint)",
+                            "SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))",
+                            tenant_id,
                             strategy_id,
                         )
 
@@ -574,7 +573,8 @@ async def _execute_async(
                                 if run_id
                                 else None
                             )
-                            order_result = executor.place_order(signal, client_order_id)
+                            import asyncio
+                            order_result = await asyncio.to_thread(executor.place_order, signal, client_order_id)
                             if log:
                                 log.order(
                                     f"LIVE order: {signal.side.value.upper()} {symbol} × {signal.quantity} "
@@ -660,6 +660,7 @@ async def _execute_async(
                             signal=signal,
                             creator_risk=risk_profile,
                             dry_run=dry_run,
+                            run_id=run_id,
                             log=log,
                         )
                         if copy_results and log:

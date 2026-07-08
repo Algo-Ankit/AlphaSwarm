@@ -117,11 +117,16 @@ class AlpacaExecutor:
                 result = self._client.submit_order(req)
                 break
             except Exception as exc:
-                if "429" in str(exc) and attempt < max_retries - 1:
+                status_code = getattr(exc, "status_code", None)
+                if status_code == 429 and attempt < max_retries - 1:
                     time.sleep(2**attempt)
                     continue
-                # If it's a conflict (409) for client_order_id, it means we already placed it.
-                # Unfortunately Alpaca SDK might just throw a generic APIError, but let's re-raise.
+                if status_code == 409 and client_order_id:
+                    try:
+                        result = self._client.get_order_by_client_id(req_kwargs["client_order_id"])
+                        break
+                    except Exception as _get_exc:
+                        raise RuntimeError(f"Alpaca order 409 conflict, but failed to fetch: {_get_exc}") from exc
                 raise RuntimeError(
                     f"Alpaca order submission failed for {order.symbol}: {exc}"
                 ) from exc
@@ -305,12 +310,27 @@ class UpstoxExecutor:
             is_amo=False,
         )
 
+        order_id = None
         try:
             resp = self._order_api.place_order(body, api_version=self._api_version)
+            order_id = getattr(getattr(resp, "data", None), "order_id", None)
         except ApiException as exc:
-            raise RuntimeError(f"Upstox order submission failed for {order.symbol}: {exc}") from exc
-
-        order_id = getattr(getattr(resp, "data", None), "order_id", None)
+            if getattr(exc, "status", None) in (502, 503, 504, 408):
+                import time
+                time.sleep(1.0)
+                try:
+                    book_resp = self._order_api.get_order_book(api_version=self._api_version)
+                    orders = getattr(book_resp, "data", None) or []
+                    tag_to_find = body.tag
+                    placed_order = next((o for o in orders if getattr(o, "tag", None) == tag_to_find), None)
+                    if placed_order:
+                        order_id = getattr(placed_order, "order_id", None)
+                    else:
+                        raise RuntimeError(f"Upstox 502 error, order not found in book: {exc}") from exc
+                except Exception as _get_exc:
+                    raise RuntimeError(f"Upstox 502 error, failed to check order book: {_get_exc}") from exc
+            else:
+                raise RuntimeError(f"Upstox order submission failed for {order.symbol}: {exc}") from exc
 
         # Upstox returns an order id on acceptance; fills are reported
         # asynchronously (poll get_positions / order book). Treat as pending.
@@ -437,6 +457,7 @@ async def fan_out_to_subscribers(
     signal,
     creator_risk,
     dry_run: bool,
+    run_id: str | None = None,
     log=None,
 ) -> list[dict]:
     """
@@ -486,7 +507,7 @@ async def fan_out_to_subscribers(
     whole_shares = not allows_fractional_shares(exchange)
     exchange_tz = exchange_timezone(exchange)
     session = get_session_status(exchange)
-    creator_base = Decimal(str(creator_risk.max_position_notional))
+    creator_base = Decimal(str(creator_risk.max_position_notional * creator_risk.max_open_positions))
     price = Decimal(str(signal.estimated_price))
     symbol = signal.symbol.upper()
 
@@ -528,8 +549,8 @@ async def fan_out_to_subscribers(
 
             copy_risk = creator_risk.model_copy(
                 update={
-                    "max_order_notional": allocated,
-                    "max_position_notional": allocated,
+                    "max_order_notional": Decimal(str(creator_risk.max_order_notional)) * scale,
+                    "max_position_notional": Decimal(str(creator_risk.max_position_notional)) * scale,
                     "max_daily_notional": scaled_daily,
                     "allowed_symbols": sorted(
                         {*(s.upper() for s in creator_risk.allowed_symbols), symbol}
@@ -576,8 +597,9 @@ async def fan_out_to_subscribers(
                     # Per-(subscriber, strategy) advisory lock — serialize concurrent
                     # copies so two creator runs can't both pass the caps and double-place.
                     await conn.execute(
-                        "SELECT pg_advisory_xact_lock(('x' || substr(md5($1::text), 1, 16))::bit(64)::bigint)",
-                        f"{sub_tenant}:{strategy_id}",
+                        "SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))",
+                        sub_tenant,
+                        strategy_id,
                     )
 
                     pos_row = await conn.fetchrow(
@@ -650,7 +672,9 @@ async def fan_out_to_subscribers(
                             is_paper=True,
                         )
                     else:
-                        order_result = executor.place_order(copy_signal, None)
+                        import asyncio
+                        client_order_id = f"cp_{sub_tenant[:8]}_{run_id[:8]}" if run_id else None
+                        order_result = await asyncio.to_thread(executor.place_order, copy_signal, client_order_id)
 
                     await _write_order_async(
                         conn,

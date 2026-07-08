@@ -104,7 +104,8 @@ async def _snapshot_portfolio_async() -> None:
                     active,
                 )
                 # Live fan-out to /v1/ws/portfolio subscribers for this tenant.
-                _publish_portfolio(
+                await asyncio.to_thread(
+                    _publish_portfolio,
                     str(tenant_id),
                     {
                         "type": "portfolio",
@@ -311,7 +312,7 @@ async def _reconcile_positions_async() -> None:
                     secret_key=decrypt_key(row["secret_encrypted"]),
                     paper=bool(row["is_paper"]),
                 )
-                broker_positions = executor.get_positions()
+                broker_positions = await asyncio.to_thread(executor.get_positions)
 
                 # Load DB positions for this tenant
                 db_rows = await pool.fetch(
