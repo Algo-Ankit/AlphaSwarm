@@ -74,6 +74,38 @@ class SocialRepo(BaseRepo):
             limit,
         )
 
+    async def commons_candidates_for_context(self, limit: int = 40) -> list[asyncpg.Record]:
+        """
+        Cross-tenant pool of listed strategies used as retrieval candidates for
+        the AI advisor's few-shot grounding. Returns each listing's pinned
+        immutable code + symbols + latest backtest metrics, ranked by Sharpe so
+        the strongest strategies are the ones the retriever gets to choose from.
+        Every published strategy makes the generator smarter — this is the query.
+        """
+        return await self.fetch(
+            """
+            SELECT ps.id, ps.title, ps.description,
+                   s.symbols, s.exchange,
+                   sv.generated_logic,
+                   bt.sharpe_ratio, bt.annualized_return_pct AS cagr_pct,
+                   ps.oos_annualized_return_pct AS oos_cagr_pct,
+                   ps.oos_computed_at
+            FROM public_strategies ps
+            JOIN strategies s ON s.id = ps.strategy_id
+            JOIN strategy_versions sv ON sv.id = ps.published_version_id
+            LEFT JOIN LATERAL (
+                SELECT b.sharpe_ratio, b.annualized_return_pct
+                FROM backtest_results b
+                WHERE b.strategy_id = ps.strategy_id
+                ORDER BY b.created_at DESC LIMIT 1
+            ) bt ON TRUE
+            WHERE ps.is_listed AND ps.published_version_id IS NOT NULL
+            ORDER BY COALESCE(bt.sharpe_ratio, 0) DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+
     async def get_public(self, public_strategy_id: UUID) -> asyncpg.Record | None:
         return await self.fetchrow(
             "SELECT * FROM public_strategies WHERE id = $1 AND is_listed",
