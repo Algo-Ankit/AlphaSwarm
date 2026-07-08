@@ -86,13 +86,26 @@ function SectionHeader({ icon: Icon, label }: { icon: React.ElementType; label: 
   )
 }
 
+/**
+ * Sanitize free-typed numeric input: strips currency symbols, commas, and
+ * spaces, and keeps at most one decimal point. Numbers are validated in JS at
+ * submit time with explicit messages — NOT via HTML `step`/`min`/`max` on a
+ * type="number" input, which silently rejects legitimate values (e.g. 1250.50
+ * in a step=100 field, or "10,000" pasted with separators) and was the cause
+ * of "some numbers not getting accepted".
+ */
+function sanitizeNumeric(v: string): string {
+  let s = v.replace(/[^0-9.]/g, '')
+  const dot = s.indexOf('.')
+  if (dot !== -1) s = s.slice(0, dot + 1) + s.slice(dot + 1).replace(/\./g, '')
+  return s
+}
+
 function FieldInput({
-  label, helper, prefix, suffix, value, onChange, type = 'number',
-  min, max, step, placeholder, required,
+  label, helper, prefix, suffix, value, onChange, placeholder, required,
 }: {
   label: string; helper: string; prefix?: string; suffix?: string
   value: string | number; onChange: (v: string) => void
-  type?: string; min?: number; max?: number; step?: number
   placeholder?: string; required?: boolean
 }) {
   return (
@@ -107,8 +120,9 @@ function FieldInput({
           </span>
         )}
         <input
-          type={type} value={value} onChange={e => onChange(e.target.value)}
-          min={min} max={max} step={step} placeholder={placeholder} required={required}
+          type="text" inputMode="decimal" value={value}
+          onChange={e => onChange(sanitizeNumeric(e.target.value))}
+          placeholder={placeholder} required={required}
           className={cn(
             'w-full text-[14px] font-medium tabular-nums',
             'bg-zinc-50 dark:bg-zinc-900/60',
@@ -278,6 +292,10 @@ export default function NewStrategyPage() {
     }
   }
 
+  // Caps are denominated in the settlement currency of the selected exchange.
+  const isINR = exchange === 'NSE' || exchange === 'BSE'
+  const ccy = isINR ? '₹' : '$'
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     let finalSymbols = [...symbols]
@@ -302,9 +320,15 @@ export default function NewStrategyPage() {
     const stopLoss    = stopLossPct !== '' ? parseFloat(stopLossPct) : null
     const takeProfit  = takeProfitPct !== '' ? parseFloat(takeProfitPct) : null
 
-    if (orderCap < 100) { setError('Per-fill notional cap must be ≥ $100.'); return }
+    // Notional caps are denominated in the instrument's settlement currency.
+    const minFill = isINR ? 1000 : 100
+    if (orderCap < minFill) { setError(`Per-fill notional cap must be ≥ ${ccy}${minFill.toLocaleString()}.`); return }
     if (posCap < orderCap) { setError('Position cap must be ≥ per-fill cap.'); return }
     if (dailyCap < orderCap) { setError('Daily turnover cap must be ≥ per-fill cap.'); return }
+    if (openPos < 1 || openPos > 100) { setError('Max positions must be between 1 and 100.'); return }
+    if (slippage < 0 || slippage > 500) { setError('Slippage must be between 0 and 500 bps.'); return }
+    if (stopLoss !== null && (stopLoss <= 0 || stopLoss >= 100)) { setError('Stop-loss must be between 0 and 100%.'); return }
+    if (takeProfit !== null && takeProfit <= 0) { setError('Take-profit must be positive.'); return }
 
     setLoading(true)
     setError(null)
@@ -637,19 +661,16 @@ export default function NewStrategyPage() {
             <SectionHeader icon={Zap} label="Position Sizing" />
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <FieldInput
-                label="Per-Fill Cap" helper="Max notional per single fill" prefix="$"
+                label="Per-Fill Cap" helper={`Max notional per single fill (${isINR ? 'min ₹1,000' : 'min $100'})`} prefix={ccy}
                 value={maxOrderNotional} onChange={setMaxOrderNotional}
-                min={100} max={1_000_000} step={100}
               />
               <FieldInput
-                label="Position Cap" helper="Max total exposure per instrument" prefix="$"
+                label="Position Cap" helper="Max total exposure per instrument" prefix={ccy}
                 value={maxPositionNotional} onChange={setMaxPositionNotional}
-                min={500} max={10_000_000} step={500}
               />
               <FieldInput
                 label="Max Positions" helper="Concurrent open positions across the universe"
                 value={maxOpenPositions} onChange={setMaxOpenPositions}
-                min={1} max={100} step={1}
               />
             </div>
           </GlassCard>
@@ -659,19 +680,18 @@ export default function NewStrategyPage() {
             <SectionHeader icon={ShieldAlert} label="Risk Controls" />
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <FieldInput
-                label="Daily Turnover Cap" helper="Gross buy+sell notional per session" prefix="$"
+                label="Daily Turnover Cap" helper="Gross buy+sell notional per session" prefix={ccy}
                 value={maxDailyNotional} onChange={setMaxDailyNotional}
-                min={1000} max={100_000_000} step={1000}
               />
               <FieldInput
                 label="Stop-Loss" helper="Hard stop per position — blank to disable" suffix="%"
                 value={stopLossPct} onChange={setStopLossPct}
-                min={0.1} max={99} step={0.1} placeholder="Off"
+                placeholder="Off"
               />
               <FieldInput
                 label="Take-Profit" helper="Profit target per position — blank to disable" suffix="%"
                 value={takeProfitPct} onChange={setTakeProfitPct}
-                min={0.1} max={10000} step={0.1} placeholder="Off"
+                placeholder="Off"
               />
             </div>
           </GlassCard>
@@ -703,14 +723,12 @@ export default function NewStrategyPage() {
               </div>
 
               <FieldInput
-                label="Slippage" helper="Assumed market impact for cost modeling" suffix="bps"
+                label="Slippage" helper="Assumed market impact for cost modeling (0–500)" suffix="bps"
                 value={slippageBps} onChange={setSlippageBps}
-                min={0} max={500} step={1}
               />
               <FieldInput
-                label="Commission" helper="Per-share execution cost model" prefix="$" suffix="/sh"
+                label="Commission" helper="Per-share execution cost model" prefix={ccy} suffix="/sh"
                 value={commissionPerShare} onChange={setCommissionPerShare}
-                min={0} max={1} step={0.001}
               />
             </div>
           </GlassCard>

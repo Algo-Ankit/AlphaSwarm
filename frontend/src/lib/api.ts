@@ -7,8 +7,10 @@ import type {
   Bar,
   BillingCurrency,
   CheckoutResponse,
+  CreatePostRequest,
   LeaderboardEntry,
   PublishRequest,
+  SocialPost,
   SubscribeResponse,
   SubscriptionEntry,
   BrokerConnectRequest,
@@ -113,19 +115,86 @@ function authHeaders(): Record<string, string> {
   }
 }
 
-async function req<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * Single-flight silent refresh. Access tokens expire in 15 minutes; without
+ * this every API call after expiry hard-logged the user out even though a
+ * perfectly valid refresh token was sitting in storage. All concurrent 401s
+ * share ONE refresh request (rotation invalidates the old token, so parallel
+ * refreshes would race each other).
+ */
+let refreshInFlight: Promise<boolean> | null = null
+
+async function trySilentRefresh(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      const rt = getRefreshToken()
+      if (!rt) return false
+      try {
+        const res = await fetch(`${BASE}/v1/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: rt }),
+        })
+        if (!res.ok) return false
+        const data = (await res.json()) as TokenResponse
+        setTokens(data.access_token, data.refresh_token)
+        return true
+      } catch {
+        return false
+      }
+    })().finally(() => {
+      refreshInFlight = null
+    })
+  }
+  return refreshInFlight
+}
+
+function withFreshAuth(init?: RequestInit): RequestInit {
+  const token = getAccessToken()
+  return {
+    ...init,
+    headers: {
+      ...((init?.headers as Record<string, string> | undefined) ?? {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  }
+}
+
+function forceLogout(): never {
+  clearTokens()
+  clearUserProfile()
+  window.location.href = '/login'
+  // Halt the caller — the page is navigating away.
+  throw new Error('Session expired')
+}
+
+async function req<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
   const res = await fetch(`${BASE}${path}`, init)
   if (!res.ok) {
     if (res.status === 401 && typeof window !== 'undefined' && !path.includes('/auth/')) {
-      clearTokens()
-      clearUserProfile()
-      window.location.href = '/login'
-      return new Promise(() => {})
+      if (!retried && (await trySilentRefresh())) {
+        return req<T>(path, withFreshAuth(init), true)
+      }
+      forceLogout()
     }
     const text = await res.text().catch(() => res.statusText)
     throw new Error(text || `HTTP ${res.status}`)
   }
   return res.json() as Promise<T>
+}
+
+/** Like req() but for 204/empty-body endpoints (DELETE, mark-read, …). */
+async function reqVoid(path: string, init?: RequestInit, retried = false): Promise<void> {
+  const res = await fetch(`${BASE}${path}`, init)
+  if (res.ok || res.status === 204) return
+  if (res.status === 401 && typeof window !== 'undefined' && !path.includes('/auth/')) {
+    if (!retried && (await trySilentRefresh())) {
+      return reqVoid(path, withFreshAuth(init), true)
+    }
+    forceLogout()
+  }
+  const text = await res.text().catch(() => res.statusText)
+  throw new Error(text || `HTTP ${res.status}`)
 }
 
 export const api = {
@@ -161,6 +230,17 @@ export const api = {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({ refresh_token: refreshToken }),
+    }),
+
+  // Broker-identity sign-in: one click authenticates AND connects the brokerage.
+  getUpstoxLoginUrl: () =>
+    req<{ login_url: string; state: string }>('/v1/auth/broker/upstox/login-url'),
+
+  upstoxLoginCallback: (code: string, state: string) =>
+    req<TokenResponse>('/v1/auth/broker/upstox/callback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, state }),
     }),
 
   // ── Strategies ────────────────────────────────────────────
@@ -206,12 +286,7 @@ export const api = {
     }),
 
   deleteBroker: (id: string) =>
-    fetch(`${BASE}/v1/brokers/${id}`, {
-      method: 'DELETE',
-      headers: authHeaders(),
-    }).then((r) => {
-      if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`)
-    }),
+    reqVoid(`/v1/brokers/${id}`, { method: 'DELETE', headers: authHeaders() }),
 
   testBroker: (id: string) =>
     req<TestConnectionResponse>(`/v1/brokers/${id}/test`, {
@@ -231,12 +306,7 @@ export const api = {
     }),
 
   deleteLLMConfig: (id: string) =>
-    fetch(`${BASE}/v1/llm-configs/${id}`, {
-      method: 'DELETE',
-      headers: authHeaders(),
-    }).then((r) => {
-      if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`)
-    }),
+    reqVoid(`/v1/llm-configs/${id}`, { method: 'DELETE', headers: authHeaders() }),
 
   // ── Search ────────────────────────────────────────────────
   searchTickers: (q: string, limit = 8) =>
@@ -326,12 +396,10 @@ export const api = {
     req<{ count: number }>('/v1/notifications/unread-count', { headers: authHeaders() }),
 
   markNotificationRead: (id: string) =>
-    fetch(`${BASE}/v1/notifications/${id}/read`, { method: 'POST', headers: authHeaders() })
-      .then((r) => { if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`) }),
+    reqVoid(`/v1/notifications/${id}/read`, { method: 'POST', headers: authHeaders() }),
 
   markAllNotificationsRead: () =>
-    fetch(`${BASE}/v1/notifications/read-all`, { method: 'POST', headers: authHeaders() })
-      .then((r) => { if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`) }),
+    reqVoid('/v1/notifications/read-all', { method: 'POST', headers: authHeaders() }),
 
   // ── Broker OAuth ──────────────────────────────────────────────
   getBrokerOAuthLoginUrl: (broker: string) =>
@@ -381,10 +449,7 @@ export const api = {
 
   // ── Rebalance approval ────────────────────────────────────────
   approveRebalance: (notifId: string) =>
-    fetch(`${BASE}/v1/notifications/${notifId}/approve`, {
-      method: 'POST',
-      headers: authHeaders(),
-    }).then((r) => { if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`) }),
+    reqVoid(`/v1/notifications/${notifId}/approve`, { method: 'POST', headers: authHeaders() }),
 
   // ── Backtest ──────────────────────────────────────────────
   runBacktest: (strategyId: string, params: BacktestRequest) =>
@@ -439,13 +504,35 @@ export const api = {
     }),
 
   unsubscribeStrategy: (publicStrategyId: string) =>
-    fetch(`${BASE}/v1/social/subscribe/${publicStrategyId}`, {
+    reqVoid(`/v1/social/subscribe/${publicStrategyId}`, {
       method: 'DELETE',
       headers: authHeaders(),
-    }).then((r) => { if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`) }),
+    }),
 
   listSubscriptions: () =>
     req<SubscriptionEntry[]>('/v1/social/subscriptions', { headers: authHeaders() }),
+
+  // ── Social Feed ───────────────────────────────────────────────────────────────
+  getFeedTimeline: (opts: { limit?: number; offset?: number } = {}) => {
+    const qs = new URLSearchParams({
+      limit: String(opts.limit ?? 50),
+      offset: String(opts.offset ?? 0),
+    })
+    return req<SocialPost[]>(`/v1/feed/timeline?${qs}`, { headers: authHeaders() })
+  },
+
+  createPost: (data: CreatePostRequest) =>
+    req<SocialPost>('/v1/feed/post', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    }),
+
+  togglePostLike: (postId: string) =>
+    req<{ post_id: string; liked: boolean; likes_count: number }>(
+      `/v1/feed/${postId}/like`,
+      { method: 'POST', headers: authHeaders() },
+    ),
 
   // ── Unified Portfolio (multi-broker CAS) ──────────────────────
   getUnifiedPortfolio: () =>

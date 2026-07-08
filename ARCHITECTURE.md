@@ -1007,6 +1007,27 @@ When paid tiers launch, founding members get 3 months free on the Trader plan.
   - [ ] Indian intraday data via Zerodha Kite Connect (user provides credentials)
   - [ ] Load testing + connection pool tuning
   - [ ] CI/CD pipeline (GitHub Actions → Docker build → deploy)
+- [x] Phase 9 — Security & Billing Hardening Audit ✓ 2026-07-08
+  - [x] Frontend silent token refresh (single-flight; ends 15-min forced logouts) + reqVoid for 204 endpoints
+  - [x] Rate limits: /auth/login 10/min, /register 5/min, /refresh 60/min, /ai-advisor 20/min, /feed/post 10/min
+  - [x] Production boot guard — refuses dev JWT secret / missing BROKER_KEY_ENCRYPTION_SECRET / empty CORS
+  - [x] Swarm Tax honesty fix — Razorpay order.create reported 'invoiced' (not 'charged'); ledger credited only on real collection; failed charges stay due (migration 0009)
+  - [x] Refresh-token reuse (theft) detection → revoke session family; daily expired-token purge beat task
+  - [x] Upstox OAuth state (CSRF) verified on callback; state cleared after use
+  - [x] Alpaca base_url allowlist (https://*.alpaca.markets only) — SSRF guard
+  - [x] Worker aborts when strategy row missing (no silent default-RSI fallback)
+  - [x] Timing-equalized login (email-enumeration oracle closed)
+  - [x] Feed likes shipped end-to-end: social_post_likes table, POST /v1/feed/{id}/like toggle, liked_by_me, wired Like button
+  - [x] Leaderboard management fee capped at 20% (2000 bps)
+  - [x] tests/test_hardening_fixes.py — 11 regression tests (116 total passing)
+- [x] Phase 10 — Onboarding & Terminal Depth ✓ 2026-07-08
+  - [x] "Continue with Upstox" broker-identity login: GET /v1/auth/broker/upstox/login-url + POST …/callback (signed stateless CSRF state, 10-min TTL); find-or-create passwordless user (migration 0010: password_hash nullable + auth_provider) and auto-connects the brokerage in the same click
+  - [x] Login page broker button + /login/upstox/callback page (sessionStorage state cross-check)
+  - [x] Password login guards broker-identity accounts (no null-hash crash; timing-equalized)
+  - [x] Strategy builder: number inputs converted to text+inputMode=decimal with sanitizer (HTML step/min/max validation silently rejected legit values); currency-aware ₹/$ caps + floors by exchange; explicit range validation messages
+  - [x] Terminal: overlay toggles (EMA 20/50/200, SMA 50, Bollinger 20-2, VWAP), log-scale toggle, crosshair OHLC+Δ%+volume readout, MACD(12,26,9) pane, settings persisted in localStorage; sma/bollinger/vwap/macd added to lib/ta.ts
+  - [x] Next 14 build fix: Suspense boundaries around useSearchParams in both OAuth callback pages (production `next build` previously failed)
+  - [x] 121 backend tests passing (5 new state-token tests); ruff clean; tsc clean; next build clean
 
 ---
 

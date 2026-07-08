@@ -23,6 +23,94 @@ export function ema(values: number[], period: number): number[] {
   return out
 }
 
+/** Simple moving average. Returns NaN for the warm-up period. */
+export function sma(values: number[], period: number): number[] {
+  const out: number[] = new Array(values.length).fill(NaN)
+  if (values.length < period) return out
+  let sum = 0
+  for (let i = 0; i < values.length; i++) {
+    sum += values[i]
+    if (i >= period) sum -= values[i - period]
+    if (i >= period - 1) out[i] = sum / period
+  }
+  return out
+}
+
+/** Bollinger Bands: SMA(period) ± k·σ (population stdev over the window). */
+export function bollinger(
+  values: number[],
+  period = 20,
+  k = 2,
+): { upper: number[]; middle: number[]; lower: number[] } {
+  const middle = sma(values, period)
+  const upper: number[] = new Array(values.length).fill(NaN)
+  const lower: number[] = new Array(values.length).fill(NaN)
+  for (let i = period - 1; i < values.length; i++) {
+    let sq = 0
+    for (let j = i - period + 1; j <= i; j++) sq += (values[j] - middle[i]) ** 2
+    const sd = Math.sqrt(sq / period)
+    upper[i] = middle[i] + k * sd
+    lower[i] = middle[i] - k * sd
+  }
+  return { upper, middle, lower }
+}
+
+/**
+ * VWAP over the loaded window (cumulative Σ(typical·vol) / Σvol).
+ * Note: intraday traders usually want session-anchored VWAP; over a daily
+ * window this reads as an anchored VWAP from the first loaded bar.
+ */
+export function vwap(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  volumes: number[],
+): number[] {
+  const out: number[] = new Array(closes.length).fill(NaN)
+  let cumPV = 0
+  let cumV = 0
+  for (let i = 0; i < closes.length; i++) {
+    const typical = (highs[i] + lows[i] + closes[i]) / 3
+    cumPV += typical * volumes[i]
+    cumV += volumes[i]
+    out[i] = cumV > 0 ? cumPV / cumV : NaN
+  }
+  return out
+}
+
+/** MACD(fast, slow, signal): returns the MACD line, signal line, and histogram. */
+export function macd(
+  values: number[],
+  fast = 12,
+  slow = 26,
+  signalPeriod = 9,
+): { macdLine: number[]; signalLine: number[]; histogram: number[] } {
+  const fastE = ema(values, fast)
+  const slowE = ema(values, slow)
+  const macdLine = values.map((_, i) =>
+    Number.isNaN(fastE[i]) || Number.isNaN(slowE[i]) ? NaN : fastE[i] - slowE[i],
+  )
+  // EMA of the MACD line, seeded once enough MACD values exist.
+  const signalLine: number[] = new Array(values.length).fill(NaN)
+  const start = slow - 1 // first index with a MACD value
+  if (values.length >= start + signalPeriod) {
+    let seed = 0
+    for (let i = start; i < start + signalPeriod; i++) seed += macdLine[i]
+    seed /= signalPeriod
+    signalLine[start + signalPeriod - 1] = seed
+    const k = 2 / (signalPeriod + 1)
+    let prev = seed
+    for (let i = start + signalPeriod; i < values.length; i++) {
+      prev = macdLine[i] * k + prev * (1 - k)
+      signalLine[i] = prev
+    }
+  }
+  const histogram = macdLine.map((m, i) =>
+    Number.isNaN(m) || Number.isNaN(signalLine[i]) ? NaN : m - signalLine[i],
+  )
+  return { macdLine, signalLine, histogram }
+}
+
 /** Wilder's RSI. Returns NaN until enough history (i < period). */
 export function rsi(values: number[], period = 14): number[] {
   const out: number[] = new Array(values.length).fill(NaN)

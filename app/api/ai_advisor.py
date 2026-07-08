@@ -1,8 +1,9 @@
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentUser, get_current_user, get_db_pool
+from app.core.rate_limit import limiter
 from app.services.ai_advisor import analyze_query
 
 router = APIRouter(prefix="/v1/ai-advisor", tags=["ai-advisor"])
@@ -19,7 +20,9 @@ class AdvisorResponse(BaseModel):
 
 
 @router.post("/analyze", response_model=AdvisorResponse)
+@limiter.limit("20/minute")  # LLM calls are the most expensive request in the app
 async def analyze(
+    request: Request,
     body: AdvisorQueryRequest,
     current_user: CurrentUser = Depends(get_current_user),
     pool: asyncpg.Pool = Depends(get_db_pool),

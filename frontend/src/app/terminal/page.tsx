@@ -6,8 +6,11 @@ import { Search, Wifi, WifiOff, TrendingUp, Newspaper, LineChart, ExternalLink, 
 import { AppShell } from '@/components/layout/AppShell'
 import { GlassCard } from '@/components/ui/GlassCard'
 import { Badge } from '@/components/ui/Badge'
-import { CandleChart } from '@/components/charts/CandleChart'
+import {
+  CandleChart, DEFAULT_OVERLAYS, OVERLAY_META, type ChartOverlays,
+} from '@/components/charts/CandleChart'
 import { RsiPane } from '@/components/charts/RsiPane'
+import { MacdPane } from '@/components/charts/MacdPane'
 import { api, getAccessToken, barsSocketUrl } from '@/lib/api'
 import { openReconnectingSocket, type WsStatus } from '@/lib/ws'
 import { sessionStatus, SESSION_LABEL, SESSION_VARIANT, nextOpenLabel } from '@/lib/marketHours'
@@ -43,6 +46,36 @@ export default function TerminalPage() {
   const [wsStatus, setWsStatus] = useState<WsStatus>('closed')
 
   const [tab, setTab] = useState<Tab>('forecast')
+
+  // ── Chart analysis settings (persisted per browser) ─────────────────────
+  const [overlays, setOverlays] = useState<ChartOverlays>(DEFAULT_OVERLAYS)
+  const [logScale, setLogScale] = useState(false)
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('terminal_chart_settings')
+      if (saved) {
+        const s = JSON.parse(saved)
+        if (s.overlays) setOverlays({ ...DEFAULT_OVERLAYS, ...s.overlays })
+        if (typeof s.logScale === 'boolean') setLogScale(s.logScale)
+      }
+    } catch { /* corrupted settings — fall back to defaults */ }
+  }, [])
+
+  const toggleOverlay = (key: keyof ChartOverlays) => {
+    setOverlays((prev) => {
+      const next = { ...prev, [key]: !prev[key] }
+      try { localStorage.setItem('terminal_chart_settings', JSON.stringify({ overlays: next, logScale })) } catch { /* quota */ }
+      return next
+    })
+  }
+  const toggleLogScale = () => {
+    setLogScale((prev) => {
+      const next = !prev
+      try { localStorage.setItem('terminal_chart_settings', JSON.stringify({ overlays, logScale: next })) } catch { /* quota */ }
+      return next
+    })
+  }
 
   // ── Auth guard ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -157,22 +190,57 @@ export default function TerminalPage() {
           </div>
         )}
 
-        {/* ── Timeframe selector ───────────────────────────────────────── */}
-        <div className="flex items-center gap-1 p-1 rounded-xl bg-zinc-100/70 dark:bg-zinc-800/50 w-fit">
-          {TIMEFRAMES.map((tf) => (
+        {/* ── Timeframe + analysis controls ─────────────────────────────── */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-1 p-1 rounded-xl bg-zinc-100/70 dark:bg-zinc-800/50 w-fit">
+            {TIMEFRAMES.map((tf) => (
+              <button
+                key={tf.value}
+                onClick={() => setTimeframe(tf.value)}
+                className={cn(
+                  'px-3 py-1.5 text-xs font-semibold rounded-lg transition-all duration-150',
+                  timeframe === tf.value
+                    ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
+                    : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300',
+                )}
+              >
+                {tf.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Overlay toggles */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {OVERLAY_META.map(({ key, label, color }) => (
+              <button
+                key={key}
+                onClick={() => toggleOverlay(key)}
+                aria-pressed={overlays[key]}
+                className={cn(
+                  'px-2.5 py-1.5 rounded-lg text-[11px] font-bold font-mono border transition-all',
+                  overlays[key]
+                    ? 'bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 shadow-sm'
+                    : 'bg-transparent border-zinc-200 dark:border-zinc-800 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300',
+                )}
+                style={overlays[key] ? { color } : undefined}
+              >
+                {label}
+              </button>
+            ))}
             <button
-              key={tf.value}
-              onClick={() => setTimeframe(tf.value)}
+              onClick={toggleLogScale}
+              aria-pressed={logScale}
+              title="Logarithmic price scale"
               className={cn(
-                'px-3 py-1.5 text-xs font-semibold rounded-lg transition-all duration-150',
-                timeframe === tf.value
-                  ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
-                  : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300',
+                'px-2.5 py-1.5 rounded-lg text-[11px] font-bold font-mono border transition-all',
+                logScale
+                  ? 'bg-violet-600 dark:bg-violet-500 border-violet-600 dark:border-violet-500 text-white'
+                  : 'bg-transparent border-zinc-200 dark:border-zinc-800 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300',
               )}
             >
-              {tf.label}
+              LOG
             </button>
-          ))}
+          </div>
         </div>
 
         {/* ── Chart ─────────────────────────────────────────────────────── */}
@@ -182,21 +250,16 @@ export default function TerminalPage() {
           ) : error ? (
             <div className="h-[420px] flex items-center justify-center text-sm text-rose-500 dark:text-rose-400">{error}</div>
           ) : (
-            <>
-              <CandleChart bars={bars} liveBar={liveBar} dark={dark} />
-              <div className="mt-3 flex items-center gap-4 px-1 text-[11px] font-medium">
-                <span className="text-blue-500">— EMA 20</span>
-                <span className="text-amber-500">— EMA 50</span>
-              </div>
-            </>
+            <CandleChart bars={bars} liveBar={liveBar} dark={dark} overlays={overlays} logScale={logScale} />
           )}
         </GlassCard>
 
-        {/* ── Indicator readout + RSI pane ──────────────────────────────── */}
+        {/* ── Indicator readout + RSI/MACD panes ────────────────────────── */}
         {!loading && !error && bars.length > 0 && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-            <GlassCard padding="md" className="lg:col-span-2">
+            <GlassCard padding="md" className="lg:col-span-2 space-y-4">
               <RsiPane bars={bars} dark={dark} />
+              <MacdPane bars={bars} dark={dark} />
             </GlassCard>
             <GlassCard padding="md">
               <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 mb-3">

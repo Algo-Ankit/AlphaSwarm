@@ -450,6 +450,28 @@ export interface SubscriptionEntry {
   subscriber_count: number
 }
 
+// ── Social Feed ────────────────────────────────────────────────────────────────
+
+export interface SocialPost {
+  id: string
+  author_tenant_id: string
+  author_name: string
+  public_strategy_id: string | null
+  strategy_title: string | null
+  cagr_pct: number | null
+  sharpe_ratio: number | null
+  content_markdown: string
+  likes_count: number
+  created_at: string
+  is_subscribed: boolean
+  liked_by_me: boolean
+}
+
+export interface CreatePostRequest {
+  content_markdown: string
+  public_strategy_id?: string | null
+}
+
 // ── Billing (dual gateway) ─────────────────────────────────────────────────────
 
 /** Currency the user pays in — selects the gateway (USD→Stripe, INR→Razorpay). */
