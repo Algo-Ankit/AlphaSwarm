@@ -230,8 +230,16 @@ async def _execute_async(
             UUID(strategy_id),
             UUID(tenant_id),
         )
-        exchange = strategy_row["exchange"] if strategy_row else "NASDAQ"
-        generated_logic = (strategy_row["generated_logic"] or "") if strategy_row else ""
+        if strategy_row is None:
+            # Never fall back to defaults here: trading the default RSI strategy on
+            # a guessed exchange because the strategy was deleted (or belongs to a
+            # different tenant) would place orders the user never configured.
+            raise RuntimeError(
+                f"Strategy {strategy_id} not found for this tenant (deleted or no "
+                "compiled version). Aborting run — nothing was traded."
+            )
+        exchange = strategy_row["exchange"]
+        generated_logic = strategy_row["generated_logic"] or ""
 
         # Broker is chosen by the strategy's exchange, NOT hardcoded — an NSE/BSE
         # strategy must use an Indian broker, not be silently routed to a US one.

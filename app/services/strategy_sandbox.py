@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import inspect
 import operator
+import types as _types
 from abc import ABCMeta
 from decimal import Decimal
 from typing import Type
@@ -29,9 +30,6 @@ class SandboxError(Exception):
 
 
 _ALLOWED_IMPORTS = frozenset({"math", "datetime"})
-
-
-import types as _types
 
 
 def _write_guard(ob):

@@ -262,6 +262,23 @@ async def _check_heartbeats_async() -> None:
         await pool.close()
 
 
+@celery_app.task(name="app.worker.beat_tasks.cleanup_refresh_tokens")
+def cleanup_refresh_tokens():
+    """Purge refresh tokens that expired > 7 days ago (unbounded-growth guard)."""
+    asyncio.run(_cleanup_refresh_tokens_async())
+
+
+async def _cleanup_refresh_tokens_async() -> None:
+    pool = await _get_pool()
+    try:
+        result = await pool.execute(
+            "DELETE FROM refresh_tokens WHERE expires_at < now() - INTERVAL '7 days'"
+        )
+        logger.info("cleanup_refresh_tokens: %s", result)
+    finally:
+        await pool.close()
+
+
 @celery_app.task(name="app.worker.beat_tasks.reconcile_positions")
 def reconcile_positions():
     """End-of-day: compare DB positions against actual broker positions."""
