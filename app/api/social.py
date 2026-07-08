@@ -19,6 +19,10 @@ from app.db.repositories.social import SocialRepo
 
 router = APIRouter(prefix="/v1/social", tags=["social"])
 
+# Publishing is gated behind a minimum number of on-platform backtest runs, so
+# low-effort, never-tested strategies can't flood the commons.
+MIN_BACKTEST_RUNS_TO_PUBLISH = 3
+
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
 
@@ -43,6 +47,13 @@ class LeaderboardEntry(BaseModel):
     max_drawdown_pct: float | None
     win_rate_pct: float | None
     total_trades: int | None
+    # Out-of-sample scorecard (data AFTER publish date). Null until first computed.
+    oos_cagr_pct: float | None
+    oos_total_return_pct: float | None
+    oos_sharpe_ratio: float | None
+    oos_max_drawdown_pct: float | None
+    oos_total_trades: int | None
+    oos_computed: bool
 
 
 class PublishRequest(BaseModel):
@@ -122,6 +133,14 @@ async def get_leaderboard(
             max_drawdown_pct=_f(r["max_drawdown_pct"]),
             win_rate_pct=_f(r["win_rate_pct"]),
             total_trades=int(r["total_trades"]) if r["total_trades"] is not None else None,
+            oos_cagr_pct=_f(r["oos_cagr_pct"]),
+            oos_total_return_pct=_f(r["oos_total_return_pct"]),
+            oos_sharpe_ratio=_f(r["oos_sharpe_ratio"]),
+            oos_max_drawdown_pct=_f(r["oos_max_drawdown_pct"]),
+            oos_total_trades=(
+                int(r["oos_total_trades"]) if r["oos_total_trades"] is not None else None
+            ),
+            oos_computed=r["oos_computed_at"] is not None,
         )
         for r in rows
     ]
@@ -142,6 +161,19 @@ async def publish_strategy(
         ) from exc
 
     repo = SocialRepo(pool, current_user.tenant_id)
+
+    # Anti-spam / anti-survivorship gate: the strategy must have been backtested
+    # on-platform at least MIN_BACKTEST_RUNS_TO_PUBLISH times before it can list.
+    runs = await repo.count_backtests(strategy_uuid)
+    if runs < MIN_BACKTEST_RUNS_TO_PUBLISH:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Backtest this strategy at least {MIN_BACKTEST_RUNS_TO_PUBLISH} times "
+                f"before publishing (currently {runs}). This keeps the commons honest."
+            ),
+        )
+
     row = await repo.publish(
         strategy_id=strategy_uuid,
         creator_user_id=current_user.user_id,

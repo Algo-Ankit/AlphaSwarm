@@ -38,6 +38,12 @@ class SocialRepo(BaseRepo):
                 ps.is_verified,
                 ps.created_at,
                 ps.published_at,
+                ps.oos_total_return_pct,
+                ps.oos_annualized_return_pct AS oos_cagr_pct,
+                ps.oos_sharpe_ratio,
+                ps.oos_max_drawdown_pct,
+                ps.oos_total_trades,
+                ps.oos_computed_at,
                 s.name      AS strategy_name,
                 s.symbols   AS symbols,
                 s.exchange  AS exchange,
@@ -120,8 +126,8 @@ class SocialRepo(BaseRepo):
                     INSERT INTO public_strategies
                         (strategy_id, creator_tenant_id, creator_user_id, title,
                          description, management_fee_bps, published_version_id,
-                         forked_from_public_strategy_id, published_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+                         forked_from_public_strategy_id, published_at, oos_start_date)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), now())
                     ON CONFLICT (strategy_id) DO UPDATE SET
                         title                = EXCLUDED.title,
                         description          = EXCLUDED.description,
@@ -129,6 +135,10 @@ class SocialRepo(BaseRepo):
                         published_version_id = EXCLUDED.published_version_id,
                         is_listed            = TRUE,
                         published_at         = now(),
+                        -- Re-pinning a new version resets the out-of-sample boundary
+                        -- and invalidates the stale OOS scorecard until recomputed.
+                        oos_start_date       = now(),
+                        oos_computed_at      = NULL,
                         updated_at           = now()
                     RETURNING *, (xmax = 0) AS _inserted
                     """,

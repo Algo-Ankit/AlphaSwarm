@@ -10,7 +10,7 @@ import type { LeaderboardEntry, LineageResponse, Strategy, SubscriptionEntry } f
 import {
   Trophy, Users, TrendingUp, TrendingDown, ShieldCheck, Sparkles,
   AlertCircle, Loader2, Copy, X, BadgeCheck, Percent, CheckCircle2, Upload,
-  GitFork, GitBranch, Network,
+  GitFork, GitBranch, Network, FlaskConical,
 } from 'lucide-react'
 
 const exchangeCcy = (exchange: string) =>
@@ -227,6 +227,9 @@ function StrategyCard({
         <span>Fee {(entry.management_fee_bps / 100).toFixed(2)}%</span>
       </div>
 
+      {/* Out-of-sample honesty row — real performance on post-publish data. */}
+      <OutOfSampleRow entry={entry} />
+
       <div className="px-5 pb-4 mt-auto space-y-2">
         {subscribed ? (
           <Button variant="secondary" className="w-full" disabled>
@@ -249,6 +252,42 @@ function StrategyCard({
         </div>
       </div>
     </GlassCard>
+  )
+}
+
+/* Out-of-sample scorecard: honest performance on data AFTER the publish date.
+   Shows alpha decay by comparing OOS return against the in-sample number. */
+function OutOfSampleRow({ entry }: { entry: LeaderboardEntry }) {
+  if (!entry.oos_computed) {
+    return (
+      <div className="px-5 py-2 flex items-center gap-1.5 text-[10px] text-zinc-400
+        bg-black/[0.015] dark:bg-white/[0.02] border-t border-black/[0.05] dark:border-white/[0.05]">
+        <FlaskConical className="w-3 h-3" /> Out-of-sample: pending (needs post-publish data)
+      </div>
+    )
+  }
+  const inSample = entry.cagr_pct ?? entry.total_return_pct
+  const oos = entry.oos_cagr_pct ?? entry.oos_total_return_pct
+  const decayed = inSample != null && oos != null && oos < inSample
+  return (
+    <div className="px-5 py-2 flex items-center justify-between text-[10px]
+      bg-black/[0.015] dark:bg-white/[0.02] border-t border-black/[0.05] dark:border-white/[0.05]">
+      <span className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400">
+        <FlaskConical className="w-3 h-3" /> Out-of-sample
+      </span>
+      <span className="flex items-center gap-2 tabular-nums">
+        <span className={cn('font-semibold',
+          (oos ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>
+          {fmtPct(oos, true)}
+        </span>
+        <span className="text-zinc-400">Sharpe {entry.oos_sharpe_ratio != null ? entry.oos_sharpe_ratio.toFixed(2) : '—'}</span>
+        {decayed && (
+          <span className="text-amber-500 flex items-center gap-0.5" title="Alpha decayed vs. in-sample">
+            <TrendingDown className="w-3 h-3" /> decayed
+          </span>
+        )}
+      </span>
+    </div>
   )
 }
 
@@ -392,7 +431,8 @@ function PublishModal({ onClose, onDone }: { onClose: () => void; onDone: () => 
       </div>
       <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-5">
         Share one of your strategies. Others can copy it and its signals fan out to their
-        accounts in real time.
+        accounts in real time. Requires at least 3 on-platform backtests, and we publish an
+        out-of-sample scorecard on your listing to keep the commons honest.
       </p>
 
       {strategies.length === 0 ? (

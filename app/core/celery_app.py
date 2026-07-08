@@ -101,5 +101,12 @@ celery_app.conf.update(
             "schedule": crontab(hour=0, minute=0, day_of_month=1),
             "options": {"queue": "beat_tasks"},
         },
+        # Out-of-sample scorecard for published strategies — daily at 04:00 UTC.
+        # Recomputes decayed-alpha metrics on post-publish data (anti-survivorship).
+        "recompute-commons-oos": {
+            "task": "app.worker.beat_tasks.recompute_commons_oos",
+            "schedule": crontab(hour=4, minute=0),
+            "options": {"queue": "beat_tasks"},
+        },
     },
 )

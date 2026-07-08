@@ -351,3 +351,117 @@ async def _reconcile_positions_async() -> None:
                 )
     finally:
         await pool.close()
+
+
+@celery_app.task(name="app.worker.beat_tasks.recompute_commons_oos")
+def recompute_commons_oos():
+    """
+    Recompute the out-of-sample scorecard for published strategies.
+
+    Anti-survivorship-bias: for each listing we backtest its PINNED immutable
+    version over data strictly AFTER its publish date (oos_start_date) and store
+    the result. Displaying that decayed-alpha number honestly beside the
+    in-sample metrics is what stops the commons from becoming a lottery-ticket
+    gallery. Runs daily; each listing is refreshed at most once every ~24h.
+    """
+    asyncio.run(_recompute_commons_oos_async())
+
+
+async def _recompute_commons_oos_async() -> None:
+    import json
+
+    from app.services.backtest import run_backtest
+    from app.services.market_data import get_bars
+
+    pool = await _get_pool()
+    try:
+        rows = await pool.fetch(
+            """
+            SELECT ps.id, ps.strategy_id, ps.oos_start_date,
+                   s.symbols, s.exchange, s.timeframe, s.risk_config,
+                   sv.generated_logic
+            FROM public_strategies ps
+            JOIN strategies s ON s.id = ps.strategy_id
+            JOIN strategy_versions sv ON sv.id = ps.published_version_id
+            WHERE ps.is_listed
+              AND ps.published_version_id IS NOT NULL
+              AND ps.oos_start_date < now() - INTERVAL '1 day'
+              AND (ps.oos_computed_at IS NULL OR ps.oos_computed_at < now() - INTERVAL '1 day')
+            ORDER BY ps.oos_computed_at ASC NULLS FIRST
+            LIMIT 50
+            """
+        )
+        if not rows:
+            logger.info("recompute_commons_oos: nothing due")
+            return
+
+        for row in rows:
+            symbols = list(row["symbols"]) or []
+            logic = row["generated_logic"] or ""
+            if not symbols or len(logic.strip()) < 30:
+                continue
+            try:
+                bars = await get_bars(
+                    symbol=symbols[0].upper(),
+                    exchange=(row["exchange"] or "NASDAQ").upper(),
+                    timeframe=row["timeframe"],
+                    limit=5_000,
+                    pool=pool,
+                    start=row["oos_start_date"],
+                    end=None,
+                )
+                if not bars or len(bars) < 20:
+                    logger.info(
+                        "recompute_commons_oos: %s has too little OOS data (%d bars)",
+                        row["id"],
+                        len(bars) if bars else 0,
+                    )
+                    continue
+
+                rc = row["risk_config"]
+                if isinstance(rc, str):
+                    try:
+                        rc = json.loads(rc)
+                    except Exception:
+                        rc = {}
+                risk_config = rc if isinstance(rc, dict) else {}
+
+                result = await asyncio.to_thread(
+                    run_backtest,
+                    str(row["strategy_id"]),
+                    logic,
+                    bars,
+                    row["timeframe"],
+                    risk_config,
+                    100_000.0,
+                )
+                m = result.metrics
+                await pool.execute(
+                    """
+                    UPDATE public_strategies
+                    SET oos_total_return_pct      = $1,
+                        oos_annualized_return_pct = $2,
+                        oos_sharpe_ratio          = $3,
+                        oos_max_drawdown_pct      = $4,
+                        oos_total_trades          = $5,
+                        oos_computed_at           = now(),
+                        updated_at                = now()
+                    WHERE id = $6
+                    """,
+                    float(m.total_return_pct),
+                    float(m.cagr_pct),
+                    float(m.sharpe_ratio),
+                    float(m.max_drawdown_pct),
+                    int(m.total_trades),
+                    row["id"],
+                )
+                logger.info(
+                    "recompute_commons_oos: %s OOS return=%.2f%% sharpe=%.2f",
+                    row["id"],
+                    float(m.total_return_pct),
+                    float(m.sharpe_ratio),
+                )
+            except Exception as exc:
+                logger.warning("recompute_commons_oos: listing %s failed: %s", row["id"], exc)
+    finally:
+        await pool.close()

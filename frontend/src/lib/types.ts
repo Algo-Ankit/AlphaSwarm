@@ -427,6 +427,12 @@ export interface LeaderboardEntry {
   max_drawdown_pct: number | null
   win_rate_pct: number | null
   total_trades: number | null
+  oos_cagr_pct: number | null
+  oos_total_return_pct: number | null
+  oos_sharpe_ratio: number | null
+  oos_max_drawdown_pct: number | null
+  oos_total_trades: number | null
+  oos_computed: boolean
 }
 
 export interface LineageNode {
