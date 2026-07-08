@@ -47,7 +47,9 @@ class PublishRequest(BaseModel):
     strategy_id: str
     title: str = Field(min_length=3, max_length=120)
     description: str = Field(default="", max_length=2_000)
-    management_fee_bps: int = Field(default=0, ge=0, le=10_000)
+    # Capped at 20% (2000 bps). A 100% fee listing is either a typo or predatory;
+    # no legitimate strategy charges more than hedge-fund territory.
+    management_fee_bps: int = Field(default=0, ge=0, le=2_000)
 
 
 class PublishResponse(BaseModel):
