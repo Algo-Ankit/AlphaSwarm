@@ -254,6 +254,13 @@ export default function LoginPage() {
           <p className="text-center text-[11px] text-zinc-400 dark:text-zinc-500 mt-3">
             Signs you in <em>and</em> connects your brokerage — no API keys to copy.
           </p>
+
+          <p className="text-center text-xs text-zinc-500 dark:text-zinc-400 mt-5">
+            Prefer a one-time code?{' '}
+            <a href="/login/otp" className="font-semibold text-violet-500 hover:text-violet-400">
+              Sign in with email or phone
+            </a>
+          </p>
         </div>
 
         <p className="text-center text-xs text-zinc-400 dark:text-zinc-500 mt-6">

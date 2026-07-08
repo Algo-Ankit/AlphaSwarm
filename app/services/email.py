@@ -74,6 +74,19 @@ def _render_verify_email(display_name: str, verify_link: str) -> tuple[str, str]
     return subject, html
 
 
+def _render_login_otp(code: str) -> tuple[str, str]:
+    subject = f"{code} is your AlphaSwarm login code"
+    html = f"""
+    <h2>Your login code</h2>
+    <p>Use this one-time code to sign in to AlphaSwarm:</p>
+    <p style="font-size:28px;font-weight:800;letter-spacing:6px;margin:16px 0">{code}</p>
+    <p>It expires in 10 minutes and can be used once. If you didn't try to sign
+    in, you can ignore this email.</p>
+    <p>— AlphaSwarm</p>
+    """
+    return subject, html
+
+
 def send_email_sync(to_email: str, subject: str, html: str) -> bool:
     """
     Blocking SendGrid dispatch. Returns True if accepted (2xx) or stubbed.
@@ -132,4 +145,9 @@ async def send_password_reset_email(to_email: str, display_name: str, reset_link
 
 async def send_verify_email(to_email: str, display_name: str, verify_link: str) -> bool:
     subject, html = _render_verify_email(display_name, verify_link)
+    return await send_email(to_email, subject, html)
+
+
+async def send_login_otp_email(to_email: str, code: str) -> bool:
+    subject, html = _render_login_otp(code)
     return await send_email(to_email, subject, html)

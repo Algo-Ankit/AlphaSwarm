@@ -128,6 +128,13 @@ class Settings(BaseSettings):
     email_from: str = "no-reply@alphaswarm.io"
     email_from_name: str = "AlphaSwarm"
 
+    # SMS (Twilio) for phone OTP login. When unset, OTP sends degrade to a log
+    # line that includes the code — so the founder/admin can test phone login
+    # locally with no SMS gateway and no real phone.
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_from_number: str = ""
+
     # Strategy sandbox — wall-clock budget for a single on_bar() / backtest loop.
     # Backstops the RestrictedPython sandbox against CPU-exhaustion (e.g.
     # `for i in range(10**18)`) that the AST prescan can't catch. POSIX workers

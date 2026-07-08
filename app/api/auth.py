@@ -1,4 +1,7 @@
 import logging
+import re
+import secrets
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import asyncpg
@@ -9,7 +12,7 @@ from app.api.deps import CurrentUser, get_current_user, get_db_pool
 from app.core.config import get_settings
 from app.core.rate_limit import limiter
 from app.db.repositories.brokers import BrokerRepo
-from app.db.repositories.users import AuthUserRepo, RefreshTokenRepo, TenantRepo
+from app.db.repositories.users import AuthUserRepo, OtpRepo, RefreshTokenRepo, TenantRepo
 from app.services import oauth_manager as oauth
 from app.services.auth import (
     create_access_token,
@@ -27,10 +30,12 @@ from app.services.auth import (
 )
 from app.services.broker_crypto import encrypt_key
 from app.services.email import (
+    send_login_otp_email,
     send_password_reset_email,
     send_verify_email,
     send_welcome_email,
 )
+from app.services.sms import send_login_otp_sms
 
 logger = logging.getLogger(__name__)
 
@@ -655,4 +660,170 @@ async def google_login_callback(
         tenant_name=tenant["name"],
         plan=tenant["plan"],
         email_verified=True,
+    )
+
+
+# ── Passwordless OTP login (email OR phone) ───────────────────────────────────
+# One flow, two channels: the user enters an email or a phone number, receives a
+# 6-digit code, and signs in. Accounts are found-or-created on first use, so a
+# brand-new user needs no separate registration. Phone-only accounts get a
+# synthetic, unique email so the NOT NULL email column stays satisfied; they can
+# add a real email later. When Twilio/SendGrid are unconfigured the code is
+# written to the server log — that is the founder/admin's zero-friction test path.
+
+OTP_TTL_SECONDS = 10 * 60
+OTP_RESEND_WINDOW_SECONDS = 60
+OTP_MAX_SENDS_PER_WINDOW = 3
+_PHONE_SYNTH_EMAIL_DOMAIN = "users.alphaswarm.local"
+
+
+class OtpRequestBody(BaseModel):
+    # Accepts an email address or a phone number; classified server-side.
+    identifier: str = Field(min_length=3, max_length=254)
+
+
+class OtpVerifyBody(BaseModel):
+    identifier: str = Field(min_length=3, max_length=254)
+    code: str = Field(min_length=4, max_length=8)
+
+
+def _normalize_phone(raw: str) -> str | None:
+    """Best-effort E.164 for Indian numbers; returns None if it isn't a phone."""
+    digits = re.sub(r"[^\d+]", "", raw)
+    if digits.startswith("+"):
+        rest = digits[1:]
+        return f"+{rest}" if rest.isdigit() and 8 <= len(rest) <= 15 else None
+    if len(digits) == 12 and digits.startswith("91"):
+        return f"+{digits}"
+    if len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
+    if len(digits) == 10 and digits[0] in "6789":
+        return f"+91{digits}"
+    return None
+
+
+def _classify_identifier(raw: str) -> tuple[str, str] | None:
+    """Return ('email'|'sms', normalized_identifier) or None if unrecognized."""
+    candidate = raw.strip()
+    if "@" in candidate:
+        return "email", candidate.lower()
+    phone = _normalize_phone(candidate)
+    return ("sms", phone) if phone else None
+
+
+def _synth_email_for_phone(phone: str) -> str:
+    return f"phone_{re.sub(r'[^0-9]', '', phone)}@{_PHONE_SYNTH_EMAIL_DOMAIN}"
+
+
+@router.post("/otp/request", response_model=DetailResponse, status_code=status.HTTP_202_ACCEPTED)
+@limiter.limit("10/minute")
+async def otp_request(
+    request: Request,
+    body: OtpRequestBody,
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> DetailResponse:
+    classified = _classify_identifier(body.identifier)
+    if not classified:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Enter a valid email address or mobile number.",
+        )
+    channel, identifier = classified
+
+    otp_repo = OtpRepo(pool)
+    # Throttle resends per identifier (independent of the IP rate limit).
+    if await otp_repo.recent_send_count(identifier, OTP_RESEND_WINDOW_SECONDS) >= (
+        OTP_MAX_SENDS_PER_WINDOW
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many codes requested — wait a minute and try again.",
+        )
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=OTP_TTL_SECONDS)
+    await otp_repo.create(identifier, channel, code, expires_at)
+
+    if channel == "email":
+        await send_login_otp_email(identifier, code)
+    else:
+        await send_login_otp_sms(identifier, code)
+
+    return DetailResponse(detail="If that account can receive codes, one is on its way.")
+
+
+@router.post("/otp/verify", response_model=TokenResponse)
+@limiter.limit("15/minute")
+async def otp_verify(
+    request: Request,
+    body: OtpVerifyBody,
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> TokenResponse:
+    classified = _classify_identifier(body.identifier)
+    if not classified:
+        raise HTTPException(status_code=422, detail="Invalid identifier.")
+    channel, identifier = classified
+
+    otp_repo = OtpRepo(pool)
+    otp = await otp_repo.get_active(identifier)
+    invalid = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="That code is invalid or has expired — request a new one.",
+    )
+    if not otp:
+        raise invalid
+    if not secrets.compare_digest(otp["code_hash"], OtpRepo.hash_code(body.code)):
+        # Burn an attempt so a code can't be brute-forced within its window.
+        await otp_repo.increment_attempts(otp["id"])
+        raise invalid
+    await otp_repo.consume(otp["id"])
+
+    user_repo = AuthUserRepo(pool)
+    tenant_repo = TenantRepo(pool)
+    token_repo = RefreshTokenRepo(pool)
+
+    if channel == "email":
+        user = await user_repo.get_by_email(identifier)
+        email, phone, display = identifier, None, identifier.split("@")[0]
+    else:
+        user = await user_repo.get_by_phone(identifier)
+        email, phone, display = _synth_email_for_phone(identifier), identifier, identifier
+
+    if user:
+        tenant = await tenant_repo.get_by_id(user["tenant_id"])
+    else:
+        tenant = await tenant_repo.create(name=f"{display}'s Workspace", plan="founding_member")
+        user = await user_repo.create(
+            tenant_id=tenant["id"],
+            email=email,
+            password_hash=None,
+            display_name=display,
+            role="owner",
+            auth_provider="otp",
+            # Control of the email/phone was just proven by entering the code.
+            email_verified=True,
+            phone=phone,
+        )
+        await send_welcome_email(email, user["display_name"])
+
+    access_token = create_access_token(
+        user_id=str(user["id"]),
+        tenant_id=str(user["tenant_id"]),
+        email=user["email"],
+        role=user["role"],
+    )
+    raw_refresh = create_refresh_token()
+    await token_repo.create(user["id"], raw_refresh, get_refresh_token_expiry())
+
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=raw_refresh,
+        user_id=str(user["id"]),
+        tenant_id=str(user["tenant_id"]),
+        email=user["email"],
+        role=user["role"],
+        display_name=user["display_name"],
+        tenant_name=tenant["name"],
+        plan=tenant["plan"],
+        email_verified=bool(user["email_verified"]),
     )

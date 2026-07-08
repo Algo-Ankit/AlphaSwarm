@@ -270,6 +270,21 @@ export const api = {
       body: JSON.stringify({ code, state }),
     }),
 
+  // Passwordless OTP login — identifier is an email OR phone number.
+  requestOtp: (identifier: string) =>
+    req<{ detail: string }>('/v1/auth/otp/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier }),
+    }),
+
+  verifyOtp: (identifier: string, code: string) =>
+    req<TokenResponse>('/v1/auth/otp/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier, code }),
+    }),
+
   // Google sign-in: pure identity, connects no brokerage.
   getGoogleLoginUrl: () =>
     req<{ login_url: string; state: string }>('/v1/auth/google/login-url'),

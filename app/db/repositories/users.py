@@ -103,12 +103,14 @@ class AuthUserRepo:
         role: str = "owner",
         auth_provider: str = "password",
         email_verified: bool = False,
+        phone: str | None = None,
     ) -> asyncpg.Record:
         return await self._pool.fetchrow(
             """
             INSERT INTO users
-                (tenant_id, email, password_hash, display_name, role, auth_provider, email_verified)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                (tenant_id, email, password_hash, display_name, role,
+                 auth_provider, email_verified, phone)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
             """,
             tenant_id,
@@ -118,12 +120,19 @@ class AuthUserRepo:
             role,
             auth_provider,
             email_verified,
+            phone,
         )
 
     async def get_by_email(self, email: str) -> asyncpg.Record | None:
         return await self._pool.fetchrow(
             "SELECT * FROM users WHERE email = $1 AND is_active = true LIMIT 1",
             email,
+        )
+
+    async def get_by_phone(self, phone: str) -> asyncpg.Record | None:
+        return await self._pool.fetchrow(
+            "SELECT * FROM users WHERE phone = $1 AND is_active = true LIMIT 1",
+            phone,
         )
 
     async def get_by_id(self, user_id: UUID) -> asyncpg.Record | None:
@@ -269,6 +278,80 @@ class RefreshTokenRepo:
         await self._pool.execute(
             "DELETE FROM refresh_tokens WHERE user_id = $1",
             user_id,
+        )
+
+
+class OtpRepo:
+    """
+    Auth-scope repo for passwordless login one-time codes. Stores only a
+    SHA-256 hash of each code — never the code itself.
+    """
+
+    MAX_ATTEMPTS = 5
+
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        self._pool = pool
+
+    @staticmethod
+    def hash_code(code: str) -> str:
+        return hashlib.sha256(code.encode()).hexdigest()
+
+    async def create(
+        self,
+        identifier: str,
+        channel: str,
+        code: str,
+        expires_at: datetime,
+    ) -> None:
+        await self._pool.execute(
+            """
+            INSERT INTO login_otps (identifier, channel, code_hash, expires_at)
+            VALUES ($1, $2, $3, $4)
+            """,
+            identifier,
+            channel,
+            self.hash_code(code),
+            expires_at,
+        )
+
+    async def get_active(self, identifier: str) -> asyncpg.Record | None:
+        """Most recent unconsumed, unexpired, not-yet-locked code for identifier."""
+        return await self._pool.fetchrow(
+            """
+            SELECT * FROM login_otps
+            WHERE identifier = $1
+              AND consumed_at IS NULL
+              AND expires_at > now()
+              AND attempts < $2
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            identifier,
+            self.MAX_ATTEMPTS,
+        )
+
+    async def recent_send_count(self, identifier: str, within_seconds: int) -> int:
+        """How many codes were issued to this identifier recently (send throttle)."""
+        row = await self._pool.fetchrow(
+            f"""
+            SELECT count(*) AS n FROM login_otps
+            WHERE identifier = $1
+              AND created_at > now() - INTERVAL '{int(within_seconds)} seconds'
+            """,
+            identifier,
+        )
+        return int(row["n"]) if row else 0
+
+    async def increment_attempts(self, otp_id: UUID) -> None:
+        await self._pool.execute(
+            "UPDATE login_otps SET attempts = attempts + 1 WHERE id = $1",
+            otp_id,
+        )
+
+    async def consume(self, otp_id: UUID) -> None:
+        await self._pool.execute(
+            "UPDATE login_otps SET consumed_at = now() WHERE id = $1",
+            otp_id,
         )
 
 

@@ -95,7 +95,8 @@ sentry-sdk[fastapi]>=2.19.0       # error + performance monitoring (FastAPI + Ce
 # Dual-gateway billing: Stripe (USD/Global) + Razorpay (INR/India)
 stripe>=11.0.0                     # USD/Global subscription billing (Quant Tier checkout + webhooks)
 razorpay>=1.4.2                    # INR/India recurring billing (UPI AutoPay / e-mandate, Quant Tier)
-sendgrid>=6.11.0                   # transactional email (welcome + rebalance approval)
+sendgrid>=6.11.0                   # transactional email (welcome + rebalance approval + login OTP)
+twilio>=9.0.0                      # transactional SMS (phone login OTP); lazy-imported, optional in dev
 upstox-python-sdk>=2.15.0          # live NSE/BSE order execution via Upstox
 
 # ──────────────────────────────────────────
