@@ -80,6 +80,12 @@ class Settings(BaseSettings):
     # and {app_base_url}/login/upstox/callback ("Continue with Upstox" sign-in).
     upstox_client_id: str = ""
     upstox_client_secret: str = ""
+    # Google Sign-In (pure identity — connects no brokerage). Register an OAuth
+    # client at https://console.cloud.google.com/apis/credentials with redirect
+    # URI {app_base_url}/login/google/callback. Lets the founder/admin and
+    # non-broker users sign in with zero broker gating.
+    google_client_id: str = ""
+    google_client_secret: str = ""
     # Base URL of the frontend — used to build OAuth redirect URIs
     app_base_url: str = "http://localhost:3000"
 

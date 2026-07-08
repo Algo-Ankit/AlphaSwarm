@@ -119,6 +119,78 @@ async def upstox_get_profile(access_token: str) -> dict:
     }
 
 
+# ── Google Sign-In (OpenID Connect) ───────────────────────────────────────────
+# Pure identity provider — unlike the broker flows, Google connects NO brokerage.
+# It exists so the founder/admin and non-broker users can sign in without any
+# broker gating. Google's `email_verified` claim is trusted the same way a
+# broker's KYC email is.
+_GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+_GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+_GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
+
+
+def google_login_url(client_id: str, redirect_uri: str, state: str) -> str:
+    params = {
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "state": state,
+        "scope": "openid email profile",
+        # Force account chooser so a wrong-account session can be corrected.
+        "prompt": "select_account",
+    }
+    return f"{_GOOGLE_AUTH_URL}?{urlencode(params)}"
+
+
+async def google_exchange_code(
+    client_id: str,
+    client_secret: str,
+    code: str,
+    redirect_uri: str,
+) -> dict:
+    """Exchange authorization code → {access_token, ...}."""
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(
+            _GOOGLE_TOKEN_URL,
+            data={
+                "code": code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code",
+            },
+            headers={"Accept": "application/json"},
+        )
+    if resp.status_code != 200:
+        raise ValueError(
+            f"Google token exchange failed: HTTP {resp.status_code}: {resp.text[:200]}"
+        )
+    return resp.json()
+
+
+async def google_get_profile(access_token: str) -> dict:
+    """
+    Fetch the authenticated Google user's profile.
+    Returns {email, user_name, email_verified}. We match accounts on the email
+    only when Google reports it as verified.
+    """
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            _GOOGLE_USERINFO_URL,
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+        )
+    if resp.status_code != 200:
+        raise ValueError(f"Google profile fetch failed: HTTP {resp.status_code}: {resp.text[:200]}")
+    data = resp.json()
+    email = (data.get("email") or "").strip().lower()
+    name = data.get("name") or (email.split("@")[0] if email else "Trader")
+    return {
+        "email": email,
+        "user_name": name,
+        "email_verified": bool(data.get("email_verified", False)),
+    }
+
+
 # ── Zerodha Kite Connect ──────────────────────────────────────────────────────
 _ZERODHA_LOGIN_BASE = "https://kite.zerodha.com/connect/login"
 _ZERODHA_TOKEN_URL = "https://api.kite.trade/session/token"

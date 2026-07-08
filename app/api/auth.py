@@ -537,3 +537,122 @@ async def upstox_login_callback(
         tenant_name=tenant["name"],
         plan=tenant["plan"],
     )
+
+
+# ── Google sign-in ("Continue with Google") ───────────────────────────────────
+# Pure identity provider: signs the user in but connects NO brokerage. This is
+# the escape hatch that lets the founder/admin and any non-broker user in with
+# zero broker gating — nothing to KYC, no API keys, no live-trading prerequisite.
+
+
+class GoogleLoginUrlResponse(BaseModel):
+    login_url: str
+    state: str
+
+
+class GoogleCallbackRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=1024)
+    state: str = Field(min_length=1, max_length=1024)
+
+
+def _google_redirect_uri() -> str:
+    base = get_settings().app_base_url.rstrip("/")
+    return f"{base}/login/google/callback"
+
+
+@router.get("/google/login-url", response_model=GoogleLoginUrlResponse)
+@limiter.limit("20/minute")
+async def google_login_url(request: Request) -> GoogleLoginUrlResponse:
+    settings = get_settings()
+    if not settings.google_client_id or not settings.google_client_secret:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google sign-in is not configured on this server.",
+        )
+    # Stateless CSRF: signed short-lived token, verified at callback time.
+    state = create_state_token("google-login")
+    return GoogleLoginUrlResponse(
+        login_url=oauth.google_login_url(
+            settings.google_client_id, _google_redirect_uri(), state
+        ),
+        state=state,
+    )
+
+
+@router.post("/google/callback", response_model=TokenResponse)
+@limiter.limit("10/minute")
+async def google_login_callback(
+    request: Request,
+    body: GoogleCallbackRequest,
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> TokenResponse:
+    settings = get_settings()
+    if not settings.google_client_id or not settings.google_client_secret:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured.")
+
+    if not verify_state_token(body.state, "google-login"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="OAuth state invalid or expired — restart the Google sign-in.",
+        )
+
+    try:
+        token_data = await oauth.google_exchange_code(
+            settings.google_client_id,
+            settings.google_client_secret,
+            body.code,
+            _google_redirect_uri(),
+        )
+        profile = await oauth.google_get_profile(token_data["access_token"])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    if not profile["email"] or not profile["email_verified"]:
+        raise HTTPException(
+            status_code=422,
+            detail="Google did not return a verified email for this account.",
+        )
+
+    user_repo = AuthUserRepo(pool)
+    tenant_repo = TenantRepo(pool)
+    token_repo = RefreshTokenRepo(pool)
+
+    user = await user_repo.get_by_email(profile["email"])
+    if user:
+        tenant = await tenant_repo.get_by_id(user["tenant_id"])
+    else:
+        tenant = await tenant_repo.create(
+            name=f"{profile['user_name']}'s Workspace", plan="founding_member"
+        )
+        user = await user_repo.create(
+            tenant_id=tenant["id"],
+            email=profile["email"],
+            password_hash=None,
+            display_name=profile["user_name"],
+            role="owner",
+            auth_provider="google",
+            email_verified=True,
+        )
+        await send_welcome_email(profile["email"], user["display_name"])
+
+    access_token = create_access_token(
+        user_id=str(user["id"]),
+        tenant_id=str(user["tenant_id"]),
+        email=profile["email"],
+        role=user["role"],
+    )
+    raw_refresh = create_refresh_token()
+    await token_repo.create(user["id"], raw_refresh, get_refresh_token_expiry())
+
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=raw_refresh,
+        user_id=str(user["id"]),
+        tenant_id=str(user["tenant_id"]),
+        email=profile["email"],
+        role=user["role"],
+        display_name=user["display_name"],
+        tenant_name=tenant["name"],
+        plan=tenant["plan"],
+        email_verified=True,
+    )

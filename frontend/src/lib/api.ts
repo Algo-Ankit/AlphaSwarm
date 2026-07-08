@@ -270,6 +270,17 @@ export const api = {
       body: JSON.stringify({ code, state }),
     }),
 
+  // Google sign-in: pure identity, connects no brokerage.
+  getGoogleLoginUrl: () =>
+    req<{ login_url: string; state: string }>('/v1/auth/google/login-url'),
+
+  googleLoginCallback: (code: string, state: string) =>
+    req<TokenResponse>('/v1/auth/google/callback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, state }),
+    }),
+
   // ── Strategies ────────────────────────────────────────────
   listStrategies: () =>
     req<Strategy[]>('/v1/strategies', { headers: authHeaders() }),
