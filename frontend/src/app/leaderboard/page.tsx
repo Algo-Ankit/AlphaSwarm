@@ -6,10 +6,11 @@ import { GlassCard } from '@/components/ui/GlassCard'
 import { Button } from '@/components/ui/Button'
 import { api, getAccessToken } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import type { LeaderboardEntry, Strategy, SubscriptionEntry } from '@/lib/types'
+import type { LeaderboardEntry, LineageResponse, Strategy, SubscriptionEntry } from '@/lib/types'
 import {
   Trophy, Users, TrendingUp, TrendingDown, ShieldCheck, Sparkles,
   AlertCircle, Loader2, Copy, X, BadgeCheck, Percent, CheckCircle2, Upload,
+  GitFork, GitBranch, Network,
 } from 'lucide-react'
 
 const exchangeCcy = (exchange: string) =>
@@ -27,7 +28,24 @@ export default function LeaderboardPage() {
   const [error, setError] = useState<string | null>(null)
 
   const [copyTarget, setCopyTarget] = useState<LeaderboardEntry | null>(null)
+  const [lineageTarget, setLineageTarget] = useState<LeaderboardEntry | null>(null)
   const [publishOpen, setPublishOpen] = useState(false)
+  const [forkingId, setForkingId] = useState<string | null>(null)
+  const [banner, setBanner] = useState<string | null>(null)
+
+  const forkStrategy = useCallback(async (entry: LeaderboardEntry) => {
+    setForkingId(entry.public_strategy_id)
+    setError(null)
+    try {
+      const res = await api.forkStrategy(entry.public_strategy_id)
+      setBanner(`Forked into “${res.name}” — edit and backtest it in your workspace.`)
+      router.push(`/strategies/${res.strategy_id}`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not fork this strategy')
+    } finally {
+      setForkingId(null)
+    }
+  }, [router])
 
   const load = useCallback(async () => {
     try {
@@ -80,6 +98,14 @@ export default function LeaderboardPage() {
             <AlertCircle className="w-4 h-4" /> {error}
           </GlassCard>
         )}
+        {banner && (
+          <GlassCard className="flex items-center justify-between gap-2 text-sm text-emerald-600 dark:text-emerald-400">
+            <span className="flex items-center gap-2"><GitFork className="w-4 h-4" /> {banner}</span>
+            <button onClick={() => setBanner(null)} className="text-zinc-400 hover:text-zinc-600">
+              <X className="w-4 h-4" />
+            </button>
+          </GlassCard>
+        )}
 
         {loading ? (
           <div className="flex items-center justify-center py-24 text-zinc-400">
@@ -110,7 +136,10 @@ export default function LeaderboardPage() {
                 entry={e}
                 rank={i + 1}
                 subscribed={subscribedIds.has(e.public_strategy_id)}
+                forking={forkingId === e.public_strategy_id}
                 onCopy={() => setCopyTarget(e)}
+                onFork={() => forkStrategy(e)}
+                onLineage={() => setLineageTarget(e)}
               />
             ))}
           </div>
@@ -124,6 +153,9 @@ export default function LeaderboardPage() {
           onDone={() => { setCopyTarget(null); load() }}
         />
       )}
+      {lineageTarget && (
+        <LineageModal entry={lineageTarget} onClose={() => setLineageTarget(null)} />
+      )}
       {publishOpen && (
         <PublishModal
           onClose={() => setPublishOpen(false)}
@@ -136,11 +168,13 @@ export default function LeaderboardPage() {
 
 /* ── Strategy card ─────────────────────────────────────────────────────────── */
 function StrategyCard({
-  entry, rank, subscribed, onCopy,
+  entry, rank, subscribed, forking, onCopy, onFork, onLineage,
 }: {
-  entry: LeaderboardEntry; rank: number; subscribed: boolean; onCopy: () => void
+  entry: LeaderboardEntry; rank: number; subscribed: boolean; forking: boolean
+  onCopy: () => void; onFork: () => void; onLineage: () => void
 }) {
   const dd = entry.max_drawdown_pct
+  const hasLineage = entry.fork_count > 0 || entry.forked_from_public_strategy_id != null
   return (
     <GlassCard padding="none" hover className="overflow-hidden flex flex-col">
       <div className="px-5 pt-4 pb-3">
@@ -155,10 +189,20 @@ function StrategyCard({
               by {entry.creator_name} · {entry.symbols.slice(0, 3).join(', ')}
               {entry.symbols.length > 3 ? '…' : ''} · {entry.exchange}
             </p>
+            {entry.forked_from_public_strategy_id && (
+              <p className="text-[10px] text-violet-500 mt-1 flex items-center gap-1">
+                <GitBranch className="w-3 h-3" /> forked from another strategy
+              </p>
+            )}
           </div>
-          <span className="flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 flex-shrink-0">
-            <Users className="w-3.5 h-3.5" /> {entry.subscriber_count}
-          </span>
+          <div className="flex flex-col items-end gap-1 flex-shrink-0">
+            <span className="flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+              <Users className="w-3.5 h-3.5" /> {entry.subscriber_count}
+            </span>
+            <span className="flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+              <GitFork className="w-3.5 h-3.5" /> {entry.fork_count}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -183,7 +227,7 @@ function StrategyCard({
         <span>Fee {(entry.management_fee_bps / 100).toFixed(2)}%</span>
       </div>
 
-      <div className="px-5 pb-4 mt-auto">
+      <div className="px-5 pb-4 mt-auto space-y-2">
         {subscribed ? (
           <Button variant="secondary" className="w-full" disabled>
             <CheckCircle2 className="w-4 h-4" /> Copying
@@ -193,6 +237,16 @@ function StrategyCard({
             <Copy className="w-4 h-4" /> Copy Trade
           </Button>
         )}
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onFork} loading={forking}>
+            <GitFork className="w-4 h-4" /> Fork
+          </Button>
+          {hasLineage && (
+            <Button variant="secondary" className="flex-1" onClick={onLineage}>
+              <Network className="w-4 h-4" /> Lineage
+            </Button>
+          )}
+        </div>
       </div>
     </GlassCard>
   )
@@ -402,6 +456,87 @@ function PublishModal({ onClose, onDone }: { onClose: () => void; onDone: () => 
           Publish
         </Button>
       </div>
+    </Modal>
+  )
+}
+
+/* ── Lineage (fork graph) modal ────────────────────────────────────────────── */
+function LineageModal({ entry, onClose }: { entry: LeaderboardEntry; onClose: () => void }) {
+  const [graph, setGraph] = useState<LineageResponse | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    api.getLineage(entry.public_strategy_id)
+      .then(setGraph)
+      .catch((e) => setErr(e instanceof Error ? e.message : 'Could not load lineage'))
+  }, [entry.public_strategy_id])
+
+  return (
+    <Modal onClose={onClose}>
+      <div className="flex items-center gap-2 mb-1">
+        <Network className="w-5 h-5 text-violet-500" />
+        <h3 className="text-lg font-bold text-zinc-900 dark:text-zinc-50">Fork lineage</h3>
+      </div>
+      <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-5">
+        The ancestry and descendants of “{entry.title}”. Each fork is an immutable
+        snapshot — this is the graph of what was inherited and what improved on it.
+      </p>
+
+      {err && <p className="text-sm text-rose-500 mb-3">{err}</p>}
+      {!graph ? (
+        <div className="flex justify-center py-8 text-zinc-400"><Loader2 className="w-5 h-5 animate-spin" /></div>
+      ) : (
+        <div className="space-y-5">
+          <div>
+            <p className="text-[11px] uppercase tracking-wider text-zinc-400 mb-2">Descends from</p>
+            {graph.ancestors.length === 0 ? (
+              <p className="text-sm text-zinc-500">An original strategy — no ancestors.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {graph.ancestors.map((a, idx) => (
+                  <div key={a.public_strategy_id} className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                    <GitBranch className="w-3.5 h-3.5 text-violet-400" style={{ marginLeft: idx * 12 }} />
+                    {a.title}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <p className="text-[11px] uppercase tracking-wider text-zinc-400 mb-2">
+              Forks that were published ({graph.children.length})
+            </p>
+            {graph.children.length === 0 ? (
+              <p className="text-sm text-zinc-500">No published forks yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {graph.children.map((c) => (
+                  <div key={c.public_strategy_id}
+                    className="flex items-center justify-between gap-2 rounded-lg px-3 py-2
+                      bg-black/[0.02] dark:bg-white/[0.03] border border-black/[0.05] dark:border-white/[0.05]">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200 truncate">{c.title}</p>
+                      <p className="text-[11px] text-zinc-400">by {c.creator_name}</p>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                        Sharpe {c.sharpe_ratio != null ? c.sharpe_ratio.toFixed(2) : '—'}
+                      </p>
+                      <p className={cn('text-[11px] font-semibold',
+                        (c.cagr_pct ?? 0) >= (entry.cagr_pct ?? 0)
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : 'text-zinc-500')}>
+                        {fmtPct(c.cagr_pct, true)}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </Modal>
   )
 }

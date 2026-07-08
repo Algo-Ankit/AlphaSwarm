@@ -418,6 +418,8 @@ export interface LeaderboardEntry {
   exchange: string
   management_fee_bps: number
   subscriber_count: number
+  fork_count: number
+  forked_from_public_strategy_id: string | null
   is_verified: boolean
   cagr_pct: number | null
   total_return_pct: number | null
@@ -425,6 +427,26 @@ export interface LeaderboardEntry {
   max_drawdown_pct: number | null
   win_rate_pct: number | null
   total_trades: number | null
+}
+
+export interface LineageNode {
+  public_strategy_id: string
+  title: string
+}
+
+export interface LineageChild {
+  public_strategy_id: string
+  title: string
+  creator_name: string
+  subscriber_count: number
+  fork_count: number
+  sharpe_ratio: number | null
+  cagr_pct: number | null
+}
+
+export interface LineageResponse {
+  ancestors: LineageNode[]
+  children: LineageChild[]
 }
 
 export interface PublishRequest {

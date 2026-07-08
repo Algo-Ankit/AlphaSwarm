@@ -33,6 +33,8 @@ class LeaderboardEntry(BaseModel):
     exchange: str
     management_fee_bps: int
     subscriber_count: int
+    fork_count: int
+    forked_from_public_strategy_id: str | None
     is_verified: bool
     # Latest-backtest metrics — null when the strategy has never been backtested.
     cagr_pct: float | None
@@ -107,6 +109,12 @@ async def get_leaderboard(
             exchange=r["exchange"],
             management_fee_bps=int(r["management_fee_bps"]),
             subscriber_count=int(r["subscriber_count"]),
+            fork_count=int(r["fork_count"]),
+            forked_from_public_strategy_id=(
+                str(r["forked_from_public_strategy_id"])
+                if r["forked_from_public_strategy_id"]
+                else None
+            ),
             is_verified=bool(r["is_verified"]),
             cagr_pct=_f(r["cagr_pct"]),
             total_return_pct=_f(r["total_return_pct"]),
@@ -153,6 +161,87 @@ async def publish_strategy(
         management_fee_bps=int(row["management_fee_bps"]),
         subscriber_count=int(row["subscriber_count"]),
         is_verified=bool(row["is_verified"]),
+    )
+
+
+class ForkResponse(BaseModel):
+    strategy_id: str
+    name: str
+    forked_from_public_strategy_id: str
+
+
+class LineageNode(BaseModel):
+    public_strategy_id: str
+    title: str
+
+
+class LineageChild(BaseModel):
+    public_strategy_id: str
+    title: str
+    creator_name: str
+    subscriber_count: int
+    fork_count: int
+    sharpe_ratio: float | None
+    cagr_pct: float | None
+
+
+class LineageResponse(BaseModel):
+    # Ancestors ordered nearest-parent first; children ranked by Sharpe.
+    ancestors: list[LineageNode]
+    children: list[LineageChild]
+
+
+@router.post("/fork/{public_strategy_id}", response_model=ForkResponse, status_code=status.HTTP_201_CREATED)
+async def fork_strategy(
+    public_strategy_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> ForkResponse:
+    """
+    Fork a published strategy into a new private strategy you own — the copied
+    code is the listing's pinned immutable version. Editing your fork and
+    re-publishing it grows the lineage graph.
+    """
+    repo = SocialRepo(pool, current_user.tenant_id)
+    try:
+        row = await repo.fork(public_strategy_id, current_user.user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Public strategy not found.")
+    return ForkResponse(
+        strategy_id=str(row["id"]),
+        name=row["name"],
+        forked_from_public_strategy_id=str(public_strategy_id),
+    )
+
+
+@router.get("/lineage/{public_strategy_id}", response_model=LineageResponse)
+async def get_lineage(
+    public_strategy_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> LineageResponse:
+    """The fork graph around a listing: ancestor chain + direct descendants."""
+    repo = SocialRepo(pool, current_user.tenant_id)
+    graph = await repo.lineage(public_strategy_id)
+    return LineageResponse(
+        ancestors=[
+            LineageNode(public_strategy_id=str(a["id"]), title=a["title"])
+            for a in graph["ancestors"]
+        ],
+        children=[
+            LineageChild(
+                public_strategy_id=str(c["id"]),
+                title=c["title"],
+                creator_name=c["creator_name"],
+                subscriber_count=int(c["subscriber_count"]),
+                fork_count=int(c["fork_count"]),
+                sharpe_ratio=_f(c["sharpe_ratio"]),
+                cagr_pct=_f(c["cagr_pct"]),
+            )
+            for c in graph["children"]
+        ],
     )
 
 

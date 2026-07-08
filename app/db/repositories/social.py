@@ -33,8 +33,11 @@ class SocialRepo(BaseRepo):
                 ps.description,
                 ps.management_fee_bps,
                 ps.subscriber_count,
+                ps.fork_count,
+                ps.forked_from_public_strategy_id,
                 ps.is_verified,
                 ps.created_at,
+                ps.published_at,
                 s.name      AS strategy_name,
                 s.symbols   AS symbols,
                 s.exchange  AS exchange,
@@ -72,6 +75,15 @@ class SocialRepo(BaseRepo):
         )
 
     # ── Publish (tenant-scoped write) ──────────────────────────────────────────
+    async def count_backtests(self, strategy_id: UUID) -> int:
+        """How many backtest runs this strategy has on-platform (publish gate)."""
+        val = await self.fetchval(
+            "SELECT count(*) FROM backtest_results WHERE strategy_id = $1 AND tenant_id = $2",
+            strategy_id,
+            self.tenant_id,
+        )
+        return int(val or 0)
+
     async def publish(
         self,
         strategy_id: UUID,
@@ -81,33 +93,192 @@ class SocialRepo(BaseRepo):
         management_fee_bps: int,
     ) -> asyncpg.Record | None:
         """
-        List the calling tenant's strategy on the leaderboard. Returns None if the
-        strategy does not belong to this tenant (ownership enforced in the INSERT's
-        WHERE EXISTS). Re-publishing updates the listing's metadata in place.
+        List the calling tenant's strategy on the leaderboard, pinning the exact
+        immutable version that is current at publish time (published_version_id) —
+        what subscribers copy and forkers fork is a frozen snapshot, not a moving
+        head. Returns None if the strategy does not belong to this tenant. If this
+        strategy was itself forked, the lineage link + parent fork_count are
+        carried onto the listing so the graph is complete.
+
+        Re-publishing updates metadata AND re-pins to the new current version.
         """
-        return await self.fetchrow(
+        async with self.acquire() as conn:
+            async with conn.transaction():
+                strat = await conn.fetchrow(
+                    """
+                    SELECT current_version_id, forked_from_public_strategy_id
+                    FROM strategies WHERE id = $1 AND tenant_id = $2
+                    """,
+                    strategy_id,
+                    self.tenant_id,
+                )
+                if strat is None:
+                    return None
+
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO public_strategies
+                        (strategy_id, creator_tenant_id, creator_user_id, title,
+                         description, management_fee_bps, published_version_id,
+                         forked_from_public_strategy_id, published_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+                    ON CONFLICT (strategy_id) DO UPDATE SET
+                        title                = EXCLUDED.title,
+                        description          = EXCLUDED.description,
+                        management_fee_bps   = EXCLUDED.management_fee_bps,
+                        published_version_id = EXCLUDED.published_version_id,
+                        is_listed            = TRUE,
+                        published_at         = now(),
+                        updated_at           = now()
+                    RETURNING *, (xmax = 0) AS _inserted
+                    """,
+                    strategy_id,
+                    self.tenant_id,
+                    creator_user_id,
+                    title,
+                    description,
+                    management_fee_bps,
+                    strat["current_version_id"],
+                    strat["forked_from_public_strategy_id"],
+                )
+                # First-time publish of a forked strategy: credit the parent listing.
+                if row["_inserted"] and strat["forked_from_public_strategy_id"] is not None:
+                    await conn.execute(
+                        "UPDATE public_strategies SET fork_count = fork_count + 1 "
+                        "WHERE id = $1",
+                        strat["forked_from_public_strategy_id"],
+                    )
+                return row
+
+    # ── Fork (cross-tenant read of a listing → tenant-scoped strategy write) ────
+    async def fork(self, public_strategy_id: UUID, forker_user_id: UUID) -> asyncpg.Record | None:
+        """
+        Copy a published strategy's pinned immutable version into a NEW private
+        strategy owned by the calling tenant, recording the lineage link. Returns
+        the new strategy row (with generated_logic), or None if the listing is
+        missing. Cannot fork your own listing. Increments the source fork_count
+        immediately — the fork happened whether or not it is ever re-published.
+        """
+        async with self.acquire() as conn:
+            async with conn.transaction():
+                src = await conn.fetchrow(
+                    """
+                    SELECT ps.id, ps.creator_tenant_id, ps.title, ps.published_version_id,
+                           s.symbols, s.exchange, s.timeframe, s.risk_config, s.prompt,
+                           s.creation_mode
+                    FROM public_strategies ps
+                    JOIN strategies s ON s.id = ps.strategy_id
+                    WHERE ps.id = $1 AND ps.is_listed
+                    FOR UPDATE OF ps
+                    """,
+                    public_strategy_id,
+                )
+                if src is None:
+                    raise ValueError("Public strategy not found or no longer listed.")
+                if src["creator_tenant_id"] == self.tenant_id:
+                    raise ValueError("You cannot fork your own published strategy.")
+
+                # Snapshot the exact published version's code/explanation/prompt.
+                ver = await conn.fetchrow(
+                    """
+                    SELECT generated_logic, explanation, prompt_snapshot
+                    FROM strategy_versions WHERE id = $1
+                    """,
+                    src["published_version_id"],
+                )
+                if ver is None:
+                    raise ValueError("Published version snapshot is unavailable.")
+
+                new_strat = await conn.fetchrow(
+                    """
+                    INSERT INTO strategies
+                        (tenant_id, owner_user_id, name, prompt, symbols, exchange,
+                         timeframe, creation_mode, risk_config, forked_from_public_strategy_id)
+                    VALUES ($1, $2, $3, $4, $5::text[], $6, $7, $8, $9::jsonb, $10)
+                    RETURNING *
+                    """,
+                    self.tenant_id,
+                    forker_user_id,
+                    f"{src['title']} (fork)",
+                    src["prompt"],
+                    list(src["symbols"]),
+                    src["exchange"],
+                    src["timeframe"],
+                    src["creation_mode"],
+                    src["risk_config"],
+                    public_strategy_id,
+                )
+                version = await conn.fetchrow(
+                    """
+                    INSERT INTO strategy_versions
+                        (strategy_id, version_number, generated_logic, explanation,
+                         prompt_snapshot, created_by)
+                    VALUES ($1, 1, $2, $3, $4, $5)
+                    RETURNING *
+                    """,
+                    new_strat["id"],
+                    ver["generated_logic"],
+                    ver["explanation"],
+                    ver["prompt_snapshot"],
+                    forker_user_id,
+                )
+                await conn.execute(
+                    "UPDATE strategies SET current_version_id = $1 WHERE id = $2",
+                    version["id"],
+                    new_strat["id"],
+                )
+                await conn.execute(
+                    "UPDATE public_strategies SET fork_count = fork_count + 1, updated_at = now() "
+                    "WHERE id = $1",
+                    public_strategy_id,
+                )
+                return await conn.fetchrow(
+                    """
+                    SELECT s.*, sv.generated_logic, sv.explanation, sv.version_number
+                    FROM strategies s
+                    JOIN strategy_versions sv ON sv.id = s.current_version_id
+                    WHERE s.id = $1
+                    """,
+                    new_strat["id"],
+                )
+
+    async def lineage(self, public_strategy_id: UUID) -> dict:
+        """
+        The fork graph around a listing: its ancestor chain (walking up the
+        forked_from links, root last) and its direct children. Cross-tenant read.
+        """
+        ancestors = await self.fetch(
             """
-            INSERT INTO public_strategies
-                (strategy_id, creator_tenant_id, creator_user_id, title, description, management_fee_bps)
-            SELECT $1, $2, $3, $4, $5, $6
-            WHERE EXISTS (
-                SELECT 1 FROM strategies WHERE id = $1 AND tenant_id = $2
+            WITH RECURSIVE chain AS (
+                SELECT p.id, p.title, p.forked_from_public_strategy_id, 0 AS depth
+                FROM public_strategies p WHERE p.id = $1
+                UNION ALL
+                SELECT p.id, p.title, p.forked_from_public_strategy_id, c.depth + 1
+                FROM public_strategies p
+                JOIN chain c ON p.id = c.forked_from_public_strategy_id
             )
-            ON CONFLICT (strategy_id) DO UPDATE SET
-                title              = EXCLUDED.title,
-                description        = EXCLUDED.description,
-                management_fee_bps = EXCLUDED.management_fee_bps,
-                is_listed          = TRUE,
-                updated_at         = now()
-            RETURNING *
+            SELECT id, title, depth FROM chain WHERE depth > 0 ORDER BY depth
             """,
-            strategy_id,
-            self.tenant_id,
-            creator_user_id,
-            title,
-            description,
-            management_fee_bps,
+            public_strategy_id,
         )
+        children = await self.fetch(
+            """
+            SELECT ps.id, ps.title, ps.subscriber_count, ps.fork_count, t.name AS creator_name,
+                   bt.sharpe_ratio, bt.annualized_return_pct AS cagr_pct
+            FROM public_strategies ps
+            JOIN tenants t ON t.id = ps.creator_tenant_id
+            LEFT JOIN LATERAL (
+                SELECT b.sharpe_ratio, b.annualized_return_pct
+                FROM backtest_results b
+                WHERE b.strategy_id = ps.strategy_id
+                ORDER BY b.created_at DESC LIMIT 1
+            ) bt ON TRUE
+            WHERE ps.forked_from_public_strategy_id = $1 AND ps.is_listed
+            ORDER BY COALESCE(bt.sharpe_ratio, 0) DESC
+            """,
+            public_strategy_id,
+        )
+        return {"ancestors": ancestors, "children": children}
 
     # ── Subscribe (tenant-scoped write) ────────────────────────────────────────
     async def subscribe(

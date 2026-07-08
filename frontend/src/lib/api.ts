@@ -9,6 +9,7 @@ import type {
   CheckoutResponse,
   CreatePostRequest,
   LeaderboardEntry,
+  LineageResponse,
   PublishRequest,
   SocialPost,
   SubscribeResponse,
@@ -548,6 +549,15 @@ export const api = {
       '/v1/social/publish',
       { method: 'POST', headers: authHeaders(), body: JSON.stringify(data) },
     ),
+
+  forkStrategy: (publicStrategyId: string) =>
+    req<{ strategy_id: string; name: string; forked_from_public_strategy_id: string }>(
+      `/v1/social/fork/${publicStrategyId}`,
+      { method: 'POST', headers: authHeaders() },
+    ),
+
+  getLineage: (publicStrategyId: string) =>
+    req<LineageResponse>(`/v1/social/lineage/${publicStrategyId}`, { headers: authHeaders() }),
 
   subscribeStrategy: (publicStrategyId: string, allocatedCapital: number) =>
     req<SubscribeResponse>(`/v1/social/subscribe/${publicStrategyId}`, {
