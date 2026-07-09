@@ -50,6 +50,8 @@ You type that. AlphaSwarm's AI generates a validated, sandboxed Python strategy,
 | 📈 **Active trader** | A Bloomberg-style terminal: candles, RSI/MACD/Bollinger, news, AI forecasts, live P&L over WebSockets. |
 | 🧑‍🔬 **Quant developer** | A browser Monaco editor, a hardened Python sandbox, a prop-grade backtester, and a forkable strategy commons. |
 
+> 📚 **Want to actually understand the system — enough to teach or pitch it?** Read [**The Definitive Handbook**](AlphaSwarm_The_Definitive_Guide.md): how every subsystem works under the hood, the finance concepts explained in plain English, end-to-end data-flow walkthroughs, and ready-made 60-second / 5-minute / whiteboard explanations.
+
 ---
 
 ## 🎯 Why traders should trust it
