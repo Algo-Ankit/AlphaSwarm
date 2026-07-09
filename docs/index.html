@@ -1,0 +1,516 @@
+<title>AlphaSwarm — Engineering Handbook</title>
+<style>
+  :root{
+    --bg:#0b1020; --surface:#111a2e; --surface-2:#16223a; --border:#26324c;
+    --text:#e7ecf6; --muted:#8b98b4; --faint:#5d6a86;
+    --accent:#f2b84b; --accent-soft:rgba(242,184,75,.14); --accent-line:rgba(242,184,75,.4);
+    --up:#3dd68c; --down:#f2706e;
+    --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --maxw:1180px; --read:66ch;
+    --shadow:0 1px 0 rgba(255,255,255,.02),0 8px 30px -12px rgba(0,0,0,.5);
+  }
+  @media (prefers-color-scheme:light){
+    :root{
+      --bg:#eef1f8; --surface:#ffffff; --surface-2:#f4f6fc; --border:#d9e0ee;
+      --text:#111a2e; --muted:#556075; --faint:#8791a5;
+      --accent:#a8770f; --accent-soft:rgba(168,119,15,.1); --accent-line:rgba(168,119,15,.35);
+      --up:#118a54; --down:#c8433f;
+      --shadow:0 1px 2px rgba(20,30,60,.06),0 10px 30px -16px rgba(20,30,60,.25);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0b1020; --surface:#111a2e; --surface-2:#16223a; --border:#26324c;
+    --text:#e7ecf6; --muted:#8b98b4; --faint:#5d6a86;
+    --accent:#f2b84b; --accent-soft:rgba(242,184,75,.14); --accent-line:rgba(242,184,75,.4);
+    --up:#3dd68c; --down:#f2706e;
+    --shadow:0 1px 0 rgba(255,255,255,.02),0 8px 30px -12px rgba(0,0,0,.5);
+  }
+  :root[data-theme="light"]{
+    --bg:#eef1f8; --surface:#ffffff; --surface-2:#f4f6fc; --border:#d9e0ee;
+    --text:#111a2e; --muted:#556075; --faint:#8791a5;
+    --accent:#a8770f; --accent-soft:rgba(168,119,15,.1); --accent-line:rgba(168,119,15,.35);
+    --up:#118a54; --down:#c8433f;
+    --shadow:0 1px 2px rgba(20,30,60,.06),0 10px 30px -16px rgba(20,30,60,.25);
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  body{
+    margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);
+    line-height:1.6;-webkit-font-smoothing:antialiased;letter-spacing:.005em;
+    background-image:radial-gradient(1200px 600px at 80% -10%,var(--accent-soft),transparent 60%);
+  }
+  a{color:inherit}
+  ::selection{background:var(--accent-soft)}
+
+  /* ── Ticker ── */
+  .ticker{position:sticky;top:0;z-index:40;border-bottom:1px solid var(--border);
+    background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(10px);
+    font-family:var(--mono);font-size:12px;overflow:hidden;white-space:nowrap}
+  .ticker-track{display:inline-flex;gap:2.5rem;padding:.5rem 0;animation:scroll 42s linear infinite}
+  .ticker:hover .ticker-track{animation-play-state:paused}
+  @keyframes scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  @media (prefers-reduced-motion:reduce){.ticker-track{animation:none;padding-left:1rem}}
+  .tk{color:var(--muted);letter-spacing:.03em}
+  .tk b{color:var(--text);font-weight:600}
+  .tk .up{color:var(--up)} .tk .dn{color:var(--down)} .tk .ac{color:var(--accent)}
+
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 clamp(1.1rem,4vw,2.5rem)}
+
+  /* ── Hero ── */
+  header.hero{padding:clamp(3rem,8vw,6rem) 0 clamp(2rem,5vw,3.5rem);border-bottom:1px solid var(--border)}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--accent);display:flex;align-items:center;gap:.6rem;margin-bottom:1.4rem}
+  .eyebrow::before{content:"";width:26px;height:1px;background:var(--accent-line)}
+  h1.title{font-size:clamp(2.6rem,8vw,5.2rem);line-height:.96;letter-spacing:-.03em;
+    font-weight:800;margin:0;text-wrap:balance}
+  h1.title .swarm{color:var(--accent)}
+  .lede{max-width:60ch;margin:1.6rem 0 0;font-size:clamp(1.05rem,2.4vw,1.3rem);color:var(--muted);
+    line-height:1.55;text-wrap:pretty}
+  .lede b{color:var(--text);font-weight:600}
+  .meta{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:2rem;font-family:var(--mono);font-size:12px}
+  .chip{border:1px solid var(--border);background:var(--surface);border-radius:100px;
+    padding:.4rem .85rem;color:var(--muted);display:inline-flex;gap:.45rem;align-items:center}
+  .chip b{color:var(--text);font-weight:600}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--up);box-shadow:0 0 8px var(--up)}
+
+  /* ── Layout ── */
+  .layout{display:grid;grid-template-columns:1fr;gap:0}
+  @media (min-width:960px){.layout{grid-template-columns:230px minmax(0,1fr);gap:clamp(2rem,5vw,4.5rem)}}
+  nav.toc{display:none}
+  @media (min-width:960px){
+    nav.toc{display:block;position:sticky;top:52px;align-self:start;height:calc(100vh - 52px);
+      overflow-y:auto;padding:2.5rem 0;font-family:var(--mono);font-size:12.5px}
+  }
+  nav.toc ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.15rem}
+  nav.toc a{display:flex;gap:.7rem;text-decoration:none;color:var(--faint);padding:.4rem .6rem;
+    border-radius:7px;border-left:2px solid transparent;transition:color .15s,background .15s}
+  nav.toc a .n{color:var(--accent);opacity:.55}
+  nav.toc a:hover{color:var(--text);background:var(--surface)}
+  nav.toc a.active{color:var(--text);background:var(--accent-soft);border-left-color:var(--accent)}
+  nav.toc a.active .n{opacity:1}
+
+  main{padding:clamp(2rem,5vw,3.5rem) 0 5rem;min-width:0}
+  section{padding:clamp(2.4rem,6vw,4rem) 0;border-bottom:1px solid var(--border)}
+  section:last-of-type{border-bottom:none}
+  .sec-head{display:flex;align-items:baseline;gap:1rem;margin-bottom:1.6rem}
+  .sec-num{font-family:var(--mono);font-size:13px;color:var(--accent);letter-spacing:.1em;
+    padding-top:.35rem}
+  h2{font-size:clamp(1.55rem,4vw,2.3rem);letter-spacing:-.02em;line-height:1.08;margin:0;
+    font-weight:750;text-wrap:balance}
+  h3{font-size:1.12rem;letter-spacing:-.01em;margin:2.2rem 0 .5rem;font-weight:680}
+  p{margin:.9rem 0;max-width:var(--read)}
+  p.wide{max-width:none}
+  em.term{font-style:normal;color:var(--accent);font-weight:600}
+  strong{font-weight:660;color:var(--text)}
+  code{font-family:var(--mono);font-size:.86em;background:var(--surface-2);border:1px solid var(--border);
+    padding:.1em .4em;border-radius:5px;color:var(--text)}
+
+  .pull{border-left:2px solid var(--accent);padding:.2rem 0 .2rem 1.4rem;margin:2rem 0;
+    font-size:clamp(1.2rem,3vw,1.6rem);line-height:1.3;letter-spacing:-.01em;font-weight:600;
+    color:var(--text);max-width:26ch;text-wrap:balance}
+  .pull span{color:var(--accent)}
+
+  /* ── Trust tiles ── */
+  .duo{display:grid;grid-template-columns:1fr;gap:1rem;margin:1.8rem 0}
+  @media (min-width:620px){.duo{grid-template-columns:1fr 1fr}}
+  .tile{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.4rem 1.5rem;
+    box-shadow:var(--shadow)}
+  .tile .k{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+  .tile h4{margin:.5rem 0 .4rem;font-size:1.15rem;letter-spacing:-.01em}
+  .tile p{margin:0;color:var(--muted);font-size:.95rem;max-width:none}
+
+  /* ── Tier table ── */
+  .tablewrap{overflow-x:auto;margin:1.8rem 0;border:1px solid var(--border);border-radius:14px;background:var(--surface)}
+  table{border-collapse:collapse;width:100%;font-size:.93rem;min-width:520px}
+  th,td{text-align:left;padding:.85rem 1.1rem;border-bottom:1px solid var(--border);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--muted);font-weight:500}
+  tr:last-child td{border-bottom:none}
+  td b{color:var(--text)}
+  td .price{font-family:var(--mono);color:var(--accent);font-weight:600}
+
+  /* ── Architecture diagram ── */
+  .arch{display:flex;flex-direction:column;gap:.7rem;margin:1.8rem 0;font-family:var(--mono)}
+  .plane{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.05rem 1.2rem;
+    position:relative;overflow:hidden}
+  .plane::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent);opacity:.55}
+  .plane .pt{display:flex;align-items:center;gap:.6rem;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+  .plane .pd{margin-top:.45rem;font-family:var(--sans);color:var(--muted);font-size:.92rem;line-height:1.5}
+  .plane .pd .item{color:var(--text)}
+  .split{display:grid;grid-template-columns:1fr;gap:.7rem}
+  @media (min-width:620px){.split{grid-template-columns:1fr 1fr}}
+  .connector{text-align:center;color:var(--faint);font-family:var(--mono);font-size:11px;letter-spacing:.1em}
+  .connector span{color:var(--accent)}
+
+  /* ── Steps ── */
+  .steps{counter-reset:step;display:flex;flex-direction:column;gap:.2rem;margin:1.6rem 0;max-width:var(--read)}
+  .step{display:grid;grid-template-columns:auto 1fr;gap:1.1rem;padding:.9rem 0;border-top:1px solid var(--border)}
+  .step:first-child{border-top:none}
+  .step .sn{counter-increment:step;font-family:var(--mono);font-size:12px;color:var(--accent);
+    width:26px;height:26px;border:1px solid var(--accent-line);border-radius:50%;display:grid;place-items:center;
+    background:var(--accent-soft)}
+  .step .sn::before{content:counter(step,decimal-leading-zero)}
+  .step p{margin:.2rem 0;max-width:none;font-size:.96rem}
+
+  /* ── Subsystem cards ── */
+  .cards{display:grid;grid-template-columns:1fr;gap:1rem;margin:1.8rem 0}
+  @media (min-width:720px){.cards{grid-template-columns:1fr 1fr}}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.5rem;
+    display:flex;flex-direction:column;gap:.6rem;box-shadow:var(--shadow);transition:border-color .2s,transform .2s}
+  .card:hover{border-color:var(--accent-line);transform:translateY(-2px)}
+  .card .cardtop{display:flex;align-items:center;justify-content:space-between;gap:.5rem}
+  .card h4{margin:0;font-size:1.1rem;letter-spacing:-.01em}
+  .card .tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--accent);border:1px solid var(--accent-line);border-radius:100px;padding:.22rem .6rem;white-space:nowrap}
+  .card .prob{color:var(--muted);font-size:.92rem;margin:0}
+  .card .mech{font-size:.92rem;margin:0}
+  .card .teach{margin:.2rem 0 0;padding-top:.7rem;border-top:1px solid var(--border);
+    font-size:.86rem;color:var(--muted)}
+  .card .teach b{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--faint);display:block;margin-bottom:.25rem}
+
+  /* ── Security list ── */
+  .sec-list{margin:1.8rem 0;border:1px solid var(--border);border-radius:14px;overflow:hidden;background:var(--surface)}
+  .sec-row{display:grid;grid-template-columns:1fr;gap:.1rem;padding:1rem 1.3rem;border-bottom:1px solid var(--border)}
+  @media (min-width:620px){.sec-row{grid-template-columns:190px 1fr;gap:1.3rem;align-items:baseline}}
+  .sec-row:last-child{border-bottom:none}
+  .sec-row .lbl{font-family:var(--mono);font-size:12px;color:var(--accent);letter-spacing:.03em}
+  .sec-row .desc{color:var(--muted);font-size:.92rem}
+  .sec-row .desc b{color:var(--text)}
+
+  /* ── Glossary ── */
+  .gloss{display:grid;grid-template-columns:1fr;gap:0;margin:1.8rem 0}
+  @media (min-width:720px){.gloss{grid-template-columns:1fr 1fr;column-gap:2.5rem}}
+  .gitem{padding:.9rem 0;border-top:1px solid var(--border)}
+  .gitem dt{font-family:var(--mono);font-size:.9rem;color:var(--text);font-weight:600;letter-spacing:-.01em}
+  .gitem dt .ac{color:var(--accent)}
+  .gitem dd{margin:.3rem 0 0;color:var(--muted);font-size:.9rem;line-height:1.5}
+
+  /* ── Explain scripts ── */
+  .scripts{display:flex;flex-direction:column;gap:1rem;margin:1.8rem 0}
+  .script{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+  .script summary{cursor:pointer;list-style:none;padding:1.15rem 1.4rem;display:flex;align-items:center;
+    justify-content:space-between;gap:1rem;font-weight:640}
+  .script summary::-webkit-details-marker{display:none}
+  .script summary .who{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+  .script summary .arw{color:var(--accent);transition:transform .2s;font-family:var(--mono)}
+  .script[open] summary .arw{transform:rotate(90deg)}
+  .script .body{padding:0 1.4rem 1.4rem;color:var(--muted)}
+  .script .body p{max-width:none;margin:.4rem 0}
+  .script .body .quote{color:var(--text);border-left:2px solid var(--accent);padding-left:1rem;font-size:1.02rem;line-height:1.55}
+
+  /* ── Footer ── */
+  footer{padding:3rem 0 4rem;color:var(--muted);font-size:.9rem}
+  .flinks{display:flex;flex-wrap:wrap;gap:.7rem;margin:1.2rem 0}
+  .flink{font-family:var(--mono);font-size:12.5px;text-decoration:none;color:var(--text);
+    border:1px solid var(--border);background:var(--surface);border-radius:9px;padding:.6rem .95rem;
+    display:inline-flex;gap:.5rem;align-items:center;transition:border-color .2s,color .2s}
+  .flink:hover{border-color:var(--accent-line);color:var(--accent)}
+  .flink .ar{color:var(--accent)}
+
+  /* ── Theme toggle ── */
+  .toggle{position:fixed;bottom:1.2rem;right:1.2rem;z-index:50;width:42px;height:42px;border-radius:50%;
+    border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;
+    display:grid;place-items:center;box-shadow:var(--shadow);font-size:16px}
+  .toggle:hover{border-color:var(--accent-line)}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+</style>
+
+<div class="ticker" aria-hidden="true">
+  <div class="ticker-track">
+    <span class="tk"><b>ALPHASWARM</b> — AI QUANT DESK</span>
+    <span class="tk">CUSTODY <span class="dn">✕ NONE</span></span>
+    <span class="tk">BYOB <span class="up">▲ BRING YOUR OWN BROKER</span></span>
+    <span class="tk">BYOK <span class="up">▲ BRING YOUR OWN KEY</span></span>
+    <span class="tk">RISK GATE <span class="ac">◆ ZERO-BYPASS</span></span>
+    <span class="tk">BACKTEST <span class="ac">◆ SLIPPAGE-AWARE</span></span>
+    <span class="tk">COMMONS <span class="up">▲ OUT-OF-SAMPLE HONEST</span></span>
+    <span class="tk">TOKEN BILLING <span class="dn">✕ NEVER</span></span>
+    <span class="tk">MIGRATIONS <b>0001 → 0014</b></span>
+    <!-- duplicate for seamless loop -->
+    <span class="tk"><b>ALPHASWARM</b> — AI QUANT DESK</span>
+    <span class="tk">CUSTODY <span class="dn">✕ NONE</span></span>
+    <span class="tk">BYOB <span class="up">▲ BRING YOUR OWN BROKER</span></span>
+    <span class="tk">BYOK <span class="up">▲ BRING YOUR OWN KEY</span></span>
+    <span class="tk">RISK GATE <span class="ac">◆ ZERO-BYPASS</span></span>
+    <span class="tk">BACKTEST <span class="ac">◆ SLIPPAGE-AWARE</span></span>
+    <span class="tk">COMMONS <span class="up">▲ OUT-OF-SAMPLE HONEST</span></span>
+    <span class="tk">TOKEN BILLING <span class="dn">✕ NEVER</span></span>
+    <span class="tk">MIGRATIONS <b>0001 → 0014</b></span>
+  </div>
+</div>
+
+<div class="wrap">
+  <header class="hero">
+    <div class="eyebrow">Engineering Handbook · v2026.07</div>
+    <h1 class="title">Alpha<span class="swarm">Swarm</span></h1>
+    <p class="lede">An <b>AI quant team in a browser tab</b>. Describe a strategy in plain English — the AI writes the code, backtests it against realistic market reality, and trades it through <b>your own broker</b>. We never touch your money. This is the document that explains how all of it actually works.</p>
+    <div class="meta">
+      <span class="chip"><span class="dot"></span> <b>MVP live</b></span>
+      <span class="chip">FastAPI · <b>asyncpg</b></span>
+      <span class="chip">Next.js <b>14</b></span>
+      <span class="chip">Celery · <b>Redis</b></span>
+      <span class="chip">PostgreSQL <b>16</b></span>
+      <span class="chip">Agent Framework · <b>BYOK</b></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Table of contents">
+      <ol>
+        <li><a href="#model"><span class="n">01</span> Mental model</a></li>
+        <li><a href="#custody"><span class="n">02</span> Why no custody</a></li>
+        <li><a href="#arch"><span class="n">03</span> Architecture</a></li>
+        <li><a href="#flow"><span class="n">04</span> How it flows</a></li>
+        <li><a href="#systems"><span class="n">05</span> The subsystems</a></li>
+        <li><a href="#security"><span class="n">06</span> Security</a></li>
+        <li><a href="#glossary"><span class="n">07</span> Quant glossary</a></li>
+        <li><a href="#explain"><span class="n">08</span> Explain it</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <section id="model">
+        <div class="sec-head"><div class="sec-num">01</div><h2>The mental model</h2></div>
+        <p>A user describes a trading strategy in plain English — <em class="term">“buy RELIANCE when RSI drops below 30”</em> — and the AI writes validated Python for it, backtests that Python against realistic conditions, and, once the user connects their <strong>own</strong> brokerage, trades it on their behalf.</p>
+        <p>Around that core sit three products for three audiences: a <strong>wealth copilot</strong> for retail investors, a <strong>Bloomberg-style terminal</strong> for active traders, and a <strong>GitHub-style commons</strong> where quants fork, copy, and honestly-score each other's strategies.</p>
+        <div class="pull">Bloomberg Terminal meets <span>GitHub</span> — on your own broker and your own AI key.</div>
+        <p>The one non-negotiable rule underneath all of it: the platform is software that <strong>sends orders</strong> — not a broker, not a fund. That single fact is the trust model and the business model at once.</p>
+      </section>
+
+      <section id="custody">
+        <div class="sec-head"><div class="sec-num">02</div><h2>Why “no custody” is the entire strategy</h2></div>
+        <p>Everyone assumes the hard part of a trading platform is the trading. It isn't — it's <strong>regulation</strong>. The moment you hold customer funds or pool money into a fund, you need money-transmitter and broker-dealer licenses, custody insurance, audits, and capital reserves. That's a multi-year, multi-million-dollar moat pointed <em class="term">at the founder</em>. AlphaSwarm sidesteps all of it with two principles:</p>
+        <div class="duo">
+          <div class="tile">
+            <div class="k">Bring Your Own Broker</div>
+            <h4>BYOB</h4>
+            <p>The user connects their existing regulated brokerage. Our servers send buy/sell instructions through the broker's API. Cash and securities never leave the user's account — so we're a software vendor, not a financial institution.</p>
+          </div>
+          <div class="tile">
+            <div class="k">Bring Your Own Key</div>
+            <h4>BYOK</h4>
+            <p>The AI runs on the user's own free LLM key (Groq, Gemini, OpenRouter, local Ollama). No shipped paid key, no token billing — which kills the single largest variable cost of an AI product and lets the AI features be free forever.</p>
+          </div>
+        </div>
+        <p><strong>How to teach it:</strong> the genius isn't the AI — it's the org chart. By refusing to hold the money <em>and</em> the AI key, AlphaSwarm hands the two most expensive, most regulated parts of a fintech back to the user and keeps only the part that's pure software.</p>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Tier</th><th>What it unlocks</th><th>Price</th></tr></thead>
+            <tbody>
+              <tr><td><b>Free / BYOK</b></td><td>AI builder &amp; advisor, paper trading, full backtester, terminal, goal wizard, the Swarm</td><td><span class="price">₹0</span></td></tr>
+              <tr><td><b>Quant Tier</b></td><td>Live agent deployment + live broker execution</td><td><span class="price">Stripe · Razorpay</span></td></tr>
+              <tr><td><b>Swarm Tax</b></td><td>1% / month on copied capital, split 50/50 platform ↔ creator</td><td><span class="price">Usage</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="arch">
+        <div class="sec-head"><div class="sec-num">03</div><h2>Architecture in four planes</h2></div>
+        <p class="wide">Each plane has a single responsibility. The key decision: the API control plane is <strong>stateless and fast</strong> — it never runs a trading loop, so a slow strategy can't block a dashboard request. All long-running, risky work lives in isolated workers.</p>
+        <div class="arch">
+          <div class="plane">
+            <div class="pt">01 · Presentation — Next.js 14 / Vercel</div>
+            <div class="pd"><span class="item">Dashboard · Terminal · Strategies · Leaderboard · Advisor · Portfolio · Feed · Login</span></div>
+          </div>
+          <div class="connector">▼ &nbsp; REST + WebSocket · <span>JWT Bearer</span> &nbsp; ▼</div>
+          <div class="plane">
+            <div class="pt">02 · Control Plane — FastAPI + asyncpg</div>
+            <div class="pd">The front desk: validates, authorizes, reads/writes Postgres, enqueues work. <span class="item">Holds no trading loop itself.</span></div>
+          </div>
+          <div class="connector">▼ &nbsp; Celery over <span>Redis</span> &nbsp;·&nbsp; direct async calls &nbsp; ▼</div>
+          <div class="split">
+            <div class="plane">
+              <div class="pt">03a · Execution Plane</div>
+              <div class="pd"><span class="item">Celery workers.</span> Strategy loop · the risk gate · order execution · SIP · Swarm Tax · out-of-sample recompute.</div>
+            </div>
+            <div class="plane">
+              <div class="pt">03b · Intelligence Services</div>
+              <div class="pd"><span class="item">market data · indicators · backtest · forecaster · strategy builder · AI advisor · OAuth.</span></div>
+            </div>
+          </div>
+          <div class="connector">▼</div>
+          <div class="plane">
+            <div class="pt">04 · Data Plane</div>
+            <div class="pd"><span class="item">PostgreSQL 16</span> — the source of truth &nbsp;·&nbsp; <span class="item">Redis 7</span> — Celery broker + pub/sub bus.</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="flow">
+        <div class="sec-head"><div class="sec-num">04</div><h2>How it flows</h2></div>
+        <p>Reading data-flow beats reading feature lists. Two flows define the product.</p>
+
+        <h3>A · Plain English → a live strategy</h3>
+        <div class="steps">
+          <div class="step"><div class="sn"></div><p>User types a strategy in plain English; the frontend POSTs it with a JWT.</p></div>
+          <div class="step"><div class="sn"></div><p>The control plane authenticates and calls the strategy builder — an <strong>Agent Framework ReAct agent</strong>.</p></div>
+          <div class="step"><div class="sn"></div><p>The agent writes candidate Python, <strong>runs it in the sandbox</strong>, reads the real errors, and fixes itself in a loop until it's a valid strategy.</p></div>
+          <div class="step"><div class="sn"></div><p>The user backtests it. The <strong>same risk gate that governs live trading</strong> runs on every simulated order.</p></div>
+          <div class="step"><div class="sn"></div><p>Connect a broker, click Deploy (Quant Tier gate). A worker runs the loop: indicators → intent → risk gate → real broker call.</p></div>
+        </div>
+
+        <h3>B · A creator's signal → 400 followers' brokers</h3>
+        <div class="steps">
+          <div class="step"><div class="sn"></div><p>A creator publishes a strategy — publishing <strong>pins an immutable version</strong> and requires ≥ 3 backtests first.</p></div>
+          <div class="step"><div class="sn"></div><p>Followers subscribe, each allocating their <strong>own</strong> capital. No money moves to AlphaSwarm — the allocation is just a sizing number.</p></div>
+          <div class="step"><div class="sn"></div><p>On a signal, the engine fans out: per-subscriber advisory lock → size to their capital → their risk gate → their broker.</p></div>
+          <div class="step"><div class="sn"></div><p>400 followers = 400 independent orders in 400 independent accounts. Funds are <strong>never pooled</strong>.</p></div>
+        </div>
+        <div class="pull" style="max-width:34ch;font-size:clamp(1.05rem,2.6vw,1.35rem)">It copies the <span>decision</span>, not the money — that's why it needs no fund license.</div>
+      </section>
+
+      <section id="systems">
+        <div class="sec-head"><div class="sec-num">05</div><h2>The subsystems</h2></div>
+        <p>Six pieces do the heavy lifting. Each below: the problem, the mechanism, and the concept you'd teach from it.</p>
+        <div class="cards">
+
+          <div class="card">
+            <div class="cardtop"><h4>The risk gate</h4><span class="tag">domain/risk.py</span></div>
+            <p class="prob">A trading bug loses real money in milliseconds. There must be exactly one gate, with no second door.</p>
+            <p class="mech"><code>verify_order_intent()</code> is a pure function running 9 checks in sequence — market hours, symbol allow-list, order &amp; position &amp; daily notional caps, whole-share rules — and <strong>fails closed</strong>. A 3% gap-safety margin makes it reject on violent opens.</p>
+            <p class="teach"><b>Concept to teach</b> A single, un-bypassable choke point, proven by tests — safety comes from one enforced place, not scattered checks.</p>
+          </div>
+
+          <div class="card">
+            <div class="cardtop"><h4>Concurrency lock</h4><span class="tag">services/execution.py</span></div>
+            <p class="prob">Two signals for one account arrive at once. Read-decide-place is a classic race that can double-fill.</p>
+            <p class="mech">A PostgreSQL transactional <strong>advisory lock</strong> (<code>pg_advisory_xact_lock</code>) keyed to the account, with the position read done <em>inside</em> the same transaction. One signal waits for the other.</p>
+            <p class="teach"><b>Concept to teach</b> TOCTOU races — check and act atomically, or the window between them will eventually hurt you.</p>
+          </div>
+
+          <div class="card">
+            <div class="cardtop"><h4>Honest backtester</h4><span class="tag">services/backtest.py</span></div>
+            <p class="prob">Most retail backtesters lie: they fill stops at the stop price and assume infinite liquidity. The pretty curve evaporates live.</p>
+            <p class="mech">Models adverse <strong>gap fills</strong>, a 10% <strong>volume-participation cap</strong> (Almgren–Chriss), bid/ask, commissions, and short-borrow. The risk gate runs on every simulated order.</p>
+            <p class="teach"><b>Concept to teach</b> Backtest realism — a backtest is only useful to the degree it refuses to let you cheat.</p>
+          </div>
+
+          <div class="card">
+            <div class="cardtop"><h4>The Swarm commons</h4><span class="tag">db/repositories/social.py</span></div>
+            <p class="prob">Public leaderboards rot into survivorship-bias theater — only winners shown, posts edited after the fact.</p>
+            <p class="mech"><strong>Immutable pinned versions</strong> + a fork graph + a daily job that backtests each listing on data that only exists <em>after</em> its publish date — a real out-of-sample scorecard.</p>
+            <p class="teach"><b>Concept to teach</b> Out-of-sample validation &amp; provenance — the only performance test that counts is on data the strategy never saw.</p>
+          </div>
+
+          <div class="card">
+            <div class="cardtop"><h4>Portfolio risk review</h4><span class="tag">services/portfolio_risk.py</span></div>
+            <p class="prob">An investor doesn't want P&amp;L — they want “what should I sell?” Being wrong there costs money.</p>
+            <p class="mech">A pure, <strong>LLM-free</strong> engine scores each holding Trim / Review / Hold from concentration (weight + HHI), drawdown, and broker mix. An optional BYOK AI layer only <em>narrates</em> it.</p>
+            <p class="teach"><b>Concept to teach</b> Deterministic core, AI as a layer — compute the consequential number defensibly; use the model to explain, never to decide.</p>
+          </div>
+
+          <div class="card">
+            <div class="cardtop"><h4>Advisor RAG</h4><span class="tag">services/ai_advisor.py</span></div>
+            <p class="prob">A generic LLM advisor gives generic advice, ungrounded in anything the platform actually knows.</p>
+            <p class="mech">When a user describes a thesis, the advisor <strong>retrieves</strong> the most relevant published commons strategies (tickers weighted 2×) and injects them as few-shot context.</p>
+            <p class="teach"><b>Concept to teach</b> Retrieval-augmented generation — every strategy published to the commons makes the advisor smarter. A compounding data moat.</p>
+          </div>
+
+        </div>
+      </section>
+
+      <section id="security">
+        <div class="sec-head"><div class="sec-num">06</div><h2>Security architecture</h2></div>
+        <p>A checklist you can defend line by line.</p>
+        <div class="sec-list">
+          <div class="sec-row"><div class="lbl">Access token</div><div class="desc">RS256 JWT · 15-min expiry · <b>user_id + tenant_id + role</b> (HS256 dev fallback)</div></div>
+          <div class="sec-row"><div class="lbl">Refresh token</div><div class="desc">32-byte random · SHA-256 hashed in DB · 30-day · <b>rotated on use</b>, reuse-detected</div></div>
+          <div class="sec-row"><div class="lbl">Action tokens</div><div class="desc">Stateless signed JWTs. The reset link embeds a hash of the current password, so it <b>self-invalidates</b> the instant the password changes</div></div>
+          <div class="sec-row"><div class="lbl">Login OTPs</div><div class="desc">Only <b>sha256(code)</b> stored · single-use · attempt-capped · resend-throttled</div></div>
+          <div class="sec-row"><div class="lbl">Multi-tenancy</div><div class="desc">Every query carries <b>WHERE tenant_id = $N</b> — enforced in BaseRepo, structurally impossible to skip</div></div>
+          <div class="sec-row"><div class="lbl">Broker keys</div><div class="desc"><b>HKDF + Fernet</b> envelope encryption at rest · decrypted in memory only</div></div>
+          <div class="sec-row"><div class="lbl">Code sandbox</div><div class="desc">RestrictedPython · str-subclass guard · format denylist · iter-DoS removed · <b>exec timeout</b></div></div>
+          <div class="sec-row"><div class="lbl">LLM access</div><div class="desc">Strict BYOK · founder-only platform-key fallback gated by a <b>timing-safe</b> email compare</div></div>
+        </div>
+      </section>
+
+      <section id="glossary">
+        <div class="sec-head"><div class="sec-num">07</div><h2>Quant glossary</h2></div>
+        <p>Every finance term you'd need to teach the system — one sentence each.</p>
+        <div class="gloss">
+          <div class="gitem"><dt>Notional</dt><dd>The cash value of an order or position (qty × price); risk limits are expressed in it.</dd></div>
+          <div class="gitem"><dt>Slippage</dt><dd>The gap between the price you expected and the price you got — markets move between decision and fill.</dd></div>
+          <div class="gitem"><dt>Market impact</dt><dd>Your own order moves the price against you; a fill is capped at ~10% of a bar's volume (Almgren–Chriss).</dd></div>
+          <div class="gitem"><dt>Gap fill</dt><dd>When a market opens far from the prior close, a stop fills at the gapped open — not the price it “should” have.</dd></div>
+          <div class="gitem"><dt>Sharpe <span class="ac">/ Sortino</span></dt><dd>Return per unit of volatility. Sortino penalizes only <em>downside</em> volatility — upside swings aren't “risk.”</dd></div>
+          <div class="gitem"><dt>Max drawdown</dt><dd>The largest peak-to-trough drop in the equity curve — the worst pain an investor would have felt.</dd></div>
+          <div class="gitem"><dt>Calmar</dt><dd>CAGR ÷ max drawdown — return measured against worst-case pain.</dd></div>
+          <div class="gitem"><dt>Profit factor</dt><dd>Gross profit ÷ gross loss; above 1 means the wins outweigh the losses.</dd></div>
+          <div class="gitem"><dt>In- vs out-of-sample</dt><dd>Measured on data you fit to (easy to curve-fit, near worthless) vs. data the strategy never saw (the real test).</dd></div>
+          <div class="gitem"><dt>Survivorship bias</dt><dd>Judging from only the winners — which massively overstates expected performance.</dd></div>
+          <div class="gitem"><dt>XIRR</dt><dd>The money-weighted return across irregular cash flows (monthly SIPs at different prices), solved numerically.</dd></div>
+          <div class="gitem"><dt>HHI</dt><dd>Sum of squared weights — a concentration measure. One holding at 100% = 1.0 (dangerous); many equal = near 0.</dd></div>
+          <div class="gitem"><dt>SIP / SWP</dt><dd>Systematic Investment Plan (invest on a schedule) / Systematic Withdrawal Plan (the retirement reverse).</dd></div>
+          <div class="gitem"><dt>Monte Carlo / GBM</dt><dd>Thousands of simulated price paths give a <em>distribution</em> of outcomes (P10/P50/P90), not one false number.</dd></div>
+        </div>
+      </section>
+
+      <section id="explain">
+        <div class="sec-head"><div class="sec-num">08</div><h2>How to explain it</h2></div>
+        <p>Three ready-made scripts, for three rooms.</p>
+        <div class="scripts">
+          <details class="script" open>
+            <summary><span>60 seconds <span class="who">· an investor at a party</span></span><span class="arw">▸</span></summary>
+            <div class="body">
+              <p class="quote">“AlphaSwarm is an AI quant team in a browser tab. You describe a trading strategy in plain English, the AI writes and honestly backtests the code, and it trades it through <em>your own</em> brokerage — we never touch your money. Because we hold neither the money nor the AI key, the whole thing is fundable by one person and free at the base tier. We only charge to go live and take a small cut of copied capital.”</p>
+            </div>
+          </details>
+          <details class="script">
+            <summary><span>5 minutes <span class="who">· a technical hire</span></span><span class="arw">▸</span></summary>
+            <div class="body">
+              <p>Walk the four planes: a stateless Next.js frontend, a fast FastAPI control plane that never runs a trading loop, isolated Celery workers that do, Postgres + Redis underneath. Then the two flows: NL → validated Python → honest backtest → gated live deployment; and a creator's signal fanning out to hundreds of <strong>independent</strong> broker accounts.</p>
+              <p>Land on the three pillars — the un-bypassable risk gate, the honest backtester, and the out-of-sample commons.</p>
+            </div>
+          </details>
+          <details class="script">
+            <summary><span>Whiteboard <span class="who">· a systems interview</span></span><span class="arw">▸</span></summary>
+            <div class="body">
+              <p>Draw the four planes; stress the web-tier / worker-tier split and <em>why</em> — a slow strategy can't block a dashboard request. Then the order path: intent → <code>verify_order_intent()</code> (single choke point, fails closed) → advisory-locked execution → broker.</p>
+              <p>Explain the TOCTOU race and the <code>pg_advisory_xact_lock</code> fix. Finish on tenant isolation in <code>BaseRepo</code> and BYOB/BYOK as the regulatory + cost moat.</p>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <footer>
+        <p>This page is the presentation layer over the full engineering handbook — the source-traceable version, with per-subsystem file paths, the complete migration story, and the bug postmortems, lives in the repo.</p>
+        <div class="flinks">
+          <a class="flink" href="https://github.com/Algo-Ankit/AlphaSwarm" target="_blank" rel="noopener"><span class="ar">▸</span> github.com/Algo-Ankit/AlphaSwarm</a>
+          <a class="flink" href="https://github.com/Algo-Ankit/AlphaSwarm/blob/main/AlphaSwarm_The_Definitive_Guide.md" target="_blank" rel="noopener"><span class="ar">▸</span> The Definitive Handbook</a>
+          <a class="flink" href="https://github.com/Algo-Ankit/AlphaSwarm/blob/main/README.md" target="_blank" rel="noopener"><span class="ar">▸</span> README</a>
+        </div>
+        <p style="font-family:var(--mono);font-size:12px;color:var(--faint)">Built by Ankit Anand Singh · migrations 0001 → 0014 · MIT</p>
+      </footer>
+    </main>
+  </div>
+</div>
+
+<button class="toggle" id="tt" aria-label="Toggle light and dark theme" title="Toggle theme">◐</button>
+
+<script>
+  // Theme toggle
+  const root=document.documentElement, btn=document.getElementById('tt');
+  btn.addEventListener('click',()=>{
+    const cur=root.getAttribute('data-theme')
+      || (matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+    root.setAttribute('data-theme', cur==='dark'?'light':'dark');
+  });
+
+  // Scrollspy for the TOC
+  const links=[...document.querySelectorAll('nav.toc a')];
+  const map=new Map(links.map(a=>[a.getAttribute('href').slice(1),a]));
+  const obs=new IntersectionObserver((entries)=>{
+    entries.forEach(e=>{
+      if(e.isIntersecting){
+        links.forEach(l=>l.classList.remove('active'));
+        const a=map.get(e.target.id); if(a)a.classList.add('active');
+      }
+    });
+  },{rootMargin:'-45% 0px -50% 0px',threshold:0});
+  document.querySelectorAll('main section[id]').forEach(s=>obs.observe(s));
+</script>
