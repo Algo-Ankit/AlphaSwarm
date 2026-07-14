@@ -1,0 +1,94 @@
+name: CD
+
+# Builds the backend + frontend container images and publishes them to the
+# GitHub Container Registry (ghcr.io) on every push to main and on version tags.
+# Authenticates with the built-in GITHUB_TOKEN — no extra secrets required.
+#
+# Pull the published images on your server with:
+#   docker pull ghcr.io/algo-ankit/alphaswarm-api:latest
+#   docker pull ghcr.io/algo-ankit/alphaswarm-web:latest
+# Tag a release (v1.2.3) to also get immutable semver-tagged images.
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false   # never cancel an in-flight publish
+
+jobs:
+  build-push:
+    name: Build & push ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write          # required to push to GHCR
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: alphaswarm-api
+            context: .
+            dockerfile: ./Dockerfile
+          - image: alphaswarm-web
+            context: ./frontend
+            dockerfile: ./frontend/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags & labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # GHCR image names must be lowercase.
+          images: ghcr.io/algo-ankit/${{ matrix.image }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build & push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── OPTIONAL: deploy to a server after images are published ─────────────────
+  # Fill in the repo secrets (Settings → Secrets and variables → Actions) and
+  # remove the `if: false` guard to enable. Assumes docker-compose.prod.yml on
+  # the host references the ghcr.io images above.
+  #
+  # deploy:
+  #   name: Deploy to prod host
+  #   needs: build-push
+  #   if: false && github.ref == 'refs/heads/main'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: SSH & pull latest images
+  #       uses: appleboy/ssh-action@v1
+  #       with:
+  #         host: ${{ secrets.DEPLOY_HOST }}
+  #         username: ${{ secrets.DEPLOY_USER }}
+  #         key: ${{ secrets.DEPLOY_SSH_KEY }}
+  #         script: |
+  #           cd /opt/alphaswarm
+  #           docker compose -f docker-compose.prod.yml pull
+  #           docker compose -f docker-compose.prod.yml up -d
