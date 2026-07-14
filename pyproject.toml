@@ -28,3 +28,7 @@ ignore = [
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-q"
+# Put the repo root on sys.path so `import app...` resolves no matter how pytest
+# is invoked (`pytest` vs `python -m pytest`). Without this, a bare `pytest` in
+# CI can't import the app package (there is no conftest.py or installed package).
+pythonpath = ["."]
