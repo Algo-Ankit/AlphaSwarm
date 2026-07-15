@@ -1,0 +1,153 @@
+# AlphaSwarm — dependency lock (pins for reproducible installs)
+#
+# WHY: requirements.txt uses open ">=" floors, so every CI run and Docker build
+# used to resolve to whatever was newest on PyPI that day. One bad upstream
+# release then broke the pipeline non-deterministically (this is exactly what
+# failed CI on 2026-07-09). This file pins the full resolved dependency graph to
+# a known-good set (verified: 121/121 tests pass) so installs are reproducible.
+#
+# USAGE: always installed as a constraints file, never on its own:
+#   pip install -r requirements.txt -c constraints.txt
+#
+# HOW TO UPDATE (do this deliberately, not incidentally):
+#   1. pip install -r requirements.txt        # in a clean venv, no -c
+#   2. run the test suite (pytest) — must stay green
+#   3. pip freeze | sort > constraints.txt    # then re-add this header
+#
+# Generated from Python 3.13; every pinned version also ships cp312/cp311 wheels,
+# so it is safe for the 3.12 runtime (Dockerfile) and the CI matrix.
+
+Deprecated==1.3.1
+Mako==1.3.12
+MarkupSafe==3.0.3
+PyJWT==2.13.0
+PyYAML==6.0.3
+Pygments==2.20.0
+RestrictedPython==8.4
+SQLAlchemy==2.0.51
+Werkzeug==3.1.8
+agent-framework-core==1.11.0
+agent-framework-openai==1.10.1
+aiohappyeyeballs==2.7.1
+aiohttp-retry==2.9.1
+aiohttp==3.14.1
+aiosignal==1.4.0
+alembic==1.18.5
+alpaca-py==0.43.5
+amqp==5.3.1
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==4.14.2
+asyncpg==0.31.0
+attrs==26.1.0
+bcrypt==5.0.0
+beautifulsoup4==4.15.0
+billiard==4.2.4
+celery==5.6.3
+certifi==2026.6.17
+cffi==2.1.0
+charset-normalizer==3.4.9
+click-didyoumean==0.3.1
+click-plugins==1.1.1.2
+click-repl==0.3.0
+click==8.4.2
+cmdstanpy==1.3.0
+colorama==0.4.6
+contourpy==1.3.3
+cryptography==49.0.0
+curl_cffi==0.15.0
+cycler==0.12.1
+distro==1.9.0
+dnspython==2.8.0
+email-validator==2.3.0
+fastapi==0.139.0
+fonttools==4.63.0
+frozenlist==1.8.0
+greenlet==3.5.3
+h11==0.16.0
+holidays==0.100
+httpcore==1.0.9
+httptools==0.8.0
+httpx==0.28.1
+idna==3.18
+importlib_resources==7.1.0
+jiter==0.16.0
+joblib==1.5.3
+kiwisolver==1.5.0
+kombu==5.6.2
+limits==5.8.0
+llvmlite==0.44.0
+markdown-it-py==4.2.0
+matplotlib==3.11.0
+mdurl==0.1.2
+msgpack==1.2.1
+multidict==6.7.1
+multitasking==0.0.13
+narwhals==2.24.0
+newsapi-python==0.2.7
+numba==0.61.2
+numpy==2.2.6
+openai==2.45.0
+opentelemetry-api==1.43.0
+orjson==3.11.9
+packaging==26.2
+pandas-ta==0.4.71b0
+pandas==3.0.3
+patsy==1.0.2
+peewee==4.2.2
+pillow==12.3.0
+platformdirs==4.10.0
+prompt_toolkit==3.0.52
+propcache==0.5.2
+prophet==1.3.0
+protobuf==7.35.1
+pycparser==3.0
+pydantic-settings==2.14.2
+pydantic==2.13.4
+pydantic_core==2.46.4
+pyflakes==3.4.0
+pyparsing==3.3.2
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.2
+python-http-client==3.3.7
+python-multipart==0.0.32
+pytz==2026.2
+razorpay==2.0.1
+redis==6.4.0
+regex==2026.7.10
+requests==2.34.2
+rich==15.0.0
+scikit-learn==1.9.0
+scipy==1.18.0
+sendgrid==6.12.5
+sentry-sdk==2.65.0
+six==1.17.0
+slowapi==0.1.10
+sniffio==1.3.1
+soupsieve==2.8.4
+sseclient-py==1.9.0
+stanio==0.5.1
+starlette==1.3.1
+statsmodels==0.14.6
+stripe==15.3.0
+tenacity==9.1.4
+threadpoolctl==3.6.0
+tiktoken==0.13.0
+tqdm==4.68.4
+twilio==9.10.9
+typing-inspection==0.4.2
+typing_extensions==4.16.0
+tzdata==2026.3
+tzlocal==5.4.4
+upstox-python-sdk==2.28.0
+urllib3==2.7.0
+uuid==1.30
+uvicorn==0.51.0
+vine==5.1.0
+watchfiles==1.2.0
+wcwidth==0.8.2
+websocket-client==1.9.0
+websockets==16.1
+wrapt==2.2.2
+yarl==1.24.2
+yfinance==1.5.1

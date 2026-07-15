@@ -24,7 +24,7 @@ SIGNAL_HOLD = "Hold"
 _CONCENTRATION_WARN = 0.20   # one holding > 20% of net worth
 _CONCENTRATION_HIGH = 0.35   # one holding > 35% is a real single-name risk
 _DRAWDOWN_REVIEW = -20.0     # a position down > 20% deserves a review
-_BROKER_CONCENTRATION = 0.70  # > 70% at one broker = platform/custodian risk
+_BROKER_CONCENTRATION = 0.70  # > 70% at one broker = single-broker concentration risk
 _ASSET_CONCENTRATION = 0.80  # > 80% in one asset class = undiversified
 
 
@@ -150,7 +150,7 @@ def analyze_holdings(holdings: list[dict]) -> dict:
         )
     if top_broker_pct >= _BROKER_CONCENTRATION * 100:
         verdict_bits.append(
-            f"{top_broker_pct:.0f}% of assets sit at a single broker — spread custodian risk"
+            f"{top_broker_pct:.0f}% of assets sit at a single broker — spread across more brokers"
         )
     if top_class_pct >= _ASSET_CONCENTRATION * 100:
         verdict_bits.append(
