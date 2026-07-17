@@ -16,7 +16,9 @@ frontend/.next/
 frontend/node_modules/
 frontend/next-env.d.ts
 frontend/tsconfig.tsbuildinfo
-frontend/package-lock.json
+# package-lock.json is deliberately NOT ignored: `npm ci` requires it, and the
+# CD job's web image build fails without it. It also pins the dependency tree
+# the same way constraints.txt does for the API.
 
 # Celery Beat runtime schedule DB (not source)
 celerybeat-schedule
