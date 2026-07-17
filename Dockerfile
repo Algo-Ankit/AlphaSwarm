@@ -42,8 +42,7 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
 
 # 1 uvicorn worker per container.
 # Scale horizontally via docker compose --scale api=N behind nginx.
-CMD ["uvicorn", "app.main:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8000", \
-     "--loop", "uvloop", \
-     "--no-access-log"]
+# entrypoint.sh runs `alembic upgrade head` before exec'ing uvicorn, so any
+# runtime that starts the image with no command override (Render, plain
+# `docker run`) still migrates. Worker/beat override this with their own command.
+CMD ["./entrypoint.sh"]

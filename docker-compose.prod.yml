@@ -3,7 +3,9 @@
 # Start:   docker compose -f docker-compose.prod.yml up -d
 # Scale:   docker compose -f docker-compose.prod.yml up -d --scale api=3
 # Logs:    docker compose -f docker-compose.prod.yml logs -f api
-# Migrate: docker compose -f docker-compose.prod.yml exec api alembic upgrade head
+#
+# Migrations run automatically: the api image's CMD is entrypoint.sh, which
+# runs `alembic upgrade head` before starting uvicorn.
 
 services:
 
