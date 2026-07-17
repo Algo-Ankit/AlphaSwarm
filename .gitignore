@@ -24,8 +24,10 @@ frontend/tsconfig.tsbuildinfo
 celerybeat-schedule
 celerybeat-schedule.*
 
-# Local scratch: one-off repros, diffs, and debug screenshots
+# Local scratch: one-off repros, diffs, debug screenshots, and dev scripts
 _pw_repro*.mjs
 _pw_shots/
 diff_output.txt
+diff_summary.py
 scratch_*.py
+create_github_issues.py
