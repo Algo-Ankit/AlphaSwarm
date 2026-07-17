@@ -1,0 +1,4 @@
+# entrypoint.sh is the api image's CMD and executes via its shebang, which a
+# CRLF checkout breaks (`/bin/sh^M: not found`). Keep shell scripts LF on every
+# platform regardless of the local core.autocrlf setting.
+*.sh text eol=lf

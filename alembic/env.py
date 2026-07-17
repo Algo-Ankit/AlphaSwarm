@@ -12,6 +12,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 config = context.config
 
+# Arbitrary but fixed key: every replica must ask for the same lock.
+ALEMBIC_LOCK_ID = 727001
+
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
@@ -36,6 +39,14 @@ def run_migrations_offline() -> None:
 def do_run_migrations(connection: Connection) -> None:
     context.configure(connection=connection, target_metadata=None)
     with context.begin_transaction():
+        # Every api container runs `alembic upgrade head` at startup, and prod
+        # scales to several replicas, so without this two of them can both read
+        # the old revision and apply the same DDL. The lock is held for the
+        # migration transaction and released on commit; late replicas then wake
+        # up, re-read the version table, and find themselves already at head.
+        connection.exec_driver_sql(
+            f"SELECT pg_advisory_xact_lock({ALEMBIC_LOCK_ID})"
+        )
         context.run_migrations()
 
 

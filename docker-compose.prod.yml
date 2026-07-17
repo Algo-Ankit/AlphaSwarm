@@ -3,7 +3,9 @@
 # Start:   docker compose -f docker-compose.prod.yml up -d
 # Scale:   docker compose -f docker-compose.prod.yml up -d --scale api=3
 # Logs:    docker compose -f docker-compose.prod.yml logs -f api
-# Migrate: docker compose -f docker-compose.prod.yml exec api alembic upgrade head
+#
+# Migrations run automatically: the api image's CMD is entrypoint.sh, which
+# runs `alembic upgrade head` before starting uvicorn.
 
 services:
 
@@ -35,8 +37,8 @@ services:
       dockerfile: Dockerfile
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://alphaswarm:alphaswarm@postgres:5432/alphaswarm
-      DATABASE_SYNC_URL: postgresql://alphaswarm:alphaswarm@postgres:5432/alphaswarm
+      DATABASE_URL: postgresql+asyncpg://alphaswarm:${POSTGRES_PASSWORD:-alphaswarm_change_me}@postgres:5432/alphaswarm
+      DATABASE_SYNC_URL: postgresql://alphaswarm:${POSTGRES_PASSWORD:-alphaswarm_change_me}@postgres:5432/alphaswarm
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
@@ -63,8 +65,8 @@ services:
       --loglevel=info
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://alphaswarm:alphaswarm@postgres:5432/alphaswarm
-      DATABASE_SYNC_URL: postgresql://alphaswarm:alphaswarm@postgres:5432/alphaswarm
+      DATABASE_URL: postgresql+asyncpg://alphaswarm:${POSTGRES_PASSWORD:-alphaswarm_change_me}@postgres:5432/alphaswarm
+      DATABASE_SYNC_URL: postgresql://alphaswarm:${POSTGRES_PASSWORD:-alphaswarm_change_me}@postgres:5432/alphaswarm
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
