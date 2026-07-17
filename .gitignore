@@ -13,7 +13,7 @@ venv/
 
 # Frontend build artifacts
 frontend/.next/
-frontend/node_modules/
+node_modules/
 frontend/next-env.d.ts
 frontend/tsconfig.tsbuildinfo
 # package-lock.json is deliberately NOT ignored: `npm ci` requires it, and the
@@ -23,3 +23,11 @@ frontend/tsconfig.tsbuildinfo
 # Celery Beat runtime schedule DB (not source)
 celerybeat-schedule
 celerybeat-schedule.*
+
+# Local scratch: one-off repros, diffs, debug screenshots, and dev scripts
+_pw_repro*.mjs
+_pw_shots/
+diff_output.txt
+diff_summary.py
+scratch_*.py
+create_github_issues.py
