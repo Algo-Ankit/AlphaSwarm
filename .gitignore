@@ -31,3 +31,6 @@ diff_output.txt
 diff_summary.py
 scratch_*.py
 create_github_issues.py
+
+# Agent runtime locks
+.claude/*.lock

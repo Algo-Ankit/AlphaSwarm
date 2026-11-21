@@ -52,7 +52,7 @@ You type that. AlphaSwarm's AI generates a validated, sandboxed Python strategy,
 
 > 📚 **Want to actually understand the system — enough to teach or pitch it?**
 > - 🖥️ **[Read the visual documentation site →](https://algo-ankit.github.io/AlphaSwarm/)** — a designed, single-page tour of the architecture (live once GitHub Pages is enabled; source in [`docs/index.html`](docs/index.html)).
-> - 📖 **[The Definitive Handbook](AlphaSwarm_The_Definitive_Guide.md)** — how every subsystem works under the hood, the finance concepts explained in plain English, end-to-end data-flow walkthroughs, and ready-made 60-second / 5-minute / whiteboard explanations.
+> - 📖 **[The Definitive Handbook](docs/AlphaSwarm_The_Definitive_Guide.md)** — how every subsystem works under the hood, the finance concepts explained in plain English, end-to-end data-flow walkthroughs, and ready-made 60-second / 5-minute / whiteboard explanations.
 
 ---
 
@@ -403,14 +403,16 @@ AlphaSwarm/
 │                      # broker crypto, BYOK founder gate, no-fund-custody, copy trading…
 ├── .github/workflows/ # CI: lint (ruff) + type-check + tests
 ├── docker-compose.yml · docker-compose.prod.yml · Dockerfile · nginx/
-├── ARCHITECTURE.md · PROJECT_JOURNEY.md · schema.sql
+├── docs/              # ARCHITECTURE.md, HANDOVER.md, DECISIONS.md, PROJECT_JOURNEY.md,
+│                      # AlphaSwarm_The_Definitive_Guide.md, QUANT_MATH.md, index.html
+└── schema.sql
 ```
 
 ---
 
 ## 🤝 Contributing
 
-Read [`ARCHITECTURE.md`](ARCHITECTURE.md) before writing code. Hard rules:
+Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before writing code. Hard rules:
 
 - **No LangChain** — Microsoft Agent Framework only.
 - **No NSEpy** — yfinance / Upstox / Zerodha only.
