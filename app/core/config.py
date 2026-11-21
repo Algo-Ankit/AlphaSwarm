@@ -32,26 +32,15 @@ class Settings(BaseSettings):
     celery_result_backend: str = "redis://localhost:6379/1"
     celery_task_always_eager: bool = False
 
-    # AI — news sentiment classification (app/services/news_intel.py only)
-    anthropic_api_key: str = ""
+    # AI — Google Gemini default & OpenAI-compatible provider
+    gemini_api_key: str = ""
+    anthropic_api_key: str = ""  # legacy fallback
+    llm_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    llm_api_key: str = ""
+    llm_model: str = "gemini-2.5-flash"
 
-    # AI — AutoGen StrategyBuilderAgent, via an OpenAI-compatible client.
-    # Points at a free local model server (Ollama, LM Studio) or a free-tier
-    # proxy (e.g. Groq) — no paid Anthropic key needed to generate strategies.
-    # Default targets Ollama on the HOST machine: api/worker run inside Docker,
-    # where "localhost" is the container itself — host.docker.internal reaches
-    # the Windows/Mac Docker Desktop host (set llm_base_url in .env to override).
-    #   Ollama (host):  llm_base_url=http://host.docker.internal:11434/v1, llm_api_key=ollama
-    #   LM Studio:      llm_base_url=http://host.docker.internal:1234/v1,  llm_api_key=lm-studio
-    #   Groq free tier: llm_base_url=https://api.groq.com/openai/v1, llm_api_key=<free Groq key>, llm_model=llama-3.1-8b-instant
-    llm_base_url: str = "http://host.docker.internal:11434/v1"
-    llm_api_key: str = "ollama"
-    llm_model: str = "llama3.1"
-
-    # Strict-BYOK exemption. The ONLY account allowed to fall back to the platform
-    # llm_api_key when it hasn't added its own key. Sourced from .env (never
-    # hard-coded, never returned by any API endpoint, never logged). Empty = no
-    # exemption (strict BYOK applies to everyone, including the founder).
+    # Strict-BYOK exemption. When gemini_api_key is unset, only the founder account
+    # is allowed to fall back to the platform llm_api_key.
     founder_email: str = ""
 
     # Alpaca

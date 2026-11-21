@@ -129,21 +129,37 @@ async def _fetch_alpha_vantage(symbol: str) -> list[dict]:
 
 async def _classify_batch(symbol: str, articles: list[dict]) -> list[dict]:
     """
-    Send all headlines in a single Claude Haiku call.
-    Raises RuntimeError if ANTHROPIC_API_KEY is not configured.
+    Send all headlines in a single LLM call (Gemini or OpenAI-compatible endpoint).
+    Falls back gracefully to neutral sentiment if no LLM key is configured.
     Raises IntelligenceServiceError if the API call fails or returns malformed output.
     """
-    if not _settings.anthropic_api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY is not configured — cannot classify news sentiment")
     if not articles:
         return []
 
-    try:
-        import anthropic
-    except ModuleNotFoundError:
-        raise RuntimeError("anthropic package is not installed — run: pip install anthropic")
+    api_key = getattr(_settings, "gemini_api_key", "") or _settings.llm_api_key
+    base_url = (
+        "https://generativelanguage.googleapis.com/v1beta/openai/"
+        if getattr(_settings, "gemini_api_key", "")
+        else _settings.llm_base_url
+    )
+    model = (
+        getattr(_settings, "llm_model", "gemini-2.5-flash") or "gemini-2.5-flash"
+    )
 
-    client = anthropic.AsyncAnthropic(api_key=_settings.anthropic_api_key)
+    if not api_key:
+        logger.info("News sentiment: No LLM key configured — returning neutral sentiment.")
+        return [
+            {
+                **a,
+                "sentiment": "neutral",
+                "category": "other",
+            }
+            for a in articles
+        ]
+
+    from openai import APIError, AsyncOpenAI
+
+    client = AsyncOpenAI(api_key=api_key, base_url=base_url)
     headline_list = "\n".join(
         f"{i + 1}. {a['headline']} (Summary: {a.get('summary', 'N/A')})"
         for i, a in enumerate(articles)
@@ -158,27 +174,28 @@ async def _classify_batch(symbol: str, articles: list[dict]) -> list[dict]:
         '[{"sentiment": "...", "category": "..."}, ...]'
     )
     try:
-        msg = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
+        msg = await client.chat.completions.create(
+            model=model,
             max_tokens=512,
             messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
         )
-    except anthropic.APIError as exc:
+    except APIError as exc:
         raise IntelligenceServiceError(
-            f"Claude Haiku sentiment classification failed: {exc}"
+            f"LLM sentiment classification failed: {exc}"
         ) from exc
 
-    text = msg.content[0].text.strip()
+    text = (msg.choices[0].message.content or "").strip()
     start = text.find("[")
     end = text.rfind("]") + 1
     if start == -1 or end <= 0:
         raise IntelligenceServiceError(
-            f"Haiku returned malformed JSON (no array found): {text[:200]}"
+            f"LLM returned malformed JSON (no array found): {text[:200]}"
         )
     try:
         classifications = json.loads(text[start:end])
     except json.JSONDecodeError as exc:
-        raise IntelligenceServiceError(f"Haiku response is not valid JSON: {exc}") from exc
+        raise IntelligenceServiceError(f"LLM response is not valid JSON: {exc}") from exc
 
     result = []
     for i, article in enumerate(articles):

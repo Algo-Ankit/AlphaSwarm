@@ -151,3 +151,35 @@ def test_access_token_is_not_a_valid_state():
 
     access = create_access_token(user_id="u", tenant_id="t", email="a@b.c", role="owner")
     assert not verify_state_token(access, "upstox-login")
+
+
+@pytest.mark.asyncio
+async def test_news_sentiment_unconfigured_key_returns_neutral():
+    """When no LLM key is configured, news classification gracefully returns neutral sentiment without crashing."""
+    from app.services.news_intel import _classify_batch
+
+    articles = [
+        {"headline": "Tech Corp announces quarterly earnings", "summary": "Growth in revenue"},
+        {"headline": "Market volatility rises amid inflation data", "summary": "Fed comments"},
+    ]
+    result = await _classify_batch(symbol="AAPL", articles=articles)
+    assert len(result) == 2
+    for item in result:
+        assert item["sentiment"] == "neutral"
+        assert item["category"] == "other"
+
+
+def test_get_executor_passes_access_token_to_upstox():
+    """Upstox executor accepts access_token from get_executor factory."""
+    from app.services.execution import UpstoxExecutor, get_executor
+
+    executor = get_executor(
+        "upstox",
+        api_key="",
+        secret_key="",
+        paper=True,
+        access_token="test_oauth_access_token",
+    )
+    assert isinstance(executor, UpstoxExecutor)
+    assert executor._paper is True
+

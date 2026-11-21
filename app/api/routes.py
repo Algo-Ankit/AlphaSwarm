@@ -220,11 +220,6 @@ async def run_strategy(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
 
     version_id = record["current_version_id"]
-    run = await run_repo.create(
-        strategy_id=strategy_id,
-        version_id=version_id,
-        dry_run=request.dry_run,
-    )
 
     # asyncpg may return JSONB columns as str; parse defensively before dispatch
     import json as _json
@@ -261,6 +256,12 @@ async def run_strategy(
                     "Upgrade in Billing, or run this strategy in paper mode (dry_run=true)."
                 ),
             )
+
+    run = await run_repo.create(
+        strategy_id=strategy_id,
+        version_id=version_id,
+        dry_run=request.dry_run,
+    )
 
     try:
         task = execute_trading_strategy.apply_async(

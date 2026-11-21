@@ -198,7 +198,7 @@ async def _fetch_alpaca(
                     "Alpaca fetch failed for %s %s %s: %s", symbol, exchange, timeframe, exc
                 )
             else:
-                time.sleep(1)
+                await asyncio.sleep(1)
     return []
 
 
@@ -273,7 +273,7 @@ async def _fetch_yfinance(
                     "yfinance fetch failed for %s %s %s: %s", symbol, exchange, timeframe, exc
                 )
             else:
-                time.sleep(1)
+                await asyncio.sleep(1)
     return []
 
 

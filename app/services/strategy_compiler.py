@@ -76,14 +76,22 @@ async def compile_strategy_prompt(
             except ValueError:
                 logger.warning("LLM config %s key decryption failed", request.llm_config_id)
 
-    # 2. No usable user key → platform fallback is FOUNDER-ONLY (strict BYOK for all others).
+    # 2. No usable user key → platform fallback:
+    # If gemini_api_key is set, provide platform Gemini model to all users out of the box.
+    # Otherwise fallback to founder-only platform key (strict BYOK for all others).
     if not api_key:
-        if not _is_founder(user_email, settings.founder_email):
+        if getattr(settings, "gemini_api_key", ""):
+            logger.info("Using default platform Gemini model for user %s", user_email or "anon")
+            api_key = settings.gemini_api_key
+            base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+            model = getattr(settings, "llm_model", "gemini-2.5-flash") or "gemini-2.5-flash"
+        elif _is_founder(user_email, settings.founder_email):
+            logger.info("Founder account — using platform LLM key fallback.")
+            api_key = settings.llm_api_key
+            base_url = settings.llm_base_url
+            model = settings.llm_model
+        else:
             raise ValueError(_STRICT_BYOK_MESSAGE)
-        logger.info("Founder account — using platform LLM key fallback.")
-        api_key = settings.llm_api_key
-        base_url = settings.llm_base_url
-        model = settings.llm_model
 
     try:
         code = await build_strategy_async(

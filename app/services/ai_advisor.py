@@ -93,12 +93,21 @@ async def _resolve_byok(
                 logger.warning("LLM config %s key decryption failed", row["id"])
 
     if not api_key:
-        if not _is_founder(current_user.email, settings.founder_email):
+        if getattr(settings, "gemini_api_key", ""):
+            logger.info(
+                "Using default platform Gemini model for advisor query by user %s",
+                current_user.email or "anon",
+            )
+            api_key = settings.gemini_api_key
+            base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+            model = getattr(settings, "llm_model", "gemini-2.5-pro") or "gemini-2.5-pro"
+        elif _is_founder(current_user.email, settings.founder_email):
+            logger.info("Founder account — using platform LLM key fallback for advisor.")
+            api_key = settings.llm_api_key
+            base_url = settings.llm_base_url
+            model = settings.llm_model
+        else:
             raise ValueError(_STRICT_BYOK_MESSAGE)
-        logger.info("Founder account — using platform LLM key fallback for advisor.")
-        api_key = settings.llm_api_key
-        base_url = settings.llm_base_url
-        model = settings.llm_model
 
     return api_key, base_url, model
 

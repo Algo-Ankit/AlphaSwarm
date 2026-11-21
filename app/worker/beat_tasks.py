@@ -75,30 +75,89 @@ async def _snapshot_portfolio_async() -> None:
                     """,
                     tenant_id,
                 )
-                # Today's realized P&L
+                # Today's realized P&L from orders filled today (or positions updated today)
                 realized_row = await pool.fetchrow(
                     """
                     SELECT COALESCE(SUM(realized_pnl), 0) AS realized
-                    FROM positions
+                    FROM orders
                     WHERE tenant_id = $1
+                      AND filled_at >= date_trunc('day', now())
+                      AND risk_status = 'approved'
                     """,
                     tenant_id,
                 )
-                # Use broker account equity if available; fall back to 0
                 open_pnl = Decimal(str(pnl_row["open_pnl"] or 0))
                 realized_today = Decimal(str(realized_row["realized"] or 0))
                 active = int(pnl_row["active_strategies"] or 0)
 
-                total_equity = float(open_pnl + realized_today)
+                # Query broker account equity & cash balance if available
+                broker_row = await pool.fetchrow(
+                    """
+                    SELECT * FROM broker_connections
+                    WHERE tenant_id = $1 AND is_active = true
+                    ORDER BY updated_at DESC LIMIT 1
+                    """,
+                    tenant_id,
+                )
+                cash_balance = None
+                broker_equity = None
+                if broker_row:
+                    try:
+                        from app.services.broker_crypto import decrypt_key
+                        from app.services.execution import get_executor
+
+                        access_token = (
+                            decrypt_key(broker_row["access_token"])
+                            if broker_row.get("access_token")
+                            else None
+                        )
+                        api_key = (
+                            decrypt_key(broker_row["key_encrypted"])
+                            if broker_row.get("key_encrypted")
+                            else ""
+                        )
+                        secret_key = (
+                            decrypt_key(broker_row["secret_encrypted"])
+                            if broker_row.get("secret_encrypted")
+                            else ""
+                        )
+                        executor = get_executor(
+                            broker_row["broker"],
+                            api_key=api_key,
+                            secret_key=secret_key,
+                            paper=bool(broker_row["is_paper"]),
+                            access_token=access_token,
+                        )
+                        acct = await asyncio.to_thread(executor.get_account)
+                        if acct:
+                            if acct.get("cash") is not None:
+                                cash_balance = float(acct["cash"])
+                            if acct.get("equity") is not None:
+                                broker_equity = float(acct["equity"])
+                    except Exception as b_exc:
+                        logger.debug(
+                            "snapshot_portfolio: broker account fetch skipped for tenant %s: %s",
+                            tenant_id,
+                            b_exc,
+                        )
+
+                if broker_equity is not None:
+                    total_equity = broker_equity
+                elif cash_balance is not None:
+                    total_equity = cash_balance + float(open_pnl)
+                else:
+                    total_equity = float(open_pnl + realized_today)
+
                 snap = await pool.fetchrow(
                     """
                     INSERT INTO portfolio_snapshots
                         (tenant_id, total_equity, cash_balance, open_pnl, realized_pnl_today, active_strategies)
-                    VALUES ($1, $2, NULL, $3, $4, $5)
+                    VALUES ($1, $2, $3, $4, $5, $6)
                     RETURNING snapshot_time
                     """,
                     tenant_id,
                     total_equity,
+                    cash_balance,
                     float(open_pnl),
                     float(realized_today),
                     active,
@@ -306,11 +365,27 @@ async def _reconcile_positions_async() -> None:
                 # Route to the connection's actual broker (alpaca / upstox / …),
                 # not a hardcoded Alpaca. Unsupported / not-yet-implemented brokers
                 # raise inside get_executor / get_positions and are logged below.
+                access_token = (
+                    decrypt_key(row["access_token"])
+                    if row.get("access_token")
+                    else None
+                )
+                api_key = (
+                    decrypt_key(row["key_encrypted"])
+                    if row.get("key_encrypted")
+                    else ""
+                )
+                secret_key = (
+                    decrypt_key(row["secret_encrypted"])
+                    if row.get("secret_encrypted")
+                    else ""
+                )
                 executor = get_executor(
                     broker,
-                    api_key=decrypt_key(row["key_encrypted"]),
-                    secret_key=decrypt_key(row["secret_encrypted"]),
+                    api_key=api_key,
+                    secret_key=secret_key,
                     paper=bool(row["is_paper"]),
+                    access_token=access_token,
                 )
                 broker_positions = await asyncio.to_thread(executor.get_positions)
 
