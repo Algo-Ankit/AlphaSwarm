@@ -540,3 +540,125 @@ async def _recompute_commons_oos_async() -> None:
                 logger.warning("recompute_commons_oos: listing %s failed: %s", row["id"], exc)
     finally:
         await pool.close()
+
+
+@celery_app.task(name="app.worker.beat_tasks.poll_and_execute_active_strategies")
+def poll_and_execute_active_strategies():
+    """Poll and execute all active strategies on their timeframe cadence during open market sessions."""
+    asyncio.run(_poll_and_execute_active_strategies_async())
+
+
+async def _poll_and_execute_active_strategies_async() -> None:
+    import json as _json
+    from datetime import datetime, timezone
+
+    from app.db.repositories.runs import RunRepo
+    from app.domain.market_hours import get_session_status
+    from app.worker.tasks import execute_trading_strategy
+
+    now = datetime.now(timezone.utc)
+    pool = await _get_pool()
+    try:
+        active_strats = await pool.fetch(
+            """
+            SELECT s.*, t.subscription_status
+            FROM strategies s
+            JOIN tenants t ON s.tenant_id = t.id
+            WHERE s.status = 'active'
+            """
+        )
+        if not active_strats:
+            return
+
+        for strat in active_strats:
+            strategy_id = strat["id"]
+            tenant_id = strat["tenant_id"]
+            user_id = strat["owner_user_id"]
+            exchange = strat["exchange"] or "NASDAQ"
+            timeframe = (strat["timeframe"] or "1d").lower()
+            risk_raw = strat["risk_config"]
+            if isinstance(risk_raw, str):
+                try:
+                    risk_raw = _json.loads(risk_raw)
+                except Exception:
+                    risk_raw = {}
+            risk_cfg = risk_raw if isinstance(risk_raw, dict) else {}
+
+            # Timeframe cadence check (1m/5m/15m/1h/1d)
+            minute = now.minute
+            if "5m" in timeframe and minute % 5 != 0:
+                continue
+            if "15m" in timeframe and minute % 15 != 0:
+                continue
+            if ("1h" in timeframe or "60m" in timeframe) and minute != 0:
+                continue
+
+            # Market session check
+            session = get_session_status(exchange, now)
+            allowed_session = risk_cfg.get("trade_session", "regular_only")
+            if session == "closed":
+                continue
+            if allowed_session == "regular_only" and session != "open":
+                continue
+
+            # Determine dry_run: if paper_trading_only or subscription not active -> dry_run = True
+            from app.services.billing import is_active_status
+
+            paper_only = risk_cfg.get("paper_trading_only", True)
+            is_sub_active = is_active_status(strat.get("subscription_status"))
+            dry_run = paper_only or not is_sub_active
+
+            # Prevent duplicate in-flight run
+            in_flight = await pool.fetchval(
+                """
+                SELECT id FROM strategy_runs
+                WHERE strategy_id = $1 AND status IN ('queued', 'running')
+                LIMIT 1
+                """,
+                strategy_id,
+            )
+            if in_flight:
+                continue
+
+            # Create run record
+            run_repo = RunRepo(pool, tenant_id)
+            run = await run_repo.create(
+                strategy_id=strategy_id,
+                version_id=strat["current_version_id"],
+                dry_run=dry_run,
+            )
+
+            try:
+                task = execute_trading_strategy.apply_async(
+                    args=[
+                        str(strategy_id),
+                        str(tenant_id),
+                        str(user_id),
+                        str(run["id"]),
+                        dry_run,
+                        list(strat["symbols"]),
+                        str(strat.get("timeframe") or "1d"),
+                        risk_cfg,
+                    ],
+                    queue="trading_tasks",
+                )
+                await run_repo.mark_dispatched(run["id"], task.id)
+                logger.info(
+                    "poll_and_execute_active_strategies: dispatched run %s (dry_run=%s) for strategy %s",
+                    run["id"],
+                    dry_run,
+                    strat["name"],
+                )
+            except Exception as exc:
+                logger.warning(
+                    "poll_and_execute_active_strategies: dispatch failed for strategy %s: %s",
+                    strategy_id,
+                    exc,
+                )
+                try:
+                    await run_repo.mark_failed(run["id"], str(exc))
+                except Exception:
+                    pass
+    finally:
+        await pool.close()
+

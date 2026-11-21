@@ -297,7 +297,7 @@ function AddZerodhaForm({ onAdded, existing }: { onAdded: (c: BrokerConnection) 
             ) : (
               <form onSubmit={handleSaveKeys} className="space-y-4 pt-4">
                 <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                  Enter your Zerodha Kite API key &amp; secret, then you'll be redirected to authorise.
+                  Enter your Zerodha Kite API key &amp; secret, then you&apos;ll be redirected to authorise.
                 </p>
                 <div>
                   <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">API Key</label>

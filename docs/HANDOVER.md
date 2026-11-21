@@ -47,54 +47,49 @@
 
 ---
 
-## 3. Active Debug Backlog (Track 1 — Fix First)
+## 3. Critical Production Fixes (Track 1 — COMPLETED)
 
-1. **Celery `beat_tasks` queue unconsumed & missing Beat service in Compose:**
-   - `docker-compose.prod.yml` runs `worker` with `-Q trading_tasks` only — `beat_tasks` (`snapshot_portfolio`, `reconcile_positions`, `check_worker_heartbeats`, `recompute_commons_oos`, `charge_swarm_tax`, news/forecast refresh) never run.
-   - `docker-compose.yml` lacks a `beat` service and `-Q trading_tasks,beat_tasks`.
-   - `start_alphaswarm.bat` also passes `-Q trading_tasks` only.
-2. **Upstox reconciliation crashes (`app/worker/beat_tasks.py`):**
-   - `reconcile_positions` calls `get_executor(broker, api_key=..., secret_key=..., paper=...)` without `access_token`, failing for OAuth brokers like Upstox (and crashing if `key_encrypted`/`secret_encrypted` is absent).
-3. **Portfolio snapshots ignore broker equity & today's realized P&L (`app/worker/beat_tasks.py`):**
-   - `snapshot_portfolio` hardcodes `cash_balance = NULL`, sets `total_equity = open_pnl + realized_today`, and sums all-time `positions.realized_pnl` instead of today's realized P&L / broker equity.
-4. **News sentiment imports uninstalled `anthropic` (`app/services/news_intel.py`):**
-   - `_classify_batch` imports `anthropic`, which is not in `requirements.txt`, instead of using the OpenAI-compatible client / Gemini default / BYOK pattern used elsewhere.
-5. **Blocking `time.sleep(1)` inside async loops (`app/services/market_data.py`):**
-   - `_fetch_alpaca` and `_fetch_yfinance` call blocking `time.sleep(1)` inside `async def` retry loops instead of `await asyncio.sleep(1)`.
-6. **Orphaned `strategy_runs` rows on validation/billing rejection (`app/api/routes.py`):**
-   - `run_strategy` inserts a `strategy_runs` row before checking `paper_trading_only` (400) and active Quant Tier subscription (402), leaving stuck `queued` rows.
-
----
-
-## 4. Planned AI Upgrade (Gemini Default + Model Picker + BYOK)
-
-- **Platform Default:** Google Gemini (`gemini-2.5-flash` for ReAct strategy compilation and agent execution; `gemini-2.5-pro` for deep investment advisory) via Google's OpenAI-compatible endpoint (`https://generativelanguage.googleapis.com/v1beta/openai/`), natively supported by `agent_framework.openai.OpenAIChatClient`.
-- **Shared Platform Access:** Available out-of-the-box to all registered users via `.env` platform key with tenant rate-limiting, removing the founder-only barrier while keeping the product zero-friction.
-- **Model Selector UI:** Frontend dropdown across Strategy Builder, AI Advisor, and Settings to select Gemini models or custom endpoints.
-- **Full BYOK / BYOB Flexibility:** Retain full BYOK support in Settings where any user can bring their own API key and custom `base_url` (NVIDIA NIM / Nemotron, Groq, OpenRouter, local Ollama) for unthrottled runs.
+1. **Celery `beat_tasks` queue consumed & Beat service active:**
+   - Added `beat_tasks` queue to Celery workers in `docker-compose.yml`, `docker-compose.prod.yml`, and `start_alphaswarm.bat`.
+   - Added Celery Beat service container with persistent `beat_schedule` volume in Docker Compose.
+2. **Upstox & OAuth reconciliation fixed (`app/worker/beat_tasks.py`):**
+   - Decrypted and passed `access_token` to `get_executor` during `reconcile_positions`.
+3. **Portfolio snapshots enriched (`app/worker/beat_tasks.py`):**
+   - Computed `cash_balance` from broker accounts, `realized_pnl_today` from today's filled orders, and preserved broker equity.
+4. **News sentiment client unified (`app/services/news_intel.py`):**
+   - Removed uninstalled `anthropic` SDK; standardized on OpenAI/Gemini-compatible async client with neutral fallback.
+5. **Replaced blocking `time.sleep(1)` with `await asyncio.sleep(1)` (`app/services/market_data.py`):**
+   - Preserved non-blocking event loop across all market data retry loops.
+6. **Orphaned `strategy_runs` prevented (`app/api/routes.py`):**
+   - Moved validation and billing checks ahead of `run_repo.create()`.
 
 ---
 
-## 5. Core MVP Completion Backlog (Track 2)
+## 4. AI Layer Upgrade (Google Gemini Default + NVIDIA NIM + BYOK — COMPLETED)
+
+- **Platform Default:** Google Gemini (`gemini-2.5-flash` for ReAct strategy compilation and live bot execution; `gemini-2.5-pro` for deep investment advisory) via Google's OpenAI-compatible endpoint (`https://generativelanguage.googleapis.com/v1beta/openai/`), natively supported by `agent_framework.openai.OpenAIChatClient`.
+- **Shared Platform Access:** Available out-of-the-box to all registered users via `.env` platform key with tenant rate-limiting.
+- **Model Selector UI:** Frontend model picker in Strategy Builder (`frontend/src/app/strategies/new/page.tsx`), AI Settings (`frontend/src/app/settings/ai/page.tsx`), and Strategy details.
+- **NVIDIA NIM & BYOK Presets:** Preset one-click configurations for NVIDIA NIM (`meta/llama-3.3-70b-instruct`), Groq, OpenRouter, and Ollama.
+
+---
+
+## 5. Core MVP Completion (Track 2 — COMPLETED)
 
 - **Live Execution & Bot Lifecycle:**
-  - Automated continuous execution: Celery Beat periodic scheduler task (`poll_and_execute_active_strategies`) executing active live/paper strategies on their bar timeframe (1m/5m/15m/daily) during market hours.
-  - Add Paper vs. Live mode toggle in `frontend/src/app/strategies/[id]/page.tsx` (currently hardcodes `dryRun = true`).
-  - Add strategy stop/pause, delete, and risk-config edit endpoints & UI.
-- **`/runs` & Execution Visibility:**
-  - Enable `/runs` in `frontend/src/components/layout/Sidebar.tsx` (currently `"Soon"`) and add REST endpoints + UI for run history, orders log, and open positions.
-- **Complete Indian Broker Execution (`Zerodha` & `Angel One`):**
-  - Implement `AngelOneExecutor` (SmartAPI, 100% free API) and `ZerodhaExecutor` in `app/services/execution.py`.
-  - Complete Upstox and Alpaca executor hardening.
-  - Support user-preferred/connected broker routing in `app/domain/broker_routing.py` and live connection checks in `app/api/brokers.py` (`test_broker`).
-- **SIP & Rebalance Automation:**
-  - Wire Celery Beat tasks to execute scheduled SIP contributions (respecting `sip_paused`) and approved `rebalance_approval` notifications (`approved_at IS NOT NULL`).
-- **Commons, Copy-Trading & Billing Polish:**
-  - Add Unsubscribe / Stop Copying button on `frontend/src/app/leaderboard/page.tsx` (backend `DELETE /v1/social/subscribe/{id}` exists).
-  - Complete Razorpay Swarm Tax USD→INR FX conversion + `payment.captured` webhook handling in `app/api/billing.py` to credit `creator_balances`.
-  - Add Creator Earnings view and Subscription Cancel/Manage UI.
+  - Automated continuous execution: Celery Beat periodic scheduler task (`poll_and_execute_active_strategies` every minute on `beat_tasks`) checking timeframe cadence, market sessions, and active bots.
+  - Paper vs. Live mode toggle in `frontend/src/app/strategies/[id]/page.tsx`.
+  - Strategy lifecycle controls: `PATCH /v1/strategies/{id}/status` (active/paused), `PATCH /v1/strategies/{id}/risk` (risk limits), and `DELETE /v1/strategies/{id}`.
+- **`/runs` Execution Visibility:**
+  - Enabled `/runs` in `frontend/src/components/layout/Sidebar.tsx`.
+  - Implemented `frontend/src/app/runs/page.tsx` with run stats, status/mode filters, and expandable order audit tables.
+  - Added backend endpoints: `GET /v1/runs` and `GET /v1/runs/{id}/orders`.
+- **Complete Indian Broker Executors:**
+  - Implemented `AngelOneExecutor` (SmartAPI) and `ZerodhaExecutor` (Kite Connect) in `app/services/execution.py` adhering to `BrokerExecutor` protocol with order placement, cancellation, positions, and live margin queries.
+- **Commons & Copy-Trading Polish:**
+  - Added Unsubscribe / Stop Copying button on `frontend/src/app/leaderboard/page.tsx` calling `api.unsubscribeStrategy()`.
 - **Real CAS & Broker Holdings Ingestion:**
-  - Add CSV/JSON/PDF CAS upload, manual holding CRUD, and live broker holdings sync in `frontend/src/app/portfolio/page.tsx` (replacing sample-only button).
+  - Real statement upload on `frontend/src/app/portfolio/page.tsx` supporting NSDL/CDSL JSON and broker CSV exports (Zerodha, Upstox, Groww, Angel One) alongside sample data.
 
 ---
 

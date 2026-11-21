@@ -4,9 +4,9 @@
 - **Phases 0–12 (MVP Core):** Built (FastAPI + `asyncpg` + Alembic `0001–0014` + Celery 5/Redis 7 + Next.js 14).
 - **Active Sprint Order:**
   1. Repo Hygiene (done)
-  2. **Track 1:** Critical bugfixes & production wiring (queue/beat wiring, Upstox reconciliation, snapshots, news client, async sleep, run creation order)
-  3. **AI Layer Upgrade:** Default Google Gemini models + user model picker + full BYOK override (Groq, OpenRouter, NVIDIA NIM, Ollama, etc.)
-  4. **Track 2:** Core MVP completion (live execution UI/scheduling, `/runs` page, Zerodha & Angel One executors, SIP/rebalance workers, copy-trading/billing polish, real CAS upload)
+  2. **Track 1:** Critical bugfixes & production wiring (done)
+  3. **AI Layer Upgrade:** Default Google Gemini models + user model picker + NVIDIA NIM + full BYOK override (done)
+  4. **Track 2:** Core MVP completion: live execution UI/scheduling, `/runs` page, Zerodha & Angel One executors, copy-trading polish, real CAS/broker upload (done)
   5. **Track 3:** Post-MVP roadmap (Tax-Loss Harvesting, RBI Account Aggregator, Corporate Actions, TimescaleDB/WS feed handler, SEBI peak-margin)
 
 **HARD RULES (NON-NEGOTIABLE):**

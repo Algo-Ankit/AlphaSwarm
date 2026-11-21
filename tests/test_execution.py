@@ -28,6 +28,52 @@ def test_crypto_skips_legs():
     assert bracket_order_class("BTC-USD", Decimal("90"), None) is None
 
 
+def test_get_executor_returns_zerodha_and_angelone():
+    from app.services.execution import AngelOneExecutor, ZerodhaExecutor, get_executor
+
+    z = get_executor("zerodha", api_key="k", secret_key="s", access_token="tok")
+    assert isinstance(z, ZerodhaExecutor)
+
+    a = get_executor("angelone", api_key="k", secret_key="s", access_token="tok")
+    assert isinstance(a, AngelOneExecutor)
+
+
+def test_indian_executors_require_access_token():
+    import pytest
+    from app.services.execution import AngelOneExecutor, ZerodhaExecutor
+
+    with pytest.raises(ValueError, match="requires an active session token"):
+        AngelOneExecutor(api_key="k", access_token="")
+
+    with pytest.raises(ValueError, match="requires an OAuth access token"):
+        ZerodhaExecutor(api_key="k", access_token="")
+
+
+def test_indian_executors_reject_paper_orders():
+    import pytest
+    from app.domain.models import OrderIntent, OrderSide, OrderType
+    from app.services.execution import AngelOneExecutor, ZerodhaExecutor
+
+    order = OrderIntent(
+        strategy_id="strat-1",
+        symbol="RELIANCE",
+        exchange="NSE",
+        side=OrderSide.buy,
+        quantity=Decimal("10"),
+        order_type=OrderType.market,
+        estimated_price=Decimal("2500"),
+        is_paper=True,
+    )
+
+    a = AngelOneExecutor(api_key="k", access_token="tok")
+    with pytest.raises(RuntimeError, match="Refusing to route a paper-flagged order"):
+        a.place_order(order)
+
+    z = ZerodhaExecutor(api_key="k", access_token="tok")
+    with pytest.raises(RuntimeError, match="Refusing to route a paper-flagged order"):
+        z.place_order(order)
+
+
 if __name__ == "__main__":
     import traceback
 

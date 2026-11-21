@@ -18,7 +18,7 @@ import {
   History, Database, ShieldAlert, CheckCircle2, Terminal,
   FlaskConical, TrendingUp, TrendingDown, BarChart3, Zap,
   Pencil, Save, X, Code2, FileText, AlertTriangle,
-  PauseCircle, PlayCircle, Plus,
+  PauseCircle, PlayCircle, Plus, Trash2,
 } from 'lucide-react'
 import { sessionStatus, SESSION_LABEL, nextOpenLabel } from '@/lib/marketHours'
 
@@ -55,6 +55,9 @@ export default function StrategyDetailPage() {
   const [lastRun,        setLastRun]        = useState<StrategyRunResponse | null>(null)
   const [agentConnected, setAgentConnected] = useState(false)
   const [agentStatus,    setAgentStatus]    = useState<string | null>(null)
+  const [runMode,        setRunMode]        = useState<'paper' | 'live'>('paper')
+  const [statusLoading,  setStatusLoading]  = useState(false)
+  const [deleting,       setDeleting]       = useState(false)
 
   // backtest state
   const [btSymbol,    setBtSymbol]    = useState('')
@@ -109,12 +112,39 @@ export default function StrategyDetailPage() {
     setAgentConnected(false)
     setAgentStatus(null)
     try {
-      const run = await api.runStrategy(strategy.id, true)
+      const run = await api.runStrategy(strategy.id, runMode === 'paper')
       setLastRun(run)
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : 'Run failed')
     } finally {
       setDispatching(false)
+    }
+  }
+
+  async function handleToggleStatus() {
+    if (!strategy) return
+    setStatusLoading(true)
+    const nextStatus = strategy.status === 'active' ? 'paused' : 'active'
+    try {
+      const updated = await api.updateStrategyStatus(strategy.id, nextStatus)
+      setStrategy(updated)
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : 'Status update failed')
+    } finally {
+      setStatusLoading(false)
+    }
+  }
+
+  async function handleDeleteStrategy() {
+    if (!strategy) return
+    if (!confirm(`Are you sure you want to delete "${strategy.name}"? This cannot be undone.`)) return
+    setDeleting(true)
+    try {
+      await api.deleteStrategy(strategy.id)
+      router.push('/strategies')
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : 'Delete failed')
+      setDeleting(false)
     }
   }
 
@@ -342,21 +372,85 @@ export default function StrategyDetailPage() {
               </div>
             )}
 
+            {/* Run mode selector & scheduling controls */}
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              {/* Paper vs Live Toggle */}
+              <div className="flex items-center p-0.5 rounded-xl bg-zinc-100 dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700">
+                <button
+                  type="button"
+                  onClick={() => setRunMode('paper')}
+                  className={cn(
+                    'px-2.5 py-1 text-xs font-semibold rounded-lg transition-all',
+                    runMode === 'paper'
+                      ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
+                      : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                  )}
+                >
+                  Paper
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRunMode('live')}
+                  className={cn(
+                    'px-2.5 py-1 text-xs font-semibold rounded-lg transition-all',
+                    runMode === 'live'
+                      ? 'bg-emerald-500 text-white shadow-sm'
+                      : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                  )}
+                >
+                  Live
+                </button>
+              </div>
+
+              {/* Automated Scheduler Toggle */}
+              <button
+                type="button"
+                onClick={handleToggleStatus}
+                disabled={statusLoading}
+                className={cn(
+                  'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors disabled:opacity-50',
+                  strategy.status === 'active'
+                    ? 'border-amber-300 dark:border-amber-600/40 text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10'
+                    : 'border-emerald-300 dark:border-emerald-600/40 text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10'
+                )}
+              >
+                {strategy.status === 'active' ? (
+                  <><PauseCircle className="w-3.5 h-3.5" /> Pause Auto-Scheduler</>
+                ) : (
+                  <><PlayCircle className="w-3.5 h-3.5" /> Enable Auto-Scheduler</>
+                )}
+              </button>
+
+              {/* Delete button */}
+              <button
+                type="button"
+                onClick={handleDeleteStrategy}
+                disabled={deleting}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 border border-transparent hover:border-rose-200 dark:hover:border-rose-500/20 transition-colors disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
             <Button
               size="lg"
               variant={(dispatching || agentIsLive) ? 'secondary' : 'primary'}
               onClick={handleRun}
               disabled={dispatching || agentIsLive}
-              title={!marketOpen && strategy.exchange !== 'CRYPTO' ? 'Paper run — live orders will queue until market opens' : undefined}
+              title={runMode === 'live' && !marketOpen && strategy.exchange !== 'CRYPTO' ? 'Paper run — live orders will queue until market opens' : undefined}
               className={cn(
-                !(dispatching || agentIsLive) && 'shadow-[0_4px_20px_rgba(109,40,217,0.35)] hover:shadow-[0_6px_28px_rgba(109,40,217,0.5)]',
+                !(dispatching || agentIsLive) && (
+                  runMode === 'live'
+                    ? 'bg-emerald-600 hover:bg-emerald-700 shadow-[0_4px_20px_rgba(16,185,129,0.35)]'
+                    : 'shadow-[0_4px_20px_rgba(109,40,217,0.35)] hover:shadow-[0_6px_28px_rgba(109,40,217,0.5)]'
+                ),
               )}
             >
               {dispatching
                 ? <><Activity className="w-4 h-4 mr-2 animate-spin" /> Dispatching…</>
                 : agentIsLive
                   ? <><Activity className="w-4 h-4 mr-2 animate-pulse" /> Agent Running…</>
-                  : <><Play className="w-4 h-4 mr-2" /> {!marketOpen && strategy.exchange !== 'CRYPTO' ? 'Run Agent (Paper)' : 'Run Agent'}</>}
+                  : <><Play className="w-4 h-4 mr-2" /> Run Now ({runMode === 'paper' ? 'Paper' : 'Live'})</>}
             </Button>
             {!marketOpen && strategy.exchange !== 'CRYPTO' && (
               <p className="text-[10px] text-zinc-400 dark:text-zinc-500 text-right">
@@ -486,7 +580,7 @@ export default function StrategyDetailPage() {
                     {strategy.explanation}
                   </p>
                   <p className="mt-4 text-[10px] text-zinc-400 italic">
-                    Plain-English summary of the generated logic — toggle "Show Code" to see the Python.
+                    Plain-English summary of the generated logic — toggle &quot;Show Code&quot; to see the Python.
                   </p>
                 </div>
               )}
@@ -504,7 +598,7 @@ export default function StrategyDetailPage() {
                 'text-zinc-600 dark:text-zinc-400',
                 'bg-zinc-50 border-zinc-100 dark:bg-zinc-900/50 dark:border-zinc-800',
               )}>
-                "{strategy.prompt}"
+                &ldquo;{strategy.prompt}&rdquo;
               </p>
             </GlassCard>
 
@@ -612,7 +706,7 @@ export default function StrategyDetailPage() {
                 </div>
                 {(btStartDate || btEndDate) && (
                   <p className="text-[10px] text-zinc-400 -mt-2">
-                    Date range overrides "Bars" — fetches all bars within range (up to the limit).
+                    Date range overrides &quot;Bars&quot; — fetches all bars within range (up to the limit).
                   </p>
                 )}
 

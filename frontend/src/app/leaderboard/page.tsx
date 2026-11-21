@@ -64,6 +64,21 @@ export default function LeaderboardPage() {
     load()
   }, [router, load])
 
+  const [unsubscribingId, setUnsubscribingId] = useState<string | null>(null)
+
+  async function handleUnsubscribe(publicStrategyId: string) {
+    if (!confirm('Stop copying this strategy? Your existing open positions will remain in your broker.')) return
+    setUnsubscribingId(publicStrategyId)
+    try {
+      await api.unsubscribeStrategy(publicStrategyId)
+      await load()
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : 'Failed to unsubscribe')
+    } finally {
+      setUnsubscribingId(null)
+    }
+  }
+
   const subscribedIds = useMemo(
     () => new Set(subscriptions.map((s) => s.public_strategy_id)),
     [subscriptions],
@@ -137,9 +152,11 @@ export default function LeaderboardPage() {
                 rank={i + 1}
                 subscribed={subscribedIds.has(e.public_strategy_id)}
                 forking={forkingId === e.public_strategy_id}
+                unsubscribing={unsubscribingId === e.public_strategy_id}
                 onCopy={() => setCopyTarget(e)}
                 onFork={() => forkStrategy(e)}
                 onLineage={() => setLineageTarget(e)}
+                onUnsubscribe={() => handleUnsubscribe(e.public_strategy_id)}
               />
             ))}
           </div>
@@ -168,10 +185,10 @@ export default function LeaderboardPage() {
 
 /* ── Strategy card ─────────────────────────────────────────────────────────── */
 function StrategyCard({
-  entry, rank, subscribed, forking, onCopy, onFork, onLineage,
+  entry, rank, subscribed, forking, unsubscribing, onCopy, onFork, onLineage, onUnsubscribe,
 }: {
-  entry: LeaderboardEntry; rank: number; subscribed: boolean; forking: boolean
-  onCopy: () => void; onFork: () => void; onLineage: () => void
+  entry: LeaderboardEntry; rank: number; subscribed: boolean; forking: boolean; unsubscribing?: boolean
+  onCopy: () => void; onFork: () => void; onLineage: () => void; onUnsubscribe: () => void
 }) {
   const dd = entry.max_drawdown_pct
   const hasLineage = entry.fork_count > 0 || entry.forked_from_public_strategy_id != null
@@ -232,9 +249,19 @@ function StrategyCard({
 
       <div className="px-5 pb-4 mt-auto space-y-2">
         {subscribed ? (
-          <Button variant="secondary" className="w-full" disabled>
-            <CheckCircle2 className="w-4 h-4" /> Copying
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1 opacity-80 cursor-default" disabled>
+              <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Copying
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={onUnsubscribe}
+              loading={unsubscribing}
+              className="text-xs font-semibold text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 px-3"
+            >
+              Stop
+            </Button>
+          </div>
         ) : (
           <Button className="w-full" onClick={onCopy}>
             <Copy className="w-4 h-4" /> Copy Trade

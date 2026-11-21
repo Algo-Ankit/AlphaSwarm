@@ -61,6 +61,44 @@ export interface StrategyRunResponse {
   message: string
 }
 
+export interface StrategyRunListItem {
+  id: string
+  strategy_id: string
+  strategy_name: string
+  symbols: string[]
+  exchange: string
+  status: string
+  dry_run: boolean
+  celery_task_id: string | null
+  started_at: string | null
+  ended_at: string | null
+  error: string | null
+  orders_count: number
+  created_at: string
+}
+
+export interface RunOrderDetail {
+  id: string
+  strategy_id: string
+  run_id: string | null
+  broker_order_id: string | null
+  symbol: string
+  exchange: string
+  side: string
+  order_type: string
+  quantity: number
+  limit_price: number | null
+  estimated_price: number
+  fill_price: number | null
+  estimated_notional: number
+  realized_pnl: number | null
+  risk_status: string
+  risk_reason: string
+  broker_status: string | null
+  created_at: string
+  filled_at: string | null
+}
+
 export interface TaskStatusResponse {
   task_id: string
   celery_status: string

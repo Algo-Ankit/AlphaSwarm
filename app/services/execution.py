@@ -395,6 +395,315 @@ class UpstoxExecutor:
             raise RuntimeError(f"Upstox cancel_order failed for {order_id}: {exc}") from exc
 
 
+class AngelOneExecutor:
+    """
+    Live NSE/BSE executor via Angel One SmartAPI (100% free API for retail quants).
+
+    Paper/dry-run never reaches here — the worker only builds an executor for live
+    runs, and the risk gate (verify_order_intent) runs in the worker BEFORE
+    place_order is called. Refuses paper orders defensively.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        access_token: str,
+        *,
+        paper: bool = False,
+        product: str = "DELIVERY",
+        base_url: str = "https://apiconnect.angelone.in",
+    ):
+        if not access_token:
+            raise ValueError(
+                "Angel One trading requires an active session token. Connect Angel One "
+                "in Settings → Broker Connections."
+            )
+        self._api_key = api_key
+        self._access_token = access_token
+        self._paper = paper
+        self._product = product
+        self._base_url = base_url.rstrip("/")
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._access_token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-UserType": "USER",
+            "X-SourceID": "WEB",
+            "X-ClientLocalIP": "127.0.0.1",
+            "X-ClientPublicIP": "127.0.0.1",
+            "X-MACAddress": "fe80::1",
+            "X-PrivateKey": self._api_key,
+        }
+
+    def place_order(self, order: OrderIntent, client_order_id: str | None = None) -> OrderResult:
+        import httpx
+
+        if order.is_paper:
+            raise RuntimeError(
+                "Refusing to route a paper-flagged order to live Angel One. Risk-gate bypass rejected."
+            )
+
+        quantity = int(order.quantity)
+        if quantity <= 0:
+            raise ValueError(f"Angel One order quantity must be positive integer, got {order.quantity}")
+
+        is_limit = order.order_type == OrderType.limit
+        price = float(order.limit_price) if (is_limit and order.limit_price is not None) else 0.0
+
+        payload = {
+            "variety": "NORMAL",
+            "tradingsymbol": order.symbol.upper() + "-EQ" if not order.symbol.endswith("-EQ") else order.symbol.upper(),
+            "symboltoken": order.symbol.upper(),
+            "transactiontype": "BUY" if order.side == OrderSide.buy else "SELL",
+            "exchange": (order.exchange or "NSE").upper(),
+            "ordertype": "LIMIT" if is_limit else "MARKET",
+            "producttype": self._product,
+            "duration": "DAY",
+            "price": str(price),
+            "squareoff": "0",
+            "stoploss": "0",
+            "quantity": str(quantity),
+        }
+
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.post(
+                    f"{self._base_url}/rest/secure/angelbroking/order/v1/placeOrder",
+                    headers=self._headers(),
+                    json=payload,
+                )
+                data = resp.json()
+                if not data.get("status") and data.get("message"):
+                    raise RuntimeError(f"Angel One order rejected: {data.get('message')}")
+                order_id = data.get("data", {}).get("orderid")
+        except Exception as exc:
+            raise RuntimeError(f"Angel One order placement failed for {order.symbol}: {exc}") from exc
+
+        return OrderResult(
+            order_id=str(order_id) if order_id else None,
+            symbol=order.symbol,
+            side=order.side,
+            quantity=order.quantity,
+            filled_quantity=None,
+            fill_price=None,
+            estimated_price=order.estimated_price,
+            broker_status="pending",
+            is_paper=False,
+        )
+
+    def get_positions(self) -> dict[str, Decimal]:
+        import httpx
+
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.get(
+                    f"{self._base_url}/rest/secure/angelbroking/order/v1/getPosition",
+                    headers=self._headers(),
+                )
+                data = resp.json()
+        except Exception as exc:
+            raise RuntimeError(f"Angel One get_positions failed: {exc}") from exc
+
+        positions: dict[str, Decimal] = {}
+        items = data.get("data", []) or []
+        for p in items:
+            sym = p.get("tradingsymbol") or p.get("symbolname")
+            qty = p.get("netqty") or p.get("quantity")
+            if sym is not None and qty is not None:
+                clean_sym = str(sym).upper().replace("-EQ", "")
+                positions[clean_sym] = Decimal(str(qty))
+        return positions
+
+    def get_account(self) -> dict:
+        import httpx
+
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.get(
+                    f"{self._base_url}/rest/secure/angelbroking/user/v1/getRMS",
+                    headers=self._headers(),
+                )
+                data = resp.json()
+        except Exception as exc:
+            raise RuntimeError(f"Angel One get_account failed: {exc}") from exc
+
+        funds = data.get("data", {}) or {}
+        available = funds.get("net") or funds.get("availablecash") or funds.get("availablemargin") or "0"
+        cash = str(available)
+        return {
+            "equity": cash,
+            "cash": cash,
+            "portfolio_value": cash,
+            "buying_power": cash,
+        }
+
+    def cancel_order(self, order_id: str) -> None:
+        import httpx
+
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.post(
+                    f"{self._base_url}/rest/secure/angelbroking/order/v1/cancelOrder",
+                    headers=self._headers(),
+                    json={"variety": "NORMAL", "orderid": order_id},
+                )
+                data = resp.json()
+                if not data.get("status") and data.get("message"):
+                    raise RuntimeError(f"Angel One cancel failed: {data.get('message')}")
+        except Exception as exc:
+            raise RuntimeError(f"Angel One cancel_order failed for {order_id}: {exc}") from exc
+
+
+class ZerodhaExecutor:
+    """
+    Live NSE/BSE executor via Zerodha Kite Connect API.
+
+    Paper/dry-run never reaches here — the risk gate (verify_order_intent) runs in the
+    worker BEFORE place_order is called. Refuses paper orders defensively.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        access_token: str,
+        *,
+        paper: bool = False,
+        product: str = "CNC",
+        base_url: str = "https://api.kite.trade",
+    ):
+        if not access_token:
+            raise ValueError(
+                "Zerodha Kite live trading requires an OAuth access token. Connect Zerodha "
+                "in Settings → Broker Connections."
+            )
+        self._api_key = api_key
+        self._access_token = access_token
+        self._paper = paper
+        self._product = product
+        self._base_url = base_url.rstrip("/")
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "X-Kite-Version": "3",
+            "Authorization": f"token {self._api_key}:{self._access_token}",
+        }
+
+    def place_order(self, order: OrderIntent, client_order_id: str | None = None) -> OrderResult:
+        import httpx
+
+        if order.is_paper:
+            raise RuntimeError(
+                "Refusing to route a paper-flagged order to live Zerodha. Risk-gate bypass rejected."
+            )
+
+        quantity = int(order.quantity)
+        if quantity <= 0:
+            raise ValueError(f"Zerodha order quantity must be positive integer, got {order.quantity}")
+
+        is_limit = order.order_type == OrderType.limit
+        price = float(order.limit_price) if (is_limit and order.limit_price is not None) else 0.0
+
+        payload = {
+            "tradingsymbol": order.symbol.upper(),
+            "exchange": (order.exchange or "NSE").upper(),
+            "transaction_type": "BUY" if order.side == OrderSide.buy else "SELL",
+            "order_type": "LIMIT" if is_limit else "MARKET",
+            "quantity": quantity,
+            "product": self._product,
+            "validity": "DAY",
+            "price": price if is_limit else 0,
+            "tag": (client_order_id or "alphaswarm")[:20],
+        }
+
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.post(
+                    f"{self._base_url}/orders/regular",
+                    headers=self._headers(),
+                    data=payload,
+                )
+                data = resp.json()
+                if data.get("status") == "error":
+                    raise RuntimeError(f"Zerodha order rejected: {data.get('message')}")
+                order_id = data.get("data", {}).get("order_id")
+        except Exception as exc:
+            raise RuntimeError(f"Zerodha order placement failed for {order.symbol}: {exc}") from exc
+
+        return OrderResult(
+            order_id=str(order_id) if order_id else None,
+            symbol=order.symbol,
+            side=order.side,
+            quantity=order.quantity,
+            filled_quantity=None,
+            fill_price=None,
+            estimated_price=order.estimated_price,
+            broker_status="pending",
+            is_paper=False,
+        )
+
+    def get_positions(self) -> dict[str, Decimal]:
+        import httpx
+
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.get(
+                    f"{self._base_url}/portfolio/positions",
+                    headers=self._headers(),
+                )
+                data = resp.json()
+        except Exception as exc:
+            raise RuntimeError(f"Zerodha get_positions failed: {exc}") from exc
+
+        positions: dict[str, Decimal] = {}
+        net_positions = data.get("data", {}).get("net", []) or []
+        for p in net_positions:
+            sym = p.get("tradingsymbol")
+            qty = p.get("quantity")
+            if sym is not None and qty is not None:
+                positions[str(sym).upper()] = Decimal(str(qty))
+        return positions
+
+    def get_account(self) -> dict:
+        import httpx
+
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.get(
+                    f"{self._base_url}/user/margins",
+                    headers=self._headers(),
+                )
+                data = resp.json()
+        except Exception as exc:
+            raise RuntimeError(f"Zerodha get_account failed: {exc}") from exc
+
+        equity = data.get("data", {}).get("equity", {}) or {}
+        available = equity.get("available", {}).get("live_balance", 0)
+        cash = str(available)
+        return {
+            "equity": cash,
+            "cash": cash,
+            "portfolio_value": cash,
+            "buying_power": cash,
+        }
+
+    def cancel_order(self, order_id: str) -> None:
+        import httpx
+
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.delete(
+                    f"{self._base_url}/orders/regular/{order_id}",
+                    headers=self._headers(),
+                )
+                data = resp.json()
+                if data.get("status") == "error":
+                    raise RuntimeError(f"Zerodha cancel failed: {data.get('message')}")
+        except Exception as exc:
+            raise RuntimeError(f"Zerodha cancel_order failed for {order_id}: {exc}") from exc
+
+
 # ── Social copy-trading: signal fan-out ───────────────────────────────────────
 # When a published strategy generates a signal, the same signal is replicated to
 # every subscriber copying it, sized proportionally to the capital each subscriber
@@ -742,4 +1051,10 @@ def get_executor(
         return AlpacaExecutor(api_key=api_key, secret_key=secret_key, paper=paper)
     if name == "upstox":
         return UpstoxExecutor(access_token=access_token or "", paper=paper)
-    raise ValueError(f"Unsupported broker '{broker}'. Supported: alpaca, upstox.")
+    if name == "zerodha":
+        return ZerodhaExecutor(api_key=api_key, access_token=access_token or "", paper=paper)
+    if name in ("angelone", "angel_one", "angel"):
+        return AngelOneExecutor(api_key=api_key, access_token=access_token or "", paper=paper)
+    raise ValueError(
+        f"Unsupported broker '{broker}'. Supported: alpaca, upstox, zerodha, angelone."
+    )
