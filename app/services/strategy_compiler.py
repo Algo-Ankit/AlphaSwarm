@@ -84,12 +84,16 @@ async def compile_strategy_prompt(
             logger.info("Using default platform Gemini model for user %s", user_email or "anon")
             api_key = settings.gemini_api_key
             base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
-            model = getattr(settings, "llm_model", "gemini-2.5-flash") or "gemini-2.5-flash"
+            model = (
+                request.model_override
+                or getattr(settings, "llm_model", "gemini-2.5-flash")
+                or "gemini-2.5-flash"
+            )
         elif _is_founder(user_email, settings.founder_email):
             logger.info("Founder account — using platform LLM key fallback.")
             api_key = settings.llm_api_key
             base_url = settings.llm_base_url
-            model = settings.llm_model
+            model = request.model_override or settings.llm_model
         else:
             raise ValueError(_STRICT_BYOK_MESSAGE)
 

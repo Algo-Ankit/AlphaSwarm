@@ -87,6 +87,7 @@ class StrategyCreateRequest(BaseModel):
     creation_mode: str = Field(default="nl", pattern="^(nl|quant)$")
     code_source: str | None = Field(default=None, max_length=50_000)
     llm_config_id: str | None = Field(default=None)
+    model_override: str | None = Field(default=None, max_length=100)
 
 
 class StrategyResponse(BaseModel):

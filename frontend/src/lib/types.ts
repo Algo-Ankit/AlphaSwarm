@@ -123,7 +123,7 @@ export interface TestConnectionResponse {
 export interface LLMConfig {
   id:          string
   label:       string
-  provider:    'groq' | 'gemini' | 'openrouter' | 'openai' | 'together' | 'anthropic' | 'custom'
+  provider:    'groq' | 'gemini' | 'nvidia' | 'openrouter' | 'openai' | 'together' | 'anthropic' | 'custom'
   base_url:    string
   model:       string
   key_preview: string
