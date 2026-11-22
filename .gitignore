@@ -34,3 +34,7 @@ create_github_issues.py
 
 # Agent runtime locks
 .claude/*.lock
+
+# Vercel CLI local link metadata
+.vercel/
+frontend/.vercel/
