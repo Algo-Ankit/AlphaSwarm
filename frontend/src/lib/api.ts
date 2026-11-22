@@ -502,7 +502,7 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  angeloneLogin: (data: { client_id: string; password: string; totp: string }) =>
+  angeloneLogin: (data: { client_id: string; password: string; totp: string; api_key?: string }) =>
     req<BrokerConnection>('/v1/brokers/oauth/angelone/login', {
       method: 'POST',
       headers: authHeaders(),

@@ -13,7 +13,7 @@ import pandas as pd
 from app.core.celery_app import celery_app
 from app.core.config import get_settings
 from app.domain.base_strategy import BaseStrategy, ReadOnlyDataFrame, StrategyContext
-from app.domain.broker_routing import broker_for_exchange, currency_symbol
+from app.domain.broker_routing import brokers_for_exchange, currency_symbol
 from app.domain.market_data import MarketState
 from app.domain.models import (
     OrderIntent,
@@ -242,15 +242,26 @@ async def _execute_async(
         generated_logic = strategy_row["generated_logic"] or ""
 
         # Broker is chosen by the strategy's exchange, NOT hardcoded — an NSE/BSE
-        # strategy must use an Indian broker, not be silently routed to a US one.
-        required_broker = broker_for_exchange(exchange)
+        # strategy must use an Indian broker (Upstox, Zerodha, or Angel One),
+        # not be silently routed to a US one.
+        allowed_brokers = brokers_for_exchange(exchange)
         brokers = await broker_repo.get_all()
-        broker_row = next((b for b in brokers if b["broker"] == required_broker), None)
+        broker_row = next(
+            (
+                b
+                for name in allowed_brokers
+                for b in brokers
+                if b["broker"] == name and b.get("is_active", True)
+            ),
+            None,
+        )
+        selected_broker = broker_row["broker"] if broker_row else allowed_brokers[0]
 
         if not dry_run and broker_row is None:
+            broker_choices = " / ".join(allowed_brokers)
             raise RuntimeError(
-                f"Live trading on {exchange} requires an active '{required_broker}' broker "
-                f"connection, but none was found. Add {required_broker} credentials in "
+                f"Live trading on {exchange} requires an active broker connection "
+                f"({broker_choices}), but none was found. Add credentials in "
                 "Settings → Broker Connections (or run in paper mode)."
             )
 
@@ -323,7 +334,7 @@ async def _execute_async(
             from app.services.execution import get_executor
 
             executor = get_executor(
-                required_broker,
+                selected_broker,
                 api_key=broker_creds["api_key"],
                 secret_key=broker_creds["secret_key"],
                 paper=broker_creds["paper"],
@@ -331,7 +342,7 @@ async def _execute_async(
             )
             if log:
                 log.info(
-                    f"Broker connected — {required_broker} paper={broker_creds['paper']}  "
+                    f"Broker connected — {selected_broker} paper={broker_creds['paper']}  "
                     f"positions={dict(positions)}"
                 )
 
