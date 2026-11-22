@@ -1,8 +1,8 @@
 # AlphaSwarm Engineering Handover
 
-**Last Updated:** 2026-11-21
+**Last Updated:** 2026-11-22
 **Branch:** `main`
-**Status:** Phases 0–12 MVP foundation built; entering bugfix, AI default/model-picker upgrade, and full-product completion sprint.
+**Status:** Phases 0–12 MVP foundation, Track 1, AI Layer Upgrade, and Track 2 completed & hardened; ready for Track 3 post-MVP roadmap.
 
 ---
 
@@ -77,19 +77,25 @@
 ## 5. Core MVP Completion (Track 2 — COMPLETED)
 
 - **Live Execution & Bot Lifecycle:**
-  - Automated continuous execution: Celery Beat periodic scheduler task (`poll_and_execute_active_strategies` every minute on `beat_tasks`) checking timeframe cadence, market sessions, and active bots.
-  - Paper vs. Live mode toggle in `frontend/src/app/strategies/[id]/page.tsx`.
+  - Automated continuous execution: Celery Beat periodic scheduler task (`poll_and_execute_active_strategies` every minute on `beat_tasks`) with timeframe cadence & per-trading-day deduplication (`_should_run_for_timeframe` across `1m`/`5m`/`15m`/`30m`/`1h`/`4h`/`1d`/`1w`), `"regular"`/`"regular_only"` session matching, and `sip_paused` gating.
+  - Approved rebalance execution: `POST /v1/notifications/{notif_id}/approve` (`app/api/notifications.py`) marks `approved_at` and immediately dispatches the strategy run to Celery (idempotently).
+  - Paper vs. Live mode toggle in `frontend/src/app/strategies/[id]/page.tsx` persisted to `risk_config.paper_trading_only` via `PATCH /v1/strategies/{id}/risk` (fixed `Decimal` JSON serialization via `model_dump(mode="json")`).
   - Strategy lifecycle controls: `PATCH /v1/strategies/{id}/status` (active/paused), `PATCH /v1/strategies/{id}/risk` (risk limits), and `DELETE /v1/strategies/{id}`.
 - **`/runs` Execution Visibility:**
   - Enabled `/runs` in `frontend/src/components/layout/Sidebar.tsx`.
-  - Implemented `frontend/src/app/runs/page.tsx` with run stats, status/mode filters, and expandable order audit tables.
+  - Implemented `frontend/src/app/runs/page.tsx` with run stats, status/mode filters, and expandable order audit tables with exchange-aware currency formatting (`₹` for NSE/BSE, `$` for US/crypto).
   - Added backend endpoints: `GET /v1/runs` and `GET /v1/runs/{id}/orders`.
-- **Complete Indian Broker Executors:**
-  - Implemented `AngelOneExecutor` (SmartAPI) and `ZerodhaExecutor` (Kite Connect) in `app/services/execution.py` adhering to `BrokerExecutor` protocol with order placement, cancellation, positions, and live margin queries.
-- **Commons & Copy-Trading Polish:**
+- **Complete Indian Broker Executors & Multi-Broker Routing:**
+  - Added `brokers_for_exchange()` in `app/domain/broker_routing.py` across `app/worker/tasks.py` and copy-trading `fan_out_to_subscribers()` so NSE/BSE strategies route to whichever active Indian broker (`upstox`, `zerodha`, or `angelone`) the tenant connected.
+  - Implemented `AngelOneExecutor` (SmartAPI) and `ZerodhaExecutor` (Kite Connect) in `app/services/execution.py` adhering to `BrokerExecutor` protocol with `.NS`/`.BO` suffix normalization, Angel One OpenAPI Scrip Master `symboltoken` resolution, and optional SmartAPI `api_key` support in `AngelOneLoginRequest` and `frontend/src/app/settings/brokers/page.tsx`.
+- **Billing, Commons & Copy-Trading Polish:**
+  - Normalized Swarm Tax billing (`app/worker/billing_tasks.py`) with `currency_for_exchange()` and `convert_amount()` so Stripe charges USD cents and Razorpay invoices INR paise accurately regardless of strategy exchange currency.
   - Added Unsubscribe / Stop Copying button on `frontend/src/app/leaderboard/page.tsx` calling `api.unsubscribeStrategy()`.
 - **Real CAS & Broker Holdings Ingestion:**
   - Real statement upload on `frontend/src/app/portfolio/page.tsx` supporting NSDL/CDSL JSON and broker CSV exports (Zerodha, Upstox, Groww, Angel One) alongside sample data.
+- **CI/CD & Split-Hosting (Vercel + Docker Compose):**
+  - Added `frontend` lint, `npm run build`, and TypeScript CI job + safe git base-diff handling in `.github/workflows/main.yml`.
+  - Added `frontend/vercel.json` and `deploy-vercel` job (`vercel@66.6.0` prebuilt deploy when `VERCEL_TOKEN`/`VERCEL_ORG_ID`/`VERCEL_PROJECT_ID` secrets are set, or automatic Vercel Git integration). Frontend deploys to Vercel (`Root Directory = frontend`, `NEXT_PUBLIC_API_URL` pointing to the stateful Docker/Hetzner backend API hosting FastAPI + WebSockets + Celery + Postgres + Redis).
 
 ---
 
@@ -107,7 +113,7 @@
 ## 7. Local Dev & Verification Commands
 
 ```bash
-# Fast local test run with uv (verified 121/121 tests pass in ~10s)
+# Fast local test run with uv (verified 131/131 tests pass in ~5s)
 & "$HOME\.local\bin\uv.exe" run pytest -q
 
 # Run specific suite
@@ -119,5 +125,19 @@
 & "$HOME\.local\bin\uv.exe" run black --check .
 
 # Frontend
-cd frontend && npm install && npm run lint && npm run build
+cd frontend && npm install && npm run lint && npx tsc --noEmit && npm run build
 ```
+
+---
+
+## 8. Decision & Bugfix Audit Trail
+
+| Date | Area | Fix / Decision | ADR | Key Files |
+| :--- | :--- | :--- | :--- | :--- |
+| 2026-11-22 | Queue / Beat | Consume `beat_tasks` queue + run Beat singleton service | [ADR-012](DECISIONS.md) | `docker-compose.yml`, `docker-compose.prod.yml`, `start_alphaswarm.bat` |
+| 2026-11-22 | AI Layer | Gemini default + `model_override` + NVIDIA NIM + News client unification | [ADR-013](DECISIONS.md) | `app/services/strategy_compiler.py`, `app/services/news_intel.py`, `app/api/llm_configs.py` |
+| 2026-11-22 | Async / Runs | Non-blocking `asyncio.sleep`; pre-validate billing/risk before `run_repo.create()` | [ADR-014](DECISIONS.md) | `app/services/market_data.py`, `app/api/routes.py` |
+| 2026-11-22 | Scheduler & Risk | `_should_run_for_timeframe` daily dedup, `sip_paused` check, `Decimal` JSON fix, Live/Paper UI toggle, rebalance approval dispatch | [ADR-014](DECISIONS.md) | `app/worker/beat_tasks.py`, `app/api/routes.py`, `app/api/notifications.py`, `frontend/src/app/strategies/[id]/page.tsx` |
+| 2026-11-22 | Indian Brokers | Upstox token reconciliation, multi-broker NSE/BSE routing, `.NS`/`.BO` strip, Angel One `symboltoken` + SmartAPI key | [ADR-015](DECISIONS.md) | `app/domain/broker_routing.py`, `app/services/execution.py`, `app/worker/tasks.py`, `app/api/brokers.py` |
+| 2026-11-22 | Billing & UI | Swarm Tax USD/INR FX conversion (`convert_amount`); `₹`/`$` currency display in `/runs` | [ADR-009](DECISIONS.md) | `app/worker/billing_tasks.py`, `frontend/src/app/runs/page.tsx` |
+| 2026-11-22 | CI/CD & Docs | Frontend CI (`lint`/`build`/`tsc`), `frontend/vercel.json`, `deploy-vercel` CD job, Niyam 3-file doc parity rule | [ADR-012](DECISIONS.md), [ADR-016](DECISIONS.md) | `.github/workflows/main.yml`, `.github/workflows/deploy.yml`, `frontend/vercel.json`, `CLAUDE.md`, `AGENTS.md`, `docs/DECISIONS.md`, `docs/HANDOVER.md` |
