@@ -94,7 +94,7 @@ export function GoalWizard({ onBuild }: Props) {
             <Zap className="w-7 h-7 text-white fill-white/20" />
           </div>
           <h2 className="text-2xl font-extrabold text-zinc-900 dark:text-zinc-50 mb-1.5 tracking-tight">
-            What's your investing goal?
+            What&apos;s your investing goal?
           </h2>
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
             Answer 3 quick questions — AlphaSwarm will build a personalised AI strategy for you.

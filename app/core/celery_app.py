@@ -58,6 +58,12 @@ celery_app.conf.update(
     task_always_eager=settings.celery_task_always_eager,
     # ── Beat schedule (periodic tasks) ───────────────────────
     beat_schedule={
+        # Automated active strategy runner — polls active strategies every minute
+        "poll-active-strategies": {
+            "task": "app.worker.beat_tasks.poll_and_execute_active_strategies",
+            "schedule": crontab(minute="*"),  # every minute
+            "options": {"queue": "beat_tasks"},
+        },
         # Portfolio snapshot every 5 minutes — powers the equity curve
         "portfolio-snapshot": {
             "task": "app.worker.beat_tasks.snapshot_portfolio",

@@ -75,30 +75,89 @@ async def _snapshot_portfolio_async() -> None:
                     """,
                     tenant_id,
                 )
-                # Today's realized P&L
+                # Today's realized P&L from orders filled today (or positions updated today)
                 realized_row = await pool.fetchrow(
                     """
                     SELECT COALESCE(SUM(realized_pnl), 0) AS realized
-                    FROM positions
+                    FROM orders
                     WHERE tenant_id = $1
+                      AND filled_at >= date_trunc('day', now())
+                      AND risk_status = 'approved'
                     """,
                     tenant_id,
                 )
-                # Use broker account equity if available; fall back to 0
                 open_pnl = Decimal(str(pnl_row["open_pnl"] or 0))
                 realized_today = Decimal(str(realized_row["realized"] or 0))
                 active = int(pnl_row["active_strategies"] or 0)
 
-                total_equity = float(open_pnl + realized_today)
+                # Query broker account equity & cash balance if available
+                broker_row = await pool.fetchrow(
+                    """
+                    SELECT * FROM broker_connections
+                    WHERE tenant_id = $1 AND is_active = true
+                    ORDER BY updated_at DESC LIMIT 1
+                    """,
+                    tenant_id,
+                )
+                cash_balance = None
+                broker_equity = None
+                if broker_row:
+                    try:
+                        from app.services.broker_crypto import decrypt_key
+                        from app.services.execution import get_executor
+
+                        access_token = (
+                            decrypt_key(broker_row["access_token"])
+                            if broker_row.get("access_token")
+                            else None
+                        )
+                        api_key = (
+                            decrypt_key(broker_row["key_encrypted"])
+                            if broker_row.get("key_encrypted")
+                            else ""
+                        )
+                        secret_key = (
+                            decrypt_key(broker_row["secret_encrypted"])
+                            if broker_row.get("secret_encrypted")
+                            else ""
+                        )
+                        executor = get_executor(
+                            broker_row["broker"],
+                            api_key=api_key,
+                            secret_key=secret_key,
+                            paper=bool(broker_row["is_paper"]),
+                            access_token=access_token,
+                        )
+                        acct = await asyncio.to_thread(executor.get_account)
+                        if acct:
+                            if acct.get("cash") is not None:
+                                cash_balance = float(acct["cash"])
+                            if acct.get("equity") is not None:
+                                broker_equity = float(acct["equity"])
+                    except Exception as b_exc:
+                        logger.debug(
+                            "snapshot_portfolio: broker account fetch skipped for tenant %s: %s",
+                            tenant_id,
+                            b_exc,
+                        )
+
+                if broker_equity is not None:
+                    total_equity = broker_equity
+                elif cash_balance is not None:
+                    total_equity = cash_balance + float(open_pnl)
+                else:
+                    total_equity = float(open_pnl + realized_today)
+
                 snap = await pool.fetchrow(
                     """
                     INSERT INTO portfolio_snapshots
                         (tenant_id, total_equity, cash_balance, open_pnl, realized_pnl_today, active_strategies)
-                    VALUES ($1, $2, NULL, $3, $4, $5)
+                    VALUES ($1, $2, $3, $4, $5, $6)
                     RETURNING snapshot_time
                     """,
                     tenant_id,
                     total_equity,
+                    cash_balance,
                     float(open_pnl),
                     float(realized_today),
                     active,
@@ -306,11 +365,27 @@ async def _reconcile_positions_async() -> None:
                 # Route to the connection's actual broker (alpaca / upstox / …),
                 # not a hardcoded Alpaca. Unsupported / not-yet-implemented brokers
                 # raise inside get_executor / get_positions and are logged below.
+                access_token = (
+                    decrypt_key(row["access_token"])
+                    if row.get("access_token")
+                    else None
+                )
+                api_key = (
+                    decrypt_key(row["key_encrypted"])
+                    if row.get("key_encrypted")
+                    else ""
+                )
+                secret_key = (
+                    decrypt_key(row["secret_encrypted"])
+                    if row.get("secret_encrypted")
+                    else ""
+                )
                 executor = get_executor(
                     broker,
-                    api_key=decrypt_key(row["key_encrypted"]),
-                    secret_key=decrypt_key(row["secret_encrypted"]),
+                    api_key=api_key,
+                    secret_key=secret_key,
                     paper=bool(row["is_paper"]),
+                    access_token=access_token,
                 )
                 broker_positions = await asyncio.to_thread(executor.get_positions)
 
@@ -465,3 +540,184 @@ async def _recompute_commons_oos_async() -> None:
                 logger.warning("recompute_commons_oos: listing %s failed: %s", row["id"], exc)
     finally:
         await pool.close()
+
+
+def _should_run_for_timeframe(
+    timeframe: str,
+    now_utc,
+    last_run_at=None,
+    exchange: str = "NASDAQ",
+) -> bool:
+    """
+    Determine whether an active strategy should execute on this 1-minute Beat tick
+    based on its timeframe and its most recent run timestamp.
+    """
+    from datetime import timezone
+
+    import pytz
+
+    from app.domain.market_hours import exchange_timezone
+
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=timezone.utc)
+    if last_run_at is not None and last_run_at.tzinfo is None:
+        last_run_at = last_run_at.replace(tzinfo=timezone.utc)
+
+    tf = (timeframe or "1d").strip().lower()
+    minute = now_utc.minute
+
+    if tf in ("1m", "1min"):
+        return True
+    if tf in ("5m", "5min"):
+        return minute % 5 == 0
+    if tf in ("15m", "15min"):
+        return minute % 15 == 0
+    if tf in ("30m", "30min"):
+        return minute % 30 == 0
+    if tf in ("1h", "1hour", "60m", "60min"):
+        return minute == 0
+    if tf in ("4h", "4hour"):
+        return minute == 0 and now_utc.hour % 4 == 0
+    if tf in ("1w", "1week", "w", "weekly"):
+        if last_run_at is None:
+            return True
+        tz = pytz.timezone(exchange_timezone(exchange))
+        now_local = now_utc.astimezone(tz)
+        last_local = last_run_at.astimezone(tz)
+        return now_local.isocalendar()[:2] != last_local.isocalendar()[:2]
+    # Default: daily ('1d', '1day', 'd', 'daily') — run once per local trading day
+    if last_run_at is None:
+        return True
+    tz = pytz.timezone(exchange_timezone(exchange))
+    return now_utc.astimezone(tz).date() != last_run_at.astimezone(tz).date()
+
+
+@celery_app.task(name="app.worker.beat_tasks.poll_and_execute_active_strategies")
+def poll_and_execute_active_strategies():
+    """Poll and execute all active strategies on their timeframe cadence during open market sessions."""
+    asyncio.run(_poll_and_execute_active_strategies_async())
+
+
+async def _poll_and_execute_active_strategies_async() -> None:
+    import json as _json
+    from datetime import datetime, timezone
+
+    from app.db.repositories.runs import RunRepo
+    from app.domain.market_hours import get_session_status
+    from app.worker.tasks import execute_trading_strategy
+
+    now = datetime.now(timezone.utc)
+    pool = await _get_pool()
+    try:
+        active_strats = await pool.fetch(
+            """
+            SELECT s.*, t.subscription_status,
+                   (
+                       SELECT MAX(sr.created_at)
+                       FROM strategy_runs sr
+                       WHERE sr.strategy_id = s.id
+                   ) AS last_run_at
+            FROM strategies s
+            JOIN tenants t ON s.tenant_id = t.id
+            WHERE s.status = 'active'
+            """
+        )
+        if not active_strats:
+            return
+
+        for strat in active_strats:
+            strategy_id = strat["id"]
+            tenant_id = strat["tenant_id"]
+            user_id = strat["owner_user_id"]
+            exchange = strat["exchange"] or "NASDAQ"
+            timeframe = (strat["timeframe"] or "1d").lower()
+            risk_raw = strat["risk_config"]
+            if isinstance(risk_raw, str):
+                try:
+                    risk_raw = _json.loads(risk_raw)
+                except Exception:
+                    risk_raw = {}
+            risk_cfg = risk_raw if isinstance(risk_raw, dict) else {}
+
+            # Market session check
+            session = get_session_status(exchange, now)
+            allowed_session = risk_cfg.get("trade_session", "regular")
+            if session == "closed":
+                continue
+            if allowed_session in ("regular", "regular_only") and session != "open":
+                continue
+
+            # Respect SIP pause flag when strategy has a configured SIP schedule
+            if strat.get("sip_monthly_amount") is not None and bool(strat.get("sip_paused", False)):
+                continue
+
+            # Timeframe cadence check (1m/5m/15m/30m/1h/4h/1d/1w)
+            if not _should_run_for_timeframe(
+                timeframe,
+                now,
+                last_run_at=strat.get("last_run_at"),
+                exchange=exchange,
+            ):
+                continue
+
+            # Determine dry_run: if paper_trading_only or subscription not active -> dry_run = True
+            from app.services.billing import is_active_status
+
+            paper_only = risk_cfg.get("paper_trading_only", True)
+            is_sub_active = is_active_status(strat.get("subscription_status"))
+            dry_run = paper_only or not is_sub_active
+
+            # Prevent duplicate in-flight run
+            in_flight = await pool.fetchval(
+                """
+                SELECT id FROM strategy_runs
+                WHERE strategy_id = $1 AND status IN ('queued', 'running')
+                LIMIT 1
+                """,
+                strategy_id,
+            )
+            if in_flight:
+                continue
+
+            # Create run record
+            run_repo = RunRepo(pool, tenant_id)
+            run = await run_repo.create(
+                strategy_id=strategy_id,
+                version_id=strat["current_version_id"],
+                dry_run=dry_run,
+            )
+
+            try:
+                task = execute_trading_strategy.apply_async(
+                    args=[
+                        str(strategy_id),
+                        str(tenant_id),
+                        str(user_id),
+                        str(run["id"]),
+                        dry_run,
+                        list(strat["symbols"]),
+                        str(strat.get("timeframe") or "1d"),
+                        risk_cfg,
+                    ],
+                    queue="trading_tasks",
+                )
+                await run_repo.mark_dispatched(run["id"], task.id)
+                logger.info(
+                    "poll_and_execute_active_strategies: dispatched run %s (dry_run=%s) for strategy %s",
+                    run["id"],
+                    dry_run,
+                    strat["name"],
+                )
+            except Exception as exc:
+                logger.warning(
+                    "poll_and_execute_active_strategies: dispatch failed for strategy %s: %s",
+                    strategy_id,
+                    exc,
+                )
+                try:
+                    await run_repo.mark_failed(run["id"], str(exc))
+                except Exception:
+                    pass
+    finally:
+        await pool.close()
+

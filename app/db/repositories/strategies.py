@@ -128,6 +128,26 @@ class StrategyRepo(BaseRepo):
             self.tenant_id,
         )
 
+    async def update_risk_config(self, strategy_id: UUID, risk_config: dict) -> None:
+        import json as _json
+
+        await self.execute(
+            """
+            UPDATE strategies SET risk_config = $1::jsonb, updated_at = now()
+            WHERE id = $2 AND tenant_id = $3
+            """,
+            _json.dumps(risk_config),
+            strategy_id,
+            self.tenant_id,
+        )
+
+    async def delete(self, strategy_id: UUID) -> None:
+        await self.execute(
+            "DELETE FROM strategies WHERE id = $1 AND tenant_id = $2",
+            strategy_id,
+            self.tenant_id,
+        )
+
     async def get_current_version_id(self, strategy_id: UUID) -> UUID | None:
         return await self.fetchval(
             "SELECT current_version_id FROM strategies WHERE id = $1 AND tenant_id = $2",

@@ -80,6 +80,43 @@ class RunRepo(BaseRepo):
             self.tenant_id,
         )
 
+    async def list_all(
+        self,
+        strategy_id: UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[asyncpg.Record]:
+        if strategy_id:
+            return await self.fetch(
+                """
+                SELECT r.*, s.name AS strategy_name, s.symbols, s.exchange,
+                       (SELECT count(*) FROM orders o WHERE o.run_id = r.id) AS orders_count
+                FROM strategy_runs r
+                JOIN strategies s ON s.id = r.strategy_id
+                WHERE r.tenant_id = $1 AND r.strategy_id = $2
+                ORDER BY r.created_at DESC
+                LIMIT $3 OFFSET $4
+                """,
+                self.tenant_id,
+                strategy_id,
+                limit,
+                offset,
+            )
+        return await self.fetch(
+            """
+            SELECT r.*, s.name AS strategy_name, s.symbols, s.exchange,
+                   (SELECT count(*) FROM orders o WHERE o.run_id = r.id) AS orders_count
+            FROM strategy_runs r
+            JOIN strategies s ON s.id = r.strategy_id
+            WHERE r.tenant_id = $1
+            ORDER BY r.created_at DESC
+            LIMIT $2 OFFSET $3
+            """,
+            self.tenant_id,
+            limit,
+            offset,
+        )
+
     async def mark_running(self, run_id: UUID) -> None:
         await self.execute(
             """

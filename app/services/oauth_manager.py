@@ -229,7 +229,9 @@ _ANGELONE_LOGIN_URL = (
 )
 
 
-async def angelone_login(client_id: str, password: str, totp: str) -> dict:
+async def angelone_login(
+    client_id: str, password: str, totp: str, *, api_key: str | None = None
+) -> dict:
     """Login to AngelOne with clientcode + mpin + TOTP. Returns JWT tokens."""
     headers = {
         "Content-Type": "application/json",
@@ -239,7 +241,7 @@ async def angelone_login(client_id: str, password: str, totp: str) -> dict:
         "X-ClientLocalIP": "127.0.0.1",
         "X-ClientPublicIP": "127.0.0.1",
         "X-MACAddress": "fe80::1",
-        "X-PrivateKey": client_id,
+        "X-PrivateKey": (api_key or "").strip() or client_id,
     }
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(

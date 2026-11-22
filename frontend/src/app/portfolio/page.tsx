@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import { AppShell } from '@/components/layout/AppShell'
@@ -12,11 +12,11 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
 import type {
-  BacktestSummary, RiskReview, Strategy, UnifiedPortfolio, WealthForecast,
+  BacktestSummary, CasHoldingInput, RiskReview, Strategy, UnifiedPortfolio, WealthForecast,
 } from '@/lib/types'
 import {
   Wallet, Upload, TrendingUp, Building2, Layers, Sparkles, AlertCircle, Loader2,
-  ShieldAlert, ShieldCheck, Scissors, Eye, Check, Bot,
+  ShieldAlert, ShieldCheck, Scissors, Eye, Check, Bot, FileText, CheckCircle2,
 } from 'lucide-react'
 
 /* A simulated parsed NSDL/CDSL CAS — lets a new user populate the unified view
@@ -62,6 +62,8 @@ export default function PortfolioPage() {
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [successMsg, setSuccessMsg] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // ── Risk review state ────────────────────────────────────────
   const [risk, setRisk] = useState<RiskReview | null>(null)
@@ -141,13 +143,141 @@ export default function PortfolioPage() {
   }, [strategyId])
 
   const loadSample = useCallback(async () => {
-    setUploading(true); setError(null)
+    setUploading(true); setError(null); setSuccessMsg(null)
     try {
-      setPortfolio(await api.uploadCas(SAMPLE_CAS))
+      const res = await api.uploadCas(SAMPLE_CAS)
+      setPortfolio(res)
+      setSuccessMsg(`Imported ${res.holdings_count} sample holdings (${fmt(res.total_value)})`)
+      setTimeout(() => setSuccessMsg(null), 5000)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload failed')
     } finally {
       setUploading(false)
+    }
+  }, [])
+
+  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    setError(null)
+    setSuccessMsg(null)
+
+    try {
+      const text = await file.text()
+      const isJson = file.name.endsWith('.json') || file.type.includes('json')
+      let statementDate = new Date().toISOString().slice(0, 10)
+      let holdings: CasHoldingInput[] = []
+
+      if (isJson) {
+        const parsed = JSON.parse(text)
+        if (Array.isArray(parsed)) {
+          holdings = parsed
+        } else if (parsed && typeof parsed === 'object') {
+          if (parsed.statement_date) statementDate = parsed.statement_date
+          if (Array.isArray(parsed.holdings)) {
+            holdings = parsed.holdings
+          }
+        }
+      } else {
+        // Parse CSV format (NSDL / Zerodha / Upstox / Groww / generic holdings exports)
+        const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+        if (lines.length < 2) {
+          throw new Error('CSV file must contain a header row and at least one data row.')
+        }
+
+        const parseCsvLine = (line: string): string[] => {
+          const cells: string[] = []
+          let cur = ''
+          let inQuotes = false
+          for (let i = 0; i < line.length; i++) {
+            const ch = line[i]
+            if (ch === '"' || ch === "'") {
+              inQuotes = !inQuotes
+            } else if (ch === ',' && !inQuotes) {
+              cells.push(cur.trim())
+              cur = ''
+            } else {
+              cur += ch
+            }
+          }
+          cells.push(cur.trim())
+          return cells
+        }
+
+        const headers = parseCsvLine(lines[0]).map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''))
+        const findCol = (keywords: string[]) =>
+          headers.findIndex(h => keywords.some(k => h.includes(k)))
+
+        const colSymbol = findCol(['symbol', 'tradingsymbol', 'instrument', 'ticker', 'scrip', 'stock'])
+        const colName = findCol(['name', 'company', 'desc'])
+        const colIsin = findCol(['isin'])
+        const colQty = findCol(['qty', 'quantity', 'units', 'shares', 'holding'])
+        const colAvg = findCol(['avgcost', 'avgprice', 'buyavg', 'costprice', 'buyprice', 'avg', 'cost'])
+        const colPrice = findCol(['ltp', 'curprice', 'currentprice', 'cmp', 'lastprice', 'marketprice', 'price'])
+        const colBroker = findCol(['broker', 'dp', 'source', 'platform'])
+        const colAsset = findCol(['assetclass', 'asset', 'type'])
+
+        if (colSymbol === -1) {
+          throw new Error('CSV header missing a symbol or instrument column (e.g. Symbol, Instrument, Ticker).')
+        }
+        if (colQty === -1) {
+          throw new Error('CSV header missing a quantity column (e.g. Qty, Quantity, Shares).')
+        }
+
+        const cleanNum = (val: string | undefined): number => {
+          if (!val) return 0
+          const cleaned = val.replace(/[₹$,]/g, '').trim()
+          const n = parseFloat(cleaned)
+          return isNaN(n) ? 0 : n
+        }
+
+        for (let i = 1; i < lines.length; i++) {
+          const cells = parseCsvLine(lines[i])
+          if (cells.length <= Math.max(colSymbol, colQty)) continue
+
+          const rawSymbol = cells[colSymbol]?.replace(/['"]/g, '').trim()
+          if (!rawSymbol) continue
+
+          const qty = cleanNum(cells[colQty])
+          if (qty <= 0) continue
+
+          const avgCost = colAvg !== -1 ? cleanNum(cells[colAvg]) : 0
+          const curPrice = colPrice !== -1 ? cleanNum(cells[colPrice]) : avgCost
+          const rawName = colName !== -1 ? cells[colName]?.replace(/['"]/g, '').trim() : undefined
+          const isin = colIsin !== -1 ? cells[colIsin]?.replace(/['"]/g, '').trim() : undefined
+          const broker = colBroker !== -1 && cells[colBroker] ? cells[colBroker].replace(/['"]/g, '').trim() : 'Broker Export'
+          const assetClass = colAsset !== -1 && cells[colAsset] ? cells[colAsset].toLowerCase().replace(/['"]/g, '').trim() : 'equity'
+
+          holdings.push({
+            symbol: rawSymbol.toUpperCase(),
+            name: rawName || rawSymbol,
+            isin: isin || null,
+            asset_class: assetClass,
+            broker: broker || 'Broker Export',
+            quantity: qty,
+            avg_cost: avgCost,
+            current_price: curPrice > 0 ? curPrice : null,
+          })
+        }
+      }
+
+      if (holdings.length === 0) {
+        throw new Error('No valid holdings could be parsed from the uploaded file. Check that symbol and quantity columns exist.')
+      }
+
+      const res = await api.uploadCas({
+        statement_date: statementDate,
+        holdings,
+      })
+      setPortfolio(res)
+      setSuccessMsg(`Successfully imported ${res.holdings_count} holdings from ${file.name}`)
+      setTimeout(() => setSuccessMsg(null), 6000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to import statement')
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }, [])
 
@@ -201,14 +331,42 @@ export default function PortfolioPage() {
               </p>
             </div>
           </div>
-          <Button variant="secondary" onClick={loadSample} loading={uploading}>
-            <Upload className="w-4 h-4" /> Import CAS (sample)
-          </Button>
+
+          <div className="flex items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json,.csv"
+              className="hidden"
+              onChange={handleFileUpload}
+            />
+            <Button
+              variant="secondary"
+              onClick={() => fileInputRef.current?.click()}
+              loading={uploading}
+            >
+              <Upload className="w-4 h-4" /> Upload Statement (CSV / JSON)
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={loadSample}
+              loading={uploading}
+              title="Load simulated NSDL/CDSL sample portfolio"
+            >
+              Sample CAS
+            </Button>
+          </div>
         </div>
+
+        {successMsg && (
+          <GlassCard className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200/50 dark:border-emerald-800/30">
+            <CheckCircle2 className="w-4 h-4 shrink-0" /> {successMsg}
+          </GlassCard>
+        )}
 
         {error && (
           <GlassCard className="flex items-center gap-2 text-sm text-rose-600 dark:text-rose-400">
-            <AlertCircle className="w-4 h-4" /> {error}
+            <AlertCircle className="w-4 h-4 shrink-0" /> {error}
           </GlassCard>
         )}
 
@@ -226,12 +384,19 @@ export default function PortfolioPage() {
               Consolidate your holdings
             </h2>
             <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1 max-w-md mx-auto">
-              Import a Consolidated Account Statement (NSDL/CDSL) to see every
-              broker&apos;s holdings as a single portfolio — then simulate its future.
+              Import an NSDL/CDSL statement or broker holdings export (Zerodha, Groww, Upstox, Angel One) to see every holding as a single portfolio.
             </p>
-            <Button className="mt-5" onClick={loadSample} loading={uploading}>
-              <Upload className="w-4 h-4" /> Import sample CAS
-            </Button>
+            <div className="flex items-center justify-center gap-3 mt-6">
+              <Button onClick={() => fileInputRef.current?.click()} loading={uploading}>
+                <Upload className="w-4 h-4" /> Upload CSV or JSON
+              </Button>
+              <Button variant="secondary" onClick={loadSample} loading={uploading}>
+                Try Sample CAS
+              </Button>
+            </div>
+            <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-3">
+              Accepts .csv (with symbol &amp; quantity columns) or .json files.
+            </p>
           </GlassCard>
         ) : (
           <>

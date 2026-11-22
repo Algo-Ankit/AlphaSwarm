@@ -87,6 +87,7 @@ class StrategyCreateRequest(BaseModel):
     creation_mode: str = Field(default="nl", pattern="^(nl|quant)$")
     code_source: str | None = Field(default=None, max_length=50_000)
     llm_config_id: str | None = Field(default=None)
+    model_override: str | None = Field(default=None, max_length=100)
 
 
 class StrategyResponse(BaseModel):
@@ -113,6 +114,14 @@ class StrategyCodeUpdateRequest(BaseModel):
     code_source: str = Field(min_length=20, max_length=50_000)
 
 
+class StrategyStatusUpdateRequest(BaseModel):
+    status: str = Field(pattern="^(active|paused|stopped|draft)$")
+
+
+class StrategyRiskUpdateRequest(BaseModel):
+    risk: StrategyRiskConfig
+
+
 class StrategyRunRequest(BaseModel):
     dry_run: bool = True
 
@@ -124,6 +133,44 @@ class StrategyRunResponse(BaseModel):
     status: RunStatus
     dry_run: bool
     message: str
+
+
+class StrategyRunListItem(BaseModel):
+    id: str
+    strategy_id: str
+    strategy_name: str
+    symbols: list[str]
+    exchange: str
+    status: str
+    dry_run: bool
+    celery_task_id: str | None = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    error: str | None = None
+    orders_count: int = 0
+    created_at: datetime
+
+
+class RunOrderDetail(BaseModel):
+    id: str
+    strategy_id: str
+    run_id: str | None = None
+    broker_order_id: str | None = None
+    symbol: str
+    exchange: str
+    side: str
+    order_type: str
+    quantity: float
+    limit_price: float | None = None
+    estimated_price: float
+    fill_price: float | None = None
+    estimated_notional: float
+    realized_pnl: float | None = None
+    risk_status: str
+    risk_reason: str
+    broker_status: str | None = None
+    created_at: datetime
+    filled_at: datetime | None = None
 
 
 class OrderIntent(BaseModel):

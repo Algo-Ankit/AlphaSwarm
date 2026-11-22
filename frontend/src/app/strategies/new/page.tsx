@@ -354,7 +354,11 @@ export default function NewStrategyPage() {
         },
         creation_mode: mode,
         ...(mode === 'quant' ? { code_source: code } : {}),
-        ...(mode === 'nl' && selectedLLM ? { llm_config_id: selectedLLM } : {}),
+        ...(mode === 'nl' && selectedLLM?.startsWith('platform:')
+          ? { model_override: selectedLLM.replace('platform:', '') }
+          : mode === 'nl' && selectedLLM
+          ? { llm_config_id: selectedLLM }
+          : {}),
       })
       router.push(`/strategies/${s.id}`)
     } catch (err: unknown) {
@@ -440,7 +444,8 @@ export default function NewStrategyPage() {
                   onChange={(e) => setSelectedLLM(e.target.value || null)}
                   className="flex-1 min-w-0 bg-transparent text-[12px] font-medium text-zinc-700 dark:text-zinc-300 focus:outline-none cursor-pointer"
                 >
-                  <option value="">Platform Default (Free · Groq llama-3.1-8b-instant)</option>
+                  <option value="">Platform Default (Free · Google Gemini 2.5 Flash)</option>
+                  <option value="platform:gemini-2.5-pro">Platform Gemini 2.5 Pro (Deep Reasoning)</option>
                   {llmConfigs.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.label} · {c.model}

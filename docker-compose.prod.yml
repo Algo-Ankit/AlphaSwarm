@@ -59,7 +59,7 @@ services:
       dockerfile: Dockerfile
     command: >
       celery -A app.core.celery_app.celery_app worker
-      -Q trading_tasks
+      -Q trading_tasks,beat_tasks
       --concurrency=4
       --max-tasks-per-child=50
       --loglevel=info

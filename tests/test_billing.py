@@ -148,6 +148,45 @@ def test_missing_razorpay_signature_rejected(monkeypatch):
     get_settings.cache_clear()
 
 
+def test_swarm_tax_fx_conversion_usd_and_inr():
+    from unittest.mock import MagicMock, patch
+
+    from app.worker.billing_tasks import _attempt_charge
+
+    mock_rzp = MagicMock()
+    with patch("app.services.billing._razorpay_client", return_value=mock_rzp):
+        status_usd_to_inr = _attempt_charge(
+            "sub-1",
+            10.0,
+            stripe_customer_id=None,
+            razorpay_customer_id="cust_rzp_1",
+            currency="USD",
+        )
+        assert status_usd_to_inr == "invoiced"
+        order_payload = mock_rzp.order.create.call_args[0][0]
+        # $10 * 83 INR/USD * 100 paise = 83,000 paise
+        assert order_payload["amount"] == 83_000
+        assert order_payload["currency"] == "INR"
+
+    mock_stripe = MagicMock()
+    mock_pm = MagicMock()
+    mock_pm.id = "pm_123"
+    mock_stripe.PaymentMethod.list.return_value = MagicMock(data=[mock_pm])
+    with patch("app.services.billing._stripe_client", return_value=mock_stripe):
+        status_inr_to_usd = _attempt_charge(
+            "sub-2",
+            830.0,
+            stripe_customer_id="cus_stripe_1",
+            razorpay_customer_id=None,
+            currency="INR",
+        )
+        assert status_inr_to_usd == "charged"
+        pi_kwargs = mock_stripe.PaymentIntent.create.call_args[1]
+        # ₹830 / 83 * 100 cents = 1,000 cents ($10)
+        assert pi_kwargs["amount"] == 1_000
+        assert pi_kwargs["currency"] == "usd"
+
+
 if __name__ == "__main__":
     import traceback
 

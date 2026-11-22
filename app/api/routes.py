@@ -9,14 +9,18 @@ from app.core.celery_app import celery_app
 from app.db.repositories.runs import RunRepo
 from app.db.repositories.strategies import StrategyRepo
 from app.domain.models import (
+    RunOrderDetail,
     RunStatus,
     StrategyCodeUpdateRequest,
     StrategyCreateRequest,
     StrategyResponse,
     StrategyRiskConfig,
+    StrategyRiskUpdateRequest,
+    StrategyRunListItem,
     StrategyRunRequest,
     StrategyRunResponse,
     StrategyStatus,
+    StrategyStatusUpdateRequest,
     TaskStatusResponse,
 )
 from app.services.strategy_compiler import compile_strategy_prompt
@@ -205,6 +209,55 @@ async def update_strategy_code(
     return _record_to_response(record)
 
 
+@router.patch("/strategies/{strategy_id}/status", response_model=StrategyResponse)
+async def update_strategy_status(
+    strategy_id: UUID,
+    request: StrategyStatusUpdateRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> StrategyResponse:
+    repo = StrategyRepo(pool, current_user.tenant_id)
+    record = await repo.get_by_id(strategy_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
+    await repo.update_status(strategy_id, request.status)
+    updated = await repo.get_by_id(strategy_id)
+    return _record_to_response(updated)
+
+
+@router.patch("/strategies/{strategy_id}/risk", response_model=StrategyResponse)
+async def update_strategy_risk(
+    strategy_id: UUID,
+    request: StrategyRiskUpdateRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> StrategyResponse:
+    from app.domain.broker_routing import currency_for_exchange
+
+    repo = StrategyRepo(pool, current_user.tenant_id)
+    record = await repo.get_by_id(strategy_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
+    risk_config = request.risk.model_dump(mode="json")
+    risk_config["currency"] = currency_for_exchange(record["exchange"])
+    await repo.update_risk_config(strategy_id, risk_config)
+    updated = await repo.get_by_id(strategy_id)
+    return _record_to_response(updated)
+
+
+@router.delete("/strategies/{strategy_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_strategy(
+    strategy_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> None:
+    repo = StrategyRepo(pool, current_user.tenant_id)
+    record = await repo.get_by_id(strategy_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
+    await repo.delete(strategy_id)
+
+
 @router.post("/strategies/{strategy_id}/runs", response_model=StrategyRunResponse)
 async def run_strategy(
     strategy_id: UUID,
@@ -220,11 +273,6 @@ async def run_strategy(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
 
     version_id = record["current_version_id"]
-    run = await run_repo.create(
-        strategy_id=strategy_id,
-        version_id=version_id,
-        dry_run=request.dry_run,
-    )
 
     # asyncpg may return JSONB columns as str; parse defensively before dispatch
     import json as _json
@@ -262,6 +310,12 @@ async def run_strategy(
                 ),
             )
 
+    run = await run_repo.create(
+        strategy_id=strategy_id,
+        version_id=version_id,
+        dry_run=request.dry_run,
+    )
+
     try:
         task = execute_trading_strategy.apply_async(
             args=[
@@ -295,6 +349,77 @@ async def run_strategy(
         dry_run=request.dry_run,
         message="Strategy run dispatched to isolated worker queue",
     )
+
+
+@router.get("/runs", response_model=list[StrategyRunListItem])
+async def list_runs(
+    strategy_id: UUID | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    current_user: CurrentUser = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> list[StrategyRunListItem]:
+    repo = RunRepo(pool, current_user.tenant_id)
+    rows = await repo.list_all(strategy_id=strategy_id, limit=limit, offset=offset)
+    return [
+        StrategyRunListItem(
+            id=str(r["id"]),
+            strategy_id=str(r["strategy_id"]),
+            strategy_name=r["strategy_name"],
+            symbols=list(r["symbols"] or []),
+            exchange=r["exchange"] or "NASDAQ",
+            status=r["status"],
+            dry_run=r["dry_run"],
+            celery_task_id=r["celery_task_id"],
+            started_at=r["started_at"],
+            ended_at=r["ended_at"],
+            error=r["error"],
+            orders_count=int(r["orders_count"] or 0),
+            created_at=r["created_at"],
+        )
+        for r in rows
+    ]
+
+
+@router.get("/runs/{run_id}/orders", response_model=list[RunOrderDetail])
+async def list_run_orders(
+    run_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_db_pool),
+) -> list[RunOrderDetail]:
+    rows = await pool.fetch(
+        """
+        SELECT * FROM orders
+        WHERE run_id = $1 AND tenant_id = $2
+        ORDER BY created_at ASC
+        """,
+        run_id,
+        current_user.tenant_id,
+    )
+    return [
+        RunOrderDetail(
+            id=str(r["id"]),
+            strategy_id=str(r["strategy_id"]),
+            run_id=str(r["run_id"]) if r["run_id"] else None,
+            broker_order_id=r["broker_order_id"],
+            symbol=r["symbol"],
+            exchange=r["exchange"],
+            side=r["side"],
+            order_type=r["order_type"],
+            quantity=float(r["quantity"]),
+            limit_price=float(r["limit_price"]) if r["limit_price"] is not None else None,
+            estimated_price=float(r["estimated_price"]),
+            fill_price=float(r["fill_price"]) if r["fill_price"] is not None else None,
+            estimated_notional=float(r["estimated_notional"]),
+            realized_pnl=float(r["realized_pnl"]) if r["realized_pnl"] is not None else None,
+            risk_status=r["risk_status"],
+            risk_reason=r["risk_reason"],
+            broker_status=r["broker_status"],
+            created_at=r["created_at"],
+            filled_at=r["filled_at"],
+        )
+        for r in rows
+    ]
 
 
 class SipUpdateRequest(BaseModel):

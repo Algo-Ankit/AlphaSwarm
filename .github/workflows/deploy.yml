@@ -83,6 +83,52 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  deploy-vercel:
+    name: Deploy Frontend to Vercel
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Vercel credentials
+        id: vercel_auth
+        run: |
+          if [ -n "$VERCEL_TOKEN" ] && [ -n "$VERCEL_ORG_ID" ] && [ -n "$VERCEL_PROJECT_ID" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "VERCEL_TOKEN / VERCEL_ORG_ID / VERCEL_PROJECT_ID not set — relying on Vercel Git integration."
+          fi
+
+      - name: Set up Node.js
+        if: steps.vercel_auth.outputs.enabled == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Vercel CLI
+        if: steps.vercel_auth.outputs.enabled == 'true'
+        run: npm install -g vercel@66.6.0
+
+      - name: Pull Vercel Environment
+        if: steps.vercel_auth.outputs.enabled == 'true'
+        run: vercel pull --yes --environment=production
+
+      - name: Build Project Artifacts
+        if: steps.vercel_auth.outputs.enabled == 'true'
+        run: vercel build --prod
+
+      - name: Deploy Project Artifacts to Vercel
+        if: steps.vercel_auth.outputs.enabled == 'true'
+        run: vercel deploy --prebuilt --prod
+
   # ── OPTIONAL: deploy to a server after images are published ─────────────────
   # Fill in the repo secrets (Settings → Secrets and variables → Actions) and
   # remove the `if: false` guard to enable. Assumes docker-compose.prod.yml on

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import {
   LayoutDashboard, Zap, Activity, Settings, TrendingUp, ChevronRight, Brain, CandlestickChart, CreditCard, Sparkles, Wallet, Trophy, Rss,
+  type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getUserProfile } from '@/lib/api'
@@ -17,7 +18,14 @@ function formatPlan(plan: string): string {
     .join(' ')
 }
 
-const NAV_SECTIONS = [
+interface NavItemDef {
+  href: string
+  icon: LucideIcon
+  label: string
+  soon?: boolean
+}
+
+const NAV_SECTIONS: Array<{ id: string; label: string; items: NavItemDef[] }> = [
   {
     id: 'trading',
     label: 'Trading',
@@ -29,7 +37,7 @@ const NAV_SECTIONS = [
       { href: '/leaderboard',    icon: Trophy,            label: 'Leaderboard' },
       { href: '/feed',           icon: Rss,               label: 'Swarm Feed' },
       { href: '/advisor',        icon: Sparkles,          label: 'AI Advisor' },
-      { href: '/runs',           icon: Activity,          label: 'Runs', soon: true },
+      { href: '/runs',           icon: Activity,          label: 'Runs' },
     ],
   },
   {

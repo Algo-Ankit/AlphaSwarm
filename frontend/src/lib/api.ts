@@ -27,6 +27,8 @@ import type {
   PortfolioSummary,
   Strategy,
   StrategyCreateRequest,
+  StrategyRunListItem,
+  RunOrderDetail,
   StrategyRunResponse,
   Subscription,
   TaskStatusResponse,
@@ -326,6 +328,37 @@ export const api = {
       body: JSON.stringify({ dry_run: dryRun }),
     }),
 
+  updateStrategyStatus: (id: string, status: 'active' | 'paused' | 'stopped' | 'draft') =>
+    req<Strategy>(`/v1/strategies/${id}/status`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ status }),
+    }),
+
+  updateStrategyRisk: (id: string, risk: unknown) =>
+    req<Strategy>(`/v1/strategies/${id}/risk`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ risk }),
+    }),
+
+  deleteStrategy: (id: string) =>
+    req<void>(`/v1/strategies/${id}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    }),
+
+  listRuns: (strategyId?: string, limit = 50, offset = 0) => {
+    const params = new URLSearchParams()
+    if (strategyId) params.set('strategy_id', strategyId)
+    params.set('limit', String(limit))
+    params.set('offset', String(offset))
+    return req<StrategyRunListItem[]>(`/v1/runs?${params.toString()}`, { headers: authHeaders() })
+  },
+
+  listRunOrders: (runId: string) =>
+    req<RunOrderDetail[]>(`/v1/runs/${runId}/orders`, { headers: authHeaders() }),
+
   getTaskStatus: (taskId: string) =>
     req<TaskStatusResponse>(`/v1/tasks/${taskId}`, { headers: authHeaders() }),
 
@@ -469,7 +502,7 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  angeloneLogin: (data: { client_id: string; password: string; totp: string }) =>
+  angeloneLogin: (data: { client_id: string; password: string; totp: string; api_key?: string }) =>
     req<BrokerConnection>('/v1/brokers/oauth/angelone/login', {
       method: 'POST',
       headers: authHeaders(),

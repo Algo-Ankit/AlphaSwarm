@@ -14,13 +14,14 @@ import { cn } from '@/lib/utils'
 // learners can self-serve a key at zero cost. `keyUrl` is the provider's official
 // key-creation console (verified); rendered as the "Create API key" button.
 const PROVIDERS = [
-  { id: 'groq',       label: 'Groq',       color: 'from-orange-400 to-orange-600',  defaultUrl: 'https://api.groq.com/openai/v1',                       hint: 'Free, no card. 14,400 req/day. Fast.',        free: true,  keyUrl: 'https://console.groq.com/keys',          models: ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile', 'mixtral-8x7b-32768'] },
-  { id: 'gemini',     label: 'Gemini',     color: 'from-sky-400 to-blue-600',       defaultUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/', hint: 'Free tier, no card. Google AI Studio.',    free: true,  keyUrl: 'https://aistudio.google.com/app/apikey', models: ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'] },
-  { id: 'openrouter', label: 'OpenRouter', color: 'from-pink-400 to-rose-600',      defaultUrl: 'https://openrouter.ai/api/v1',                        hint: 'Has free models (:free suffix).',             free: true,  keyUrl: 'https://openrouter.ai/settings/keys',    models: ['meta-llama/llama-3.1-8b-instruct:free', 'google/gemma-2-9b-it:free'] },
-  { id: 'openai',     label: 'OpenAI',     color: 'from-emerald-400 to-teal-600',   defaultUrl: 'https://api.openai.com/v1',                           hint: 'Paid. GPT-4o. Best code quality.',            free: false, keyUrl: 'https://platform.openai.com/api-keys',   models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo'] },
-  { id: 'together',   label: 'Together',   color: 'from-blue-400 to-indigo-600',    defaultUrl: 'https://api.together.xyz/v1',                         hint: 'Free $25 credit on signup.',                  free: true,  keyUrl: 'https://api.together.xyz/settings/api-keys', models: ['meta-llama/Llama-3-8b-chat-hf', 'mistralai/Mixtral-8x7B-Instruct-v0.1'] },
-  { id: 'anthropic',  label: 'Anthropic',  color: 'from-violet-400 to-purple-600',  defaultUrl: 'https://api.anthropic.com/v1',                        hint: 'Paid. Claude 3.5 Haiku / Sonnet.',            free: false, keyUrl: 'https://console.anthropic.com/settings/keys', models: ['claude-3-5-haiku-20241022', 'claude-3-5-sonnet-20241022'] },
-  { id: 'custom',     label: 'Custom',     color: 'from-zinc-400 to-zinc-600',      defaultUrl: '',                                                    hint: 'Any OpenAI-compatible endpoint.',             free: false, keyUrl: '',                                       models: [] },
+  { id: 'gemini',     label: 'Google Gemini', color: 'from-sky-400 to-blue-600',       defaultUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/', hint: 'Free tier, fast, high limits. Google AI Studio.', free: true,  keyUrl: 'https://aistudio.google.com/app/apikey', models: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'] },
+  { id: 'nvidia',     label: 'NVIDIA NIM',    color: 'from-emerald-500 to-green-700',   defaultUrl: 'https://integrate.api.nvidia.com/v1',                     hint: 'Free credits on signup. Nemotron & Llama 3.3.', free: true,  keyUrl: 'https://build.nvidia.com',             models: ['nvidia/nemotron-4-340b-instruct', 'meta/llama-3.3-70b-instruct', 'mistralai/mixtral-8x22b-instruct-v0.1'] },
+  { id: 'groq',       label: 'Groq',          color: 'from-orange-400 to-orange-600',   defaultUrl: 'https://api.groq.com/openai/v1',                          hint: 'Free, no card. 14,400 req/day. Ultra-fast.',  free: true,  keyUrl: 'https://console.groq.com/keys',          models: ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile', 'mixtral-8x7b-32768'] },
+  { id: 'openrouter', label: 'OpenRouter',    color: 'from-pink-400 to-rose-600',       defaultUrl: 'https://openrouter.ai/api/v1',                            hint: 'Has free models (:free suffix).',             free: true,  keyUrl: 'https://openrouter.ai/settings/keys',    models: ['meta-llama/llama-3.1-8b-instruct:free', 'google/gemma-2-9b-it:free'] },
+  { id: 'openai',     label: 'OpenAI',        color: 'from-emerald-400 to-teal-600',    defaultUrl: 'https://api.openai.com/v1',                              hint: 'Paid. GPT-4o. Best code quality.',            free: false, keyUrl: 'https://platform.openai.com/api-keys',   models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo'] },
+  { id: 'together',   label: 'Together',      color: 'from-blue-400 to-indigo-600',     defaultUrl: 'https://api.together.xyz/v1',                            hint: 'Free $25 credit on signup.',                  free: true,  keyUrl: 'https://api.together.xyz/settings/api-keys', models: ['meta-llama/Llama-3-8b-chat-hf', 'mistralai/Mixtral-8x7B-Instruct-v0.1'] },
+  { id: 'anthropic',  label: 'Anthropic',     color: 'from-violet-400 to-purple-600',   defaultUrl: 'https://api.anthropic.com/v1',                           hint: 'Paid. Claude 3.5 Haiku / Sonnet.',            free: false, keyUrl: 'https://console.anthropic.com/settings/keys', models: ['claude-3-5-haiku-20241022', 'claude-3-5-sonnet-20241022'] },
+  { id: 'custom',     label: 'Custom',        color: 'from-zinc-400 to-zinc-600',       defaultUrl: '',                                                       hint: 'Any OpenAI-compatible endpoint (Ollama, etc).',free: false, keyUrl: '',                                       models: [] },
 ] as const
 
 type ProviderId = (typeof PROVIDERS)[number]['id']
@@ -298,6 +299,24 @@ export default function AISettingsPage() {
             Bring your own LLM API key for NL strategy generation. No key yet? Pick a <span className="font-semibold text-emerald-600 dark:text-emerald-400">Free</span> provider
             below, click <span className="font-semibold">Create API key</span>, paste it here — it takes about two minutes and costs nothing.
           </p>
+        </div>
+
+        {/* Platform Default Badge */}
+        <div className="mb-8 p-4 rounded-2xl bg-gradient-to-r from-sky-500/10 via-blue-500/5 to-transparent border border-sky-500/20 flex items-start gap-3.5">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-gradient-to-br from-sky-400 to-blue-600 text-white font-bold text-sm flex-shrink-0">
+            G
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Default Model: Google Gemini 2.5 Flash</span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider bg-sky-100 dark:bg-sky-900/40 text-sky-600 dark:text-sky-300">
+                Included Free
+              </span>
+            </div>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
+              AlphaSwarm provides Gemini 2.5 Flash out of the box for strategy building and portfolio intelligence. You can add your own key below (BYOK) for higher rate limits or specialized models.
+            </p>
+          </div>
         </div>
 
         {/* Free options callout */}

@@ -43,6 +43,8 @@ def charge_swarm_tax() -> None:
 
 
 async def _charge_swarm_tax_async() -> None:
+    from app.domain.broker_routing import currency_for_exchange
+
     pool = await _get_pool()
     try:
         subs = await pool.fetch(
@@ -52,10 +54,12 @@ async def _charge_swarm_tax_async() -> None:
                 ss.subscriber_tenant_id,
                 ss.allocated_capital,
                 ps.creator_tenant_id,
+                s.exchange,
                 t.stripe_customer_id,
                 t.razorpay_customer_id
             FROM strategy_subscriptions ss
             JOIN public_strategies ps ON ps.id = ss.public_strategy_id
+            JOIN strategies s ON s.id = ps.strategy_id
             JOIN tenants t ON t.id = ss.subscriber_tenant_id
             WHERE ss.is_active
               AND (
@@ -74,6 +78,7 @@ async def _charge_swarm_tax_async() -> None:
             sub_id = row["id"]
             creator_tenant_id = row["creator_tenant_id"]
             allocated = Decimal(str(row["allocated_capital"]))
+            strategy_currency = currency_for_exchange(row.get("exchange") or "NASDAQ")
 
             swarm_tax = (allocated * Decimal("0.01")).quantize(Decimal("0.01"))
             creator_share = (swarm_tax / 2).quantize(Decimal("0.01"))
@@ -85,6 +90,7 @@ async def _charge_swarm_tax_async() -> None:
                     amount_usd=float(swarm_tax),
                     stripe_customer_id=row["stripe_customer_id"],
                     razorpay_customer_id=row["razorpay_customer_id"],
+                    currency=strategy_currency,
                 )
             except Exception as exc:
                 logger.warning("charge_swarm_tax: billing failed sub=%s: %s", sub_id, exc)
@@ -117,27 +123,30 @@ async def _charge_swarm_tax_async() -> None:
                             """
                             INSERT INTO creator_balances
                                 (creator_tenant_id, subscription_id, amount, currency, credit_type)
-                            VALUES ($1, $2, $3, 'USD', 'creator_share')
+                            VALUES ($1, $2, $3, $4, 'creator_share')
                             """,
                             creator_tenant_id,
                             sub_id,
                             float(creator_share),
+                            strategy_currency,
                         )
                         await conn.execute(
                             """
                             INSERT INTO creator_balances
                                 (creator_tenant_id, subscription_id, amount, currency, credit_type)
-                            VALUES ($1, $2, $3, 'USD', 'platform_share')
+                            VALUES ($1, $2, $3, $4, 'platform_share')
                             """,
                             creator_tenant_id,
                             sub_id,
                             float(platform_share),
+                            strategy_currency,
                         )
 
             logger.info(
-                "charge_swarm_tax: sub=%s tax=%.2f status=%s creator=%.2f platform=%.2f",
+                "charge_swarm_tax: sub=%s tax=%.2f %s status=%s creator=%.2f platform=%.2f",
                 sub_id,
                 swarm_tax,
+                strategy_currency,
                 fee_status,
                 creator_share,
                 platform_share,
@@ -151,9 +160,14 @@ def _attempt_charge(
     amount_usd: float,
     stripe_customer_id: str | None,
     razorpay_customer_id: str | None,
+    *,
+    currency: str = "USD",
 ) -> str:
     """
     Charge the subscriber's saved payment method.
+
+    Converts the strategy-denominated tax (`amount_usd` in `currency`) into USD cents
+    for Stripe or INR paise for Razorpay via `broker_routing.convert_amount`.
 
     Returns the resulting fee_status:
       'charged'  — money actually collected (Stripe off-session PaymentIntent).
@@ -164,13 +178,19 @@ def _attempt_charge(
 
     Raises on gateway errors so the caller can log and mark 'failed'.
     """
+    from app.domain.broker_routing import convert_amount
     from app.services.billing import BillingNotConfigured
 
-    amount_cents = round(amount_usd * 100)
-    if amount_cents <= 0:
+    raw_amt = Decimal(str(amount_usd))
+    usd_amt = convert_amount(raw_amt, currency, "USD")
+    inr_amt = convert_amount(raw_amt, currency, "INR")
+
+    amount_cents = round(float(usd_amt) * 100)
+    amount_paise = round(float(inr_amt) * 100)
+    if amount_cents <= 0 and amount_paise <= 0:
         return "exempt"
 
-    if stripe_customer_id:
+    if stripe_customer_id and amount_cents > 0:
         try:
             from app.services.billing import _stripe_client  # type: ignore[attr-defined]
 
@@ -195,19 +215,11 @@ def _attempt_charge(
         except BillingNotConfigured:
             pass  # Stripe not configured — try Razorpay next.
 
-    if razorpay_customer_id:
+    if razorpay_customer_id and amount_paise > 0:
         try:
             from app.services.billing import _razorpay_client  # type: ignore[attr-defined]
 
             client = _razorpay_client()
-            # Razorpay order.create only ISSUES an order — it does not pull money
-            # from the customer (auto-debit needs a tokenised e-mandate, which we
-            # don't hold here). Earlier code returned this as "charged" and
-            # credited the creator ledger with revenue that was never collected.
-            # We now report it honestly as 'invoiced'; the ledger is credited only
-            # when a payment webhook confirms the order was actually paid.
-            # Production: add a real FX conversion (USD→INR) before this call.
-            amount_paise = round(amount_usd * 100)
             client.order.create(
                 {
                     "amount": amount_paise,

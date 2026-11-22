@@ -297,7 +297,7 @@ function AddZerodhaForm({ onAdded, existing }: { onAdded: (c: BrokerConnection) 
             ) : (
               <form onSubmit={handleSaveKeys} className="space-y-4 pt-4">
                 <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                  Enter your Zerodha Kite API key &amp; secret, then you'll be redirected to authorise.
+                  Enter your Zerodha Kite API key &amp; secret, then you&apos;ll be redirected to authorise.
                 </p>
                 <div>
                   <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">API Key</label>
@@ -369,14 +369,20 @@ function AngelOneForm({ onAdded }: { onAdded: (c: BrokerConnection) => void }) {
   const [clientId, setClientId] = useState('')
   const [password, setPassword] = useState('')
   const [totp, setTotp]       = useState('')
+  const [apiKey, setApiKey]   = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState<string | null>(null)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault(); setLoading(true); setError(null)
     try {
-      const conn = await api.angeloneLogin({ client_id: clientId.trim(), password, totp: totp.trim() })
-      onAdded(conn); setClientId(''); setPassword(''); setTotp(''); setOpen(false)
+      const conn = await api.angeloneLogin({
+        client_id: clientId.trim(),
+        password,
+        totp: totp.trim(),
+        ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+      })
+      onAdded(conn); setClientId(''); setPassword(''); setTotp(''); setApiKey(''); setOpen(false)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Login failed')
     } finally { setLoading(false) }
@@ -404,14 +410,15 @@ function AngelOneForm({ onAdded }: { onAdded: (c: BrokerConnection) => void }) {
               <p className="text-xs font-medium text-amber-700 dark:text-amber-300">Enter your Client Code, MPIN, and current TOTP. AlphaSwarm does not store your password in plaintext.</p>
             </div>
             {[
-              { label: 'Client Code', value: clientId,  set: setClientId,  type: 'text',     ph: 'e.g. A123456' },
-              { label: 'MPIN',        value: password,  set: setPassword,  type: 'password', ph: '4–6 digit MPIN' },
-              { label: 'TOTP',        value: totp,      set: setTotp,      type: 'text',     ph: '6-digit authenticator code' },
+              { label: 'Client Code', value: clientId,  set: setClientId,  type: 'text',     ph: 'e.g. A123456', req: true,  max: 32 },
+              { label: 'MPIN',        value: password,  set: setPassword,  type: 'password', ph: '4–6 digit MPIN', req: true,  max: 32 },
+              { label: 'TOTP',        value: totp,      set: setTotp,      type: 'text',     ph: '6-digit authenticator code', req: true,  max: 8 },
+              { label: 'SmartAPI Key (for order execution)', value: apiKey, set: setApiKey, type: 'text', ph: 'Optional — SmartAPI app API key', req: false, max: 128 },
             ].map((f) => (
               <div key={f.label}>
                 <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">{f.label}</label>
-                <input type={f.type} value={f.value} onChange={(e) => f.set(e.target.value)} placeholder={f.ph} required
-                  autoComplete="off" spellCheck={false} maxLength={f.label === 'TOTP' ? 8 : 32}
+                <input type={f.type} value={f.value} onChange={(e) => f.set(e.target.value)} placeholder={f.ph} required={f.req}
+                  autoComplete="off" spellCheck={false} maxLength={f.max}
                   className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-sm font-mono text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-violet-500/30" />
               </div>
             ))}

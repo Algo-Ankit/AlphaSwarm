@@ -20,6 +20,15 @@ _EXCHANGE_BROKER: dict[str, str] = {
     "BSE": "upstox",
 }
 
+# exchange (UPPER) → ordered tuple of supported brokers for that exchange
+_EXCHANGE_BROKERS: dict[str, tuple[str, ...]] = {
+    "NASDAQ": ("alpaca",),
+    "NYSE": ("alpaca",),
+    "CRYPTO": ("alpaca",),
+    "NSE": ("upstox", "zerodha", "angelone"),
+    "BSE": ("upstox", "zerodha", "angelone"),
+}
+
 # exchange (UPPER) → ISO-4217 currency the market settles in
 _EXCHANGE_CURRENCY: dict[str, str] = {
     "NASDAQ": "USD",
@@ -63,8 +72,13 @@ _UNITS_PER_USD: dict[str, Decimal] = {
 
 
 def broker_for_exchange(exchange: str) -> str:
-    """Broker key that should execute orders for this exchange."""
+    """Primary broker key that executes orders for this exchange."""
     return _EXCHANGE_BROKER.get((exchange or "").upper(), DEFAULT_BROKER)
+
+
+def brokers_for_exchange(exchange: str) -> tuple[str, ...]:
+    """All supported broker keys (in preference order) for this exchange."""
+    return _EXCHANGE_BROKERS.get((exchange or "").upper(), (DEFAULT_BROKER,))
 
 
 def currency_for_exchange(exchange: str) -> str:

@@ -111,6 +111,7 @@ class AngelOneLoginRequest(BaseModel):
     client_id: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=256)
     totp: str = Field(min_length=6, max_length=8)
+    api_key: str | None = Field(default=None, max_length=256)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -437,8 +438,11 @@ async def angelone_login(
     Credential-based AngelOne login: clientcode + MPIN + TOTP.
     On success, stores the JWT access token (valid ~1 day).
     """
+    smart_api_key = (body.api_key or "").strip() or body.client_id
     try:
-        token_data = await oauth.angelone_login(body.client_id, body.password, body.totp)
+        token_data = await oauth.angelone_login(
+            body.client_id, body.password, body.totp, api_key=smart_api_key
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
 
@@ -446,7 +450,7 @@ async def angelone_login(
     expires_at = oauth.token_expires_at(token_data["expires_in"])
     row = await repo.upsert_oauth(
         broker="angelone",
-        key_encrypted=encrypt_key(body.client_id),
+        key_encrypted=encrypt_key(smart_api_key),
         secret_encrypted=encrypt_key(body.password),
         access_token=encrypt_key(token_data["access_token"]),
         refresh_token=encrypt_key(token_data["refresh_token"])
