@@ -542,6 +542,56 @@ async def _recompute_commons_oos_async() -> None:
         await pool.close()
 
 
+def _should_run_for_timeframe(
+    timeframe: str,
+    now_utc,
+    last_run_at=None,
+    exchange: str = "NASDAQ",
+) -> bool:
+    """
+    Determine whether an active strategy should execute on this 1-minute Beat tick
+    based on its timeframe and its most recent run timestamp.
+    """
+    from datetime import timezone
+
+    import pytz
+
+    from app.domain.market_hours import exchange_timezone
+
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=timezone.utc)
+    if last_run_at is not None and last_run_at.tzinfo is None:
+        last_run_at = last_run_at.replace(tzinfo=timezone.utc)
+
+    tf = (timeframe or "1d").strip().lower()
+    minute = now_utc.minute
+
+    if tf in ("1m", "1min"):
+        return True
+    if tf in ("5m", "5min"):
+        return minute % 5 == 0
+    if tf in ("15m", "15min"):
+        return minute % 15 == 0
+    if tf in ("30m", "30min"):
+        return minute % 30 == 0
+    if tf in ("1h", "1hour", "60m", "60min"):
+        return minute == 0
+    if tf in ("4h", "4hour"):
+        return minute == 0 and now_utc.hour % 4 == 0
+    if tf in ("1w", "1week", "w", "weekly"):
+        if last_run_at is None:
+            return True
+        tz = pytz.timezone(exchange_timezone(exchange))
+        now_local = now_utc.astimezone(tz)
+        last_local = last_run_at.astimezone(tz)
+        return now_local.isocalendar()[:2] != last_local.isocalendar()[:2]
+    # Default: daily ('1d', '1day', 'd', 'daily') — run once per local trading day
+    if last_run_at is None:
+        return True
+    tz = pytz.timezone(exchange_timezone(exchange))
+    return now_utc.astimezone(tz).date() != last_run_at.astimezone(tz).date()
+
+
 @celery_app.task(name="app.worker.beat_tasks.poll_and_execute_active_strategies")
 def poll_and_execute_active_strategies():
     """Poll and execute all active strategies on their timeframe cadence during open market sessions."""
@@ -561,7 +611,12 @@ async def _poll_and_execute_active_strategies_async() -> None:
     try:
         active_strats = await pool.fetch(
             """
-            SELECT s.*, t.subscription_status
+            SELECT s.*, t.subscription_status,
+                   (
+                       SELECT MAX(sr.created_at)
+                       FROM strategy_runs sr
+                       WHERE sr.strategy_id = s.id
+                   ) AS last_run_at
             FROM strategies s
             JOIN tenants t ON s.tenant_id = t.id
             WHERE s.status = 'active'
@@ -584,21 +639,25 @@ async def _poll_and_execute_active_strategies_async() -> None:
                     risk_raw = {}
             risk_cfg = risk_raw if isinstance(risk_raw, dict) else {}
 
-            # Timeframe cadence check (1m/5m/15m/1h/1d)
-            minute = now.minute
-            if "5m" in timeframe and minute % 5 != 0:
-                continue
-            if "15m" in timeframe and minute % 15 != 0:
-                continue
-            if ("1h" in timeframe or "60m" in timeframe) and minute != 0:
-                continue
-
             # Market session check
             session = get_session_status(exchange, now)
-            allowed_session = risk_cfg.get("trade_session", "regular_only")
+            allowed_session = risk_cfg.get("trade_session", "regular")
             if session == "closed":
                 continue
-            if allowed_session == "regular_only" and session != "open":
+            if allowed_session in ("regular", "regular_only") and session != "open":
+                continue
+
+            # Respect SIP pause flag when strategy has a configured SIP schedule
+            if strat.get("sip_monthly_amount") is not None and bool(strat.get("sip_paused", False)):
+                continue
+
+            # Timeframe cadence check (1m/5m/15m/30m/1h/4h/1d/1w)
+            if not _should_run_for_timeframe(
+                timeframe,
+                now,
+                last_run_at=strat.get("last_run_at"),
+                exchange=exchange,
+            ):
                 continue
 
             # Determine dry_run: if paper_trading_only or subscription not active -> dry_run = True

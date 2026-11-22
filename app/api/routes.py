@@ -232,11 +232,15 @@ async def update_strategy_risk(
     current_user: CurrentUser = Depends(get_current_user),
     pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> StrategyResponse:
+    from app.domain.broker_routing import currency_for_exchange
+
     repo = StrategyRepo(pool, current_user.tenant_id)
     record = await repo.get_by_id(strategy_id)
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
-    await repo.update_risk_config(strategy_id, request.risk.model_dump())
+    risk_config = request.risk.model_dump(mode="json")
+    risk_config["currency"] = currency_for_exchange(record["exchange"])
+    await repo.update_risk_config(strategy_id, risk_config)
     updated = await repo.get_by_id(strategy_id)
     return _record_to_response(updated)
 

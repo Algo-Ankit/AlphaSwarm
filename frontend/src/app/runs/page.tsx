@@ -15,6 +15,11 @@ import {
   ShieldCheck, ShieldAlert, AlertTriangle, ArrowUpDown
 } from 'lucide-react'
 
+function ccyForExchange(exchange?: string): string {
+  const ex = (exchange ?? '').toUpperCase()
+  return ex === 'NSE' || ex === 'BSE' ? '₹' : '$'
+}
+
 export default function RunsPage() {
   const [runs, setRuns] = useState<StrategyRunListItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -290,7 +295,9 @@ export default function RunsPage() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-zinc-200/50 dark:divide-zinc-800/50">
-                              {orders.map((o) => (
+                              {orders.map((o) => {
+                                const ccy = ccyForExchange(o.exchange || r.exchange)
+                                return (
                                 <tr key={o.id} className="font-mono text-[11px]">
                                   <td className="py-2.5 font-bold text-zinc-900 dark:text-zinc-100">{o.symbol}</td>
                                   <td className="py-2.5">
@@ -306,12 +313,12 @@ export default function RunsPage() {
                                     </span>
                                   </td>
                                   <td className="py-2.5 text-zinc-700 dark:text-zinc-300">{o.quantity}</td>
-                                  <td className="py-2.5 text-zinc-500">${o.estimated_price.toFixed(2)}</td>
+                                  <td className="py-2.5 text-zinc-500">{ccy}{o.estimated_price.toFixed(2)}</td>
                                   <td className="py-2.5 text-zinc-900 dark:text-zinc-100 font-semibold">
-                                    {o.fill_price ? `$${o.fill_price.toFixed(2)}` : '—'}
+                                    {o.fill_price ? `${ccy}${o.fill_price.toFixed(2)}` : '—'}
                                   </td>
                                   <td className="py-2.5 text-zinc-700 dark:text-zinc-300">
-                                    ${o.estimated_notional.toLocaleString()}
+                                    {ccy}{o.estimated_notional.toLocaleString()}
                                   </td>
                                   <td className="py-2.5">
                                     <span
@@ -326,7 +333,8 @@ export default function RunsPage() {
                                   <td className="py-2.5 capitalize text-zinc-500">{o.broker_status ?? 'simulated'}</td>
                                   <td className="py-2.5 text-zinc-400">{fmtDate(o.created_at)}</td>
                                 </tr>
-                              ))}
+                                )
+                              })}
                             </tbody>
                           </table>
                         </div>

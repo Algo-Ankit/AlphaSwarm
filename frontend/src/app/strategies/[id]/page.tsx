@@ -56,6 +56,7 @@ export default function StrategyDetailPage() {
   const [agentConnected, setAgentConnected] = useState(false)
   const [agentStatus,    setAgentStatus]    = useState<string | null>(null)
   const [runMode,        setRunMode]        = useState<'paper' | 'live'>('paper')
+  const [modeUpdating,   setModeUpdating]   = useState(false)
   const [statusLoading,  setStatusLoading]  = useState(false)
   const [deleting,       setDeleting]       = useState(false)
 
@@ -95,6 +96,7 @@ export default function StrategyDetailPage() {
         setStrategy(s)
         setBtSymbol(s.symbols[0] ?? 'SPY')
         setBtTimeframe(normalizeTimeframe(s.timeframe))
+        setRunMode(s.risk?.paper_trading_only === false ? 'live' : 'paper')
       })
       .catch(() => router.push('/'))
       .finally(() => setLoading(false))
@@ -105,6 +107,31 @@ export default function StrategyDetailPage() {
   }, [id, router])
 
   const agentIsLive = agentConnected && agentStatus === 'running'
+
+  async function handleSetRunMode(nextMode: 'paper' | 'live') {
+    if (!strategy || nextMode === runMode) return
+    if (
+      nextMode === 'live' &&
+      !window.confirm(
+        'Enable Live Trading for this strategy? Both manual Live runs and the automated scheduler will place real broker orders (subject to risk caps and active Quant Tier subscription).'
+      )
+    ) {
+      return
+    }
+    setModeUpdating(true)
+    try {
+      const updated = await api.updateStrategyRisk(strategy.id, {
+        ...strategy.risk,
+        paper_trading_only: nextMode === 'paper',
+      })
+      setStrategy(updated)
+      setRunMode(updated.risk?.paper_trading_only === false ? 'live' : 'paper')
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : 'Failed to update execution mode')
+    } finally {
+      setModeUpdating(false)
+    }
+  }
 
   async function handleRun() {
     if (!strategy) return
@@ -378,9 +405,10 @@ export default function StrategyDetailPage() {
               <div className="flex items-center p-0.5 rounded-xl bg-zinc-100 dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700">
                 <button
                   type="button"
-                  onClick={() => setRunMode('paper')}
+                  onClick={() => handleSetRunMode('paper')}
+                  disabled={modeUpdating}
                   className={cn(
-                    'px-2.5 py-1 text-xs font-semibold rounded-lg transition-all',
+                    'px-2.5 py-1 text-xs font-semibold rounded-lg transition-all disabled:opacity-50',
                     runMode === 'paper'
                       ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
                       : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
@@ -390,9 +418,10 @@ export default function StrategyDetailPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setRunMode('live')}
+                  onClick={() => handleSetRunMode('live')}
+                  disabled={modeUpdating}
                   className={cn(
-                    'px-2.5 py-1 text-xs font-semibold rounded-lg transition-all',
+                    'px-2.5 py-1 text-xs font-semibold rounded-lg transition-all disabled:opacity-50',
                     runMode === 'live'
                       ? 'bg-emerald-500 text-white shadow-sm'
                       : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
@@ -906,8 +935,15 @@ export default function StrategyDetailPage() {
                   </div>
                 ))}
                 <div className="flex items-center justify-between py-3">
-                  <span className="text-sm text-zinc-500 dark:text-zinc-400">Paper Trading</span>
-                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                  <span className="text-sm text-zinc-500 dark:text-zinc-400">Execution Mode</span>
+                  <span className={cn(
+                    'text-[11px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider',
+                    strategy.risk.paper_trading_only
+                      ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300'
+                      : 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300',
+                  )}>
+                    {strategy.risk.paper_trading_only ? 'Paper Only' : 'Live Enabled'}
+                  </span>
                 </div>
               </div>
               <div className="mt-4 pt-4 border-t border-zinc-100 dark:border-white/[0.05]">
