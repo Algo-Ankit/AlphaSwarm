@@ -111,7 +111,7 @@ jobs:
         if: steps.vercel_auth.outputs.enabled == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
 
       - name: Install Vercel CLI
         if: steps.vercel_auth.outputs.enabled == 'true'
