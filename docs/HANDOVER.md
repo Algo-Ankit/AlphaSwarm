@@ -94,8 +94,8 @@
 - **Real CAS & Broker Holdings Ingestion:**
   - Real statement upload on `frontend/src/app/portfolio/page.tsx` supporting NSDL/CDSL JSON and broker CSV exports (Zerodha, Upstox, Groww, Angel One) alongside sample data.
 - **CI/CD & Split-Hosting (Vercel + Docker Compose):**
-  - Added `frontend` lint, `npm run build`, and TypeScript CI job + safe git base-diff handling in `.github/workflows/main.yml`.
-  - Added `frontend/vercel.json` and `deploy-vercel` job (`vercel@66.6.0` prebuilt deploy when `VERCEL_TOKEN`/`VERCEL_ORG_ID`/`VERCEL_PROJECT_ID` secrets are set, or automatic Vercel Git integration). Frontend deploys to Vercel (`Root Directory = frontend`, `NEXT_PUBLIC_API_URL` pointing to the stateful Docker/Hetzner backend API hosting FastAPI + WebSockets + Celery + Postgres + Redis).
+  - Added `frontend` lint, `npm run build`, and TypeScript CI job (Node 24) + safe git base-diff handling in `.github/workflows/main.yml`.
+  - Added `frontend/vercel.json`, `"engines": { "node": "26.x" }` in `frontend/package.json`, and `deploy-vercel` job (`vercel@66.6.0` prebuilt deploy when `VERCEL_TOKEN`/`VERCEL_ORG_ID`/`VERCEL_PROJECT_ID` secrets are set, or automatic Vercel Git integration). Linked `Algo-Ankit/AlphaSwarm` to Vercel project `alphaswarm` (`prj_jwOUbjex68jkcwwbGzwMZEnZFgOP`, `Root Directory = frontend`, `NEXT_PUBLIC_API_URL` pointing to the stateful Docker/Hetzner backend API hosting FastAPI + WebSockets + Celery + Postgres + Redis).
 
 ---
 
@@ -140,4 +140,4 @@ cd frontend && npm install && npm run lint && npx tsc --noEmit && npm run build
 | 2026-11-22 | Scheduler & Risk | `_should_run_for_timeframe` daily dedup, `sip_paused` check, `Decimal` JSON fix, Live/Paper UI toggle, rebalance approval dispatch | [ADR-014](DECISIONS.md) | `app/worker/beat_tasks.py`, `app/api/routes.py`, `app/api/notifications.py`, `frontend/src/app/strategies/[id]/page.tsx` |
 | 2026-11-22 | Indian Brokers | Upstox token reconciliation, multi-broker NSE/BSE routing, `.NS`/`.BO` strip, Angel One `symboltoken` + SmartAPI key | [ADR-015](DECISIONS.md) | `app/domain/broker_routing.py`, `app/services/execution.py`, `app/worker/tasks.py`, `app/api/brokers.py` |
 | 2026-11-22 | Billing & UI | Swarm Tax USD/INR FX conversion (`convert_amount`); `₹`/`$` currency display in `/runs` | [ADR-009](DECISIONS.md) | `app/worker/billing_tasks.py`, `frontend/src/app/runs/page.tsx` |
-| 2026-11-22 | CI/CD & Docs | Frontend CI (`lint`/`build`/`tsc`), `frontend/vercel.json`, `deploy-vercel` CD job, Niyam 3-file doc parity rule | [ADR-012](DECISIONS.md), [ADR-016](DECISIONS.md) | `.github/workflows/main.yml`, `.github/workflows/deploy.yml`, `frontend/vercel.json`, `CLAUDE.md`, `AGENTS.md`, `docs/DECISIONS.md`, `docs/HANDOVER.md` |
+| 2026-11-22 | CI/CD & Docs | Frontend CI (`lint`/`build`/`tsc`, Node 24/26.x), `frontend/Dockerfile` (`node:24-alpine`), `frontend/vercel.json`, `deploy-vercel` CD job, Vercel Git link (`prj_jwOUbjex68jkcwwbGzwMZEnZFgOP`), Niyam 3-file doc parity | [ADR-012](DECISIONS.md), [ADR-016](DECISIONS.md) | `.github/workflows/main.yml`, `.github/workflows/deploy.yml`, `frontend/Dockerfile`, `frontend/package.json`, `frontend/vercel.json`, `CLAUDE.md`, `AGENTS.md`, `docs/DECISIONS.md`, `docs/HANDOVER.md` |
