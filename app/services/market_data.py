@@ -180,8 +180,6 @@ async def _fetch_alpaca(
             for b in raw
         ]
 
-    import time
-
     for attempt in range(3):
         try:
             return await asyncio.to_thread(_sync)
@@ -261,8 +259,6 @@ async def _fetch_yfinance(
             bars = _aggregate_to_4h(bars, symbol, exchange)
 
         return bars
-
-    import time
 
     for attempt in range(3):
         try:

@@ -179,6 +179,106 @@ def test_indian_executors_resolve_tokens_and_strip_suffix():
         assert z_kwargs["data"]["tradingsymbol"] == "RELIANCE"
 
 
+def test_is_broker_connection_ready_filters_pending_and_expired_oauth():
+    from datetime import datetime, timedelta, timezone
+
+    from app.domain.broker_routing import is_broker_connection_ready
+
+    # Pending Upstox OAuth row (no access_token) must NOT shadow Zerodha/AngelOne
+    assert not is_broker_connection_ready(
+        {"broker": "upstox", "is_active": True, "access_token": None}
+    )
+    # Expired token must return False
+    assert not is_broker_connection_ready(
+        {
+            "broker": "zerodha",
+            "is_active": True,
+            "access_token": "tok",
+            "token_expires_at": datetime.now(timezone.utc) - timedelta(minutes=5),
+        }
+    )
+    # Valid token returns True
+    assert is_broker_connection_ready(
+        {
+            "broker": "zerodha",
+            "is_active": True,
+            "access_token": "tok",
+            "token_expires_at": datetime.now(timezone.utc) + timedelta(hours=6),
+        }
+    )
+    # Alpaca requires both key_encrypted and secret_encrypted
+    assert not is_broker_connection_ready({"broker": "alpaca", "is_active": True})
+    assert is_broker_connection_ready(
+        {
+            "broker": "alpaca",
+            "is_active": True,
+            "key_encrypted": "enc_k",
+            "secret_encrypted": "enc_s",
+        }
+    )
+
+
+def test_notification_to_dict_preserves_approved_at():
+    from datetime import datetime, timezone
+    from uuid import uuid4
+
+    from app.services.notifications import notification_to_dict
+
+    now = datetime(2026, 11, 24, 10, 0, tzinfo=timezone.utc)
+    row = {
+        "id": uuid4(),
+        "type": "rebalance_approval",
+        "title": "Lump-Sum",
+        "body": "Approve boost",
+        "entity_type": "strategy",
+        "entity_id": uuid4(),
+        "is_read": True,
+        "approved_at": now,
+        "created_at": now,
+    }
+    d = notification_to_dict(row)
+    assert d["approved_at"] == now.isoformat()
+
+
+def test_llm_base_url_rejects_ssrf_and_plaintext_nonlocal():
+    import pytest
+    from fastapi import HTTPException
+
+    from app.api.llm_configs import _validate_llm_base_url
+
+    _validate_llm_base_url("https://integrate.api.nvidia.com/v1")
+    _validate_llm_base_url("http://localhost:11434/v1")
+
+    for bad in (
+        "http://169.254.169.254/latest/meta-data",
+        "https://10.0.0.1/v1",
+        "http://api.openai.com/v1",
+    ):
+        with pytest.raises(HTTPException):
+            _validate_llm_base_url(bad)
+
+
+def test_compile_strategy_prompt_rejects_missing_tenant_id_on_byok():
+    import asyncio
+    from unittest.mock import MagicMock
+    from uuid import uuid4
+
+    import pytest
+
+    from app.domain.models import StrategyCreateRequest
+    from app.services.strategy_compiler import compile_strategy_prompt
+
+    req = StrategyCreateRequest(
+        name="Test Strategy",
+        prompt="Buy SPY when RSI < 30 and sell when RSI > 70",
+        symbols=["SPY"],
+        timeframe="1d",
+        llm_config_id=str(uuid4()),
+    )
+    with pytest.raises(ValueError, match="tenant_id is required"):
+        asyncio.run(compile_strategy_prompt(req, pool=MagicMock(), tenant_id=None))
+
+
 if __name__ == "__main__":
     import traceback
 
