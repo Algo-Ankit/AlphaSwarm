@@ -118,3 +118,23 @@ def convert_amount(amount: Decimal, from_currency: str, to_currency: str) -> Dec
 def has_fx_rate(currency: str) -> bool:
     """True if we hold a reference FX rate for this currency."""
     return (currency or DEFAULT_CURRENCY).upper() in _UNITS_PER_USD
+
+
+def is_broker_connection_ready(broker_row: dict) -> bool:
+    """True if a broker_connections row has usable, non-expired credentials."""
+    from datetime import datetime, timezone
+
+    if not broker_row or not broker_row.get("is_active", True):
+        return False
+    name = (broker_row.get("broker") or "").lower()
+    if name == "alpaca":
+        return bool(broker_row.get("key_encrypted") and broker_row.get("secret_encrypted"))
+    # OAuth / session-token brokers (upstox, zerodha, angelone)
+    if not broker_row.get("access_token"):
+        return False
+    expires_at = broker_row.get("token_expires_at")
+    if isinstance(expires_at, datetime):
+        exp = expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=timezone.utc)
+        if exp < datetime.now(timezone.utc):
+            return False
+    return True

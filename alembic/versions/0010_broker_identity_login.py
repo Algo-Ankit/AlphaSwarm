@@ -25,8 +25,13 @@ def upgrade() -> None:
     )
     # A passwordless row must say which provider owns the identity.
     op.execute("""
-        ALTER TABLE users ADD CONSTRAINT users_auth_provider_check
-        CHECK (password_hash IS NOT NULL OR auth_provider <> 'password')
+        DO $$
+        BEGIN
+            ALTER TABLE users ADD CONSTRAINT users_auth_provider_check
+            CHECK (password_hash IS NOT NULL OR auth_provider <> 'password');
+        EXCEPTION
+            WHEN duplicate_object THEN NULL;
+        END $$;
     """)
 
 

@@ -41,7 +41,7 @@ import type {
   WealthForecast,
 } from './types'
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 /** WS base derived from the HTTP base (http→ws, https→wss). */
 export function wsBase(): string {
@@ -343,7 +343,7 @@ export const api = {
     }),
 
   deleteStrategy: (id: string) =>
-    req<void>(`/v1/strategies/${id}`, {
+    reqVoid(`/v1/strategies/${id}`, {
       method: 'DELETE',
       headers: authHeaders(),
     }),

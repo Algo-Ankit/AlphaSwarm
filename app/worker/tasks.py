@@ -13,7 +13,11 @@ import pandas as pd
 from app.core.celery_app import celery_app
 from app.core.config import get_settings
 from app.domain.base_strategy import BaseStrategy, ReadOnlyDataFrame, StrategyContext
-from app.domain.broker_routing import brokers_for_exchange, currency_symbol
+from app.domain.broker_routing import (
+    brokers_for_exchange,
+    currency_symbol,
+    is_broker_connection_ready,
+)
 from app.domain.market_data import MarketState
 from app.domain.models import (
     OrderIntent,
@@ -161,9 +165,6 @@ async def _write_order_async(
 
 # ── Full async execution body ─────────────────────────────────────────────────
 
-# Module-level pool reused across invocations within the same Celery worker process.
-_pool = None
-
 
 async def _execute_async(
     strategy_id: str,
@@ -175,7 +176,6 @@ async def _execute_async(
     timeframe: str,
     risk_config: dict,
 ) -> dict:
-    global _pool
     import asyncpg
 
     from app.db.repositories.brokers import BrokerRepo
@@ -189,11 +189,9 @@ async def _execute_async(
     db_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
 
     log = RunLogger(run_id) if run_id else None
+    pool = await asyncpg.create_pool(db_url, min_size=1, max_size=3)
 
     try:
-        if _pool is None:
-            _pool = await asyncpg.create_pool(db_url, min_size=1, max_size=5)
-        pool = _pool
 
         tradable_symbols = [s.upper() for s in (symbols or ["SPY"])]
         risk_profile = StrategyRiskConfig.model_validate(
@@ -251,7 +249,7 @@ async def _execute_async(
                 b
                 for name in allowed_brokers
                 for b in brokers
-                if b["broker"] == name and b.get("is_active", True)
+                if b["broker"] == name and is_broker_connection_ready(b)
             ),
             None,
         )
@@ -711,18 +709,18 @@ async def _execute_async(
         if log:
             log.error(f"Worker exception: {exc}")
             log.status("failed", str(exc))
-        if run_id and _pool is not None:
+        if run_id and pool is not None:
             try:
                 from app.db.repositories.runs import RunRepo as _RunRepo
 
-                await _RunRepo(_pool, UUID(tenant_id)).mark_crashed(UUID(run_id), str(exc))
+                await _RunRepo(pool, UUID(tenant_id)).mark_crashed(UUID(run_id), str(exc))
             except Exception:
                 pass
             try:
                 from app.services.notifications import create_notification
 
                 await create_notification(
-                    _pool,
+                    pool,
                     tenant_id=tenant_id,
                     user_id=user_id,
                     type="bot_error",
@@ -736,6 +734,7 @@ async def _execute_async(
         raise
 
     finally:
+        await pool.close()
         if log:
             log.close()
 
@@ -759,13 +758,7 @@ def execute_trading_strategy(
             "Cannot execute live orders without run_id — no audit trail would be recorded."
         )
 
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-    return loop.run_until_complete(
+    return asyncio.run(
         _execute_async(
             strategy_id=strategy_id,
             tenant_id=tenant_id,

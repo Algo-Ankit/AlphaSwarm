@@ -35,6 +35,8 @@ create_github_issues.py
 # Agent runtime locks
 .claude/*.lock
 
-# Vercel CLI local link metadata
+# Vercel CLI local link metadata & local env overrides
 .vercel/
 frontend/.vercel/
+.env*.local
+frontend/.env*.local

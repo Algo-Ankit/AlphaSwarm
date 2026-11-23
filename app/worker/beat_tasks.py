@@ -355,12 +355,20 @@ async def _reconcile_positions_async() -> None:
             logger.info("reconcile_positions: no active broker connections")
             return
 
+        from app.domain.broker_routing import is_broker_connection_ready
         from app.services.broker_crypto import decrypt_key
-        from app.services.execution import get_executor
+        from app.services.execution import _strip_indian_suffix, get_executor
 
         for row in brokers:
             tenant_id = row["tenant_id"]
             broker = row["broker"]
+            if not is_broker_connection_ready(row):
+                logger.debug(
+                    "reconcile_positions: skipping tenant=%s broker=%s (pending or expired credentials)",
+                    tenant_id,
+                    broker,
+                )
+                continue
             try:
                 # Route to the connection's actual broker (alpaca / upstox / …),
                 # not a hardcoded Alpaca. Unsupported / not-yet-implemented brokers
@@ -389,12 +397,17 @@ async def _reconcile_positions_async() -> None:
                 )
                 broker_positions = await asyncio.to_thread(executor.get_positions)
 
-                # Load DB positions for this tenant
+                # Load DB positions for this tenant (strip .NS/.BO so RELIANCE.NS matches RELIANCE)
                 db_rows = await pool.fetch(
                     "SELECT symbol, quantity FROM positions WHERE tenant_id = $1",
                     tenant_id,
                 )
-                db_positions = {r["symbol"].upper(): Decimal(str(r["quantity"])) for r in db_rows}
+                db_positions: dict[str, Decimal] = {}
+                for r in db_rows:
+                    key = _strip_indian_suffix(r["symbol"])
+                    db_positions[key] = db_positions.get(key, Decimal("0")) + Decimal(
+                        str(r["quantity"])
+                    )
 
                 for symbol, broker_qty in broker_positions.items():
                     db_qty = db_positions.get(symbol, Decimal("0"))
@@ -575,9 +588,17 @@ def _should_run_for_timeframe(
     if tf in ("30m", "30min"):
         return minute % 30 == 0
     if tf in ("1h", "1hour", "60m", "60min"):
-        return minute == 0
+        if minute != 0:
+            return False
+        if last_run_at is not None and (now_utc - last_run_at).total_seconds() < 3000:
+            return False
+        return True
     if tf in ("4h", "4hour"):
-        return minute == 0 and now_utc.hour % 4 == 0
+        if not (minute == 0 and now_utc.hour % 4 == 0):
+            return False
+        if last_run_at is not None and (now_utc - last_run_at).total_seconds() < 12600:
+            return False
+        return True
     if tf in ("1w", "1week", "w", "weekly"):
         if last_run_at is None:
             return True
@@ -616,6 +637,7 @@ async def _poll_and_execute_active_strategies_async() -> None:
                        SELECT MAX(sr.created_at)
                        FROM strategy_runs sr
                        WHERE sr.strategy_id = s.id
+                         AND sr.status IN ('queued', 'running', 'completed')
                    ) AS last_run_at
             FROM strategies s
             JOIN tenants t ON s.tenant_id = t.id

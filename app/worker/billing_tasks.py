@@ -81,8 +81,33 @@ async def _charge_swarm_tax_async() -> None:
             strategy_currency = currency_for_exchange(row.get("exchange") or "NASDAQ")
 
             swarm_tax = (allocated * Decimal("0.01")).quantize(Decimal("0.01"))
-            creator_share = (swarm_tax / 2).quantize(Decimal("0.01"))
-            platform_share = swarm_tax - creator_share
+            if swarm_tax < Decimal("0.02"):
+                # Below $0.02 / ₹0.02, a 50/50 split rounds creator_share to 0.00,
+                # which would violate creator_balances CHECK (amount > 0).
+                await pool.execute(
+                    """
+                    UPDATE strategy_subscriptions
+                    SET last_billed_at = now(), fee_status = 'exempt', updated_at = now()
+                    WHERE id = $1
+                    """,
+                    sub_id,
+                )
+                continue
+
+            # When Stripe collects, it always charges USD; record the ledger in USD
+            # so creator_balances.currency matches the actual collected currency.
+            from app.domain.broker_routing import convert_amount
+
+            billed_currency = (
+                "USD"
+                if (row["stripe_customer_id"] and strategy_currency != "USD")
+                else strategy_currency
+            )
+            ledger_tax = convert_amount(swarm_tax, strategy_currency, billed_currency).quantize(
+                Decimal("0.01")
+            )
+            creator_share = (ledger_tax / 2).quantize(Decimal("0.01"))
+            platform_share = ledger_tax - creator_share
 
             try:
                 fee_status = _attempt_charge(
@@ -118,7 +143,7 @@ async def _charge_swarm_tax_async() -> None:
                         sub_id,
                         fee_status,
                     )
-                    if fee_status == "charged":
+                    if fee_status == "charged" and creator_share > 0 and platform_share > 0:
                         await conn.execute(
                             """
                             INSERT INTO creator_balances
@@ -128,7 +153,7 @@ async def _charge_swarm_tax_async() -> None:
                             creator_tenant_id,
                             sub_id,
                             float(creator_share),
-                            strategy_currency,
+                            billed_currency,
                         )
                         await conn.execute(
                             """
@@ -139,14 +164,14 @@ async def _charge_swarm_tax_async() -> None:
                             creator_tenant_id,
                             sub_id,
                             float(platform_share),
-                            strategy_currency,
+                            billed_currency,
                         )
 
             logger.info(
                 "charge_swarm_tax: sub=%s tax=%.2f %s status=%s creator=%.2f platform=%.2f",
                 sub_id,
-                swarm_tax,
-                strategy_currency,
+                ledger_tax,
+                billed_currency,
                 fee_status,
                 creator_share,
                 platform_share,

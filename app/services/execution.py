@@ -204,26 +204,30 @@ def _strip_indian_suffix(symbol: str) -> str:
 
 # Upstox places orders by instrument_key (e.g. "NSE_EQ|INE002A01018"), not by
 # trading symbol. We resolve symbol → instrument_key from Upstox's published
-# instrument master, cached process-wide (it changes at most daily).
+# instrument master, cached process-wide with a 24h TTL.
+_INSTRUMENT_CACHE_TTL_SECONDS = 86_400
 _UPSTOX_INSTRUMENTS_URL = (
     "https://assets.upstox.com/market-quote/instruments/exchange/{exchange}.json.gz"
 )
-# exchange (NSE/BSE) → {TRADING_SYMBOL: instrument_key}
-_UPSTOX_INSTRUMENT_CACHE: dict[str, dict[str, str]] = {}
+# exchange (NSE/BSE) → (monotonic_ts, {TRADING_SYMBOL: instrument_key})
+_UPSTOX_INSTRUMENT_CACHE: dict[str, tuple[float, dict[str, str]]] = {}
 
 # Angel One SmartAPI places orders by (tradingsymbol, numeric symboltoken).
 _ANGELONE_SCRIP_MASTER_URL = (
     "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 )
-# exchange (NSE/BSE) → {CLEAN_SYMBOL: (tradingsymbol, token)}
-_ANGELONE_INSTRUMENT_CACHE: dict[str, dict[str, tuple[str, str]]] = {}
+# exchange (NSE/BSE) → (monotonic_ts, {CLEAN_SYMBOL: (tradingsymbol, token)})
+_ANGELONE_INSTRUMENT_CACHE: dict[str, tuple[float, dict[str, tuple[str, str]]]] = {}
 
 
 def _load_angelone_instruments(exchange: str) -> dict[str, tuple[str, str]]:
     """Fetch + cache {clean_symbol: (tradingsymbol, token)} from Angel One Scrip Master."""
+    import time
+
     exch = (exchange or "NSE").upper()
-    if exch in _ANGELONE_INSTRUMENT_CACHE:
-        return _ANGELONE_INSTRUMENT_CACHE[exch]
+    cached = _ANGELONE_INSTRUMENT_CACHE.get(exch)
+    if cached and (time.monotonic() - cached[0]) < _INSTRUMENT_CACHE_TTL_SECONDS:
+        return cached[1]
 
     import httpx
 
@@ -250,20 +254,24 @@ def _load_angelone_instruments(exchange: str) -> dict[str, tuple[str, str]]:
             by_exch[exch_seg][clean] = (tsym, token)
             by_exch[exch_seg][tsym] = (tsym, token)
 
-    _ANGELONE_INSTRUMENT_CACHE.update(by_exch)
-    return _ANGELONE_INSTRUMENT_CACHE.get(exch, {})
+    now_mono = time.monotonic()
+    for seg, mapping in by_exch.items():
+        _ANGELONE_INSTRUMENT_CACHE[seg] = (now_mono, mapping)
+    return by_exch.get(exch, {})
 
 
 def _load_upstox_instruments(exchange: str) -> dict[str, str]:
     """Fetch + cache the {trading_symbol: instrument_key} map for an exchange's equity segment."""
-    exch = exchange.upper()
-    if exch in _UPSTOX_INSTRUMENT_CACHE:
-        return _UPSTOX_INSTRUMENT_CACHE[exch]
-
     import gzip
     import json
+    import time
 
     import httpx
+
+    exch = exchange.upper()
+    cached = _UPSTOX_INSTRUMENT_CACHE.get(exch)
+    if cached and (time.monotonic() - cached[0]) < _INSTRUMENT_CACHE_TTL_SECONDS:
+        return cached[1]
 
     url = _UPSTOX_INSTRUMENTS_URL.format(exchange=exch)
     try:
@@ -279,7 +287,7 @@ def _load_upstox_instruments(exchange: str) -> dict[str, str]:
     for inst in instruments:
         if inst.get("segment") == eq_segment and inst.get("trading_symbol"):
             mapping[inst["trading_symbol"].upper()] = inst["instrument_key"]
-    _UPSTOX_INSTRUMENT_CACHE[exch] = mapping
+    _UPSTOX_INSTRUMENT_CACHE[exch] = (time.monotonic(), mapping)
     return mapping
 
 
@@ -464,7 +472,7 @@ class AngelOneExecutor:
         *,
         paper: bool = False,
         product: str = "DELIVERY",
-        base_url: str = "https://apiconnect.angelone.in",
+        base_url: str = "https://apiconnect.angelbroking.com",
     ):
         if not access_token:
             raise ValueError(
@@ -545,10 +553,11 @@ class AngelOneExecutor:
                     headers=self._headers(),
                     json=payload,
                 )
-                data = resp.json()
+                resp.raise_for_status()
+                data = resp.json() or {}
                 if not data.get("status") and data.get("message"):
                     raise RuntimeError(f"Angel One order rejected: {data.get('message')}")
-                order_id = data.get("data", {}).get("orderid")
+                order_id = (data.get("data") or {}).get("orderid")
         except Exception as exc:
             raise RuntimeError(f"Angel One order placement failed for {order.symbol}: {exc}") from exc
 
@@ -573,7 +582,8 @@ class AngelOneExecutor:
                     f"{self._base_url}/rest/secure/angelbroking/order/v1/getPosition",
                     headers=self._headers(),
                 )
-                data = resp.json()
+                resp.raise_for_status()
+                data = resp.json() or {}
         except Exception as exc:
             raise RuntimeError(f"Angel One get_positions failed: {exc}") from exc
 
@@ -596,7 +606,8 @@ class AngelOneExecutor:
                     f"{self._base_url}/rest/secure/angelbroking/user/v1/getRMS",
                     headers=self._headers(),
                 )
-                data = resp.json()
+                resp.raise_for_status()
+                data = resp.json() or {}
         except Exception as exc:
             raise RuntimeError(f"Angel One get_account failed: {exc}") from exc
 
@@ -620,7 +631,8 @@ class AngelOneExecutor:
                     headers=self._headers(),
                     json={"variety": "NORMAL", "orderid": order_id},
                 )
-                data = resp.json()
+                resp.raise_for_status()
+                data = resp.json() or {}
                 if not data.get("status") and data.get("message"):
                     raise RuntimeError(f"Angel One cancel failed: {data.get('message')}")
         except Exception as exc:
@@ -695,10 +707,11 @@ class ZerodhaExecutor:
                     headers=self._headers(),
                     data=payload,
                 )
-                data = resp.json()
+                resp.raise_for_status()
+                data = resp.json() or {}
                 if data.get("status") == "error":
                     raise RuntimeError(f"Zerodha order rejected: {data.get('message')}")
-                order_id = data.get("data", {}).get("order_id")
+                order_id = (data.get("data") or {}).get("order_id")
         except Exception as exc:
             raise RuntimeError(f"Zerodha order placement failed for {order.symbol}: {exc}") from exc
 
@@ -723,12 +736,13 @@ class ZerodhaExecutor:
                     f"{self._base_url}/portfolio/positions",
                     headers=self._headers(),
                 )
-                data = resp.json()
+                resp.raise_for_status()
+                data = resp.json() or {}
         except Exception as exc:
             raise RuntimeError(f"Zerodha get_positions failed: {exc}") from exc
 
         positions: dict[str, Decimal] = {}
-        net_positions = data.get("data", {}).get("net", []) or []
+        net_positions = (data.get("data") or {}).get("net", []) or []
         for p in net_positions:
             sym = p.get("tradingsymbol")
             qty = p.get("quantity")
@@ -745,12 +759,13 @@ class ZerodhaExecutor:
                     f"{self._base_url}/user/margins",
                     headers=self._headers(),
                 )
-                data = resp.json()
+                resp.raise_for_status()
+                data = resp.json() or {}
         except Exception as exc:
             raise RuntimeError(f"Zerodha get_account failed: {exc}") from exc
 
-        equity = data.get("data", {}).get("equity", {}) or {}
-        available = equity.get("available", {}).get("live_balance", 0)
+        equity = (data.get("data") or {}).get("equity", {}) or {}
+        available = (equity.get("available") or {}).get("live_balance", 0)
         cash = str(available)
         return {
             "equity": cash,
@@ -768,7 +783,8 @@ class ZerodhaExecutor:
                     f"{self._base_url}/orders/regular/{order_id}",
                     headers=self._headers(),
                 )
-                data = resp.json()
+                resp.raise_for_status()
+                data = resp.json() or {}
                 if data.get("status") == "error":
                     raise RuntimeError(f"Zerodha cancel failed: {data.get('message')}")
         except Exception as exc:
@@ -859,7 +875,11 @@ async def fan_out_to_subscribers(
     from uuid import UUID
 
     from app.db.repositories.brokers import BrokerRepo
-    from app.domain.broker_routing import allows_fractional_shares, brokers_for_exchange
+    from app.domain.broker_routing import (
+        allows_fractional_shares,
+        brokers_for_exchange,
+        is_broker_connection_ready,
+    )
     from app.domain.market_data import MarketState
     from app.domain.market_hours import exchange_timezone, get_session_status
     from app.domain.models import OrderIntent, OrderResult
@@ -925,7 +945,7 @@ async def fan_out_to_subscribers(
                     b
                     for name in allowed_brokers
                     for b in broker_rows
-                    if b["broker"] == name and b.get("is_active", True)
+                    if b["broker"] == name and is_broker_connection_ready(b)
                 ),
                 None,
             )

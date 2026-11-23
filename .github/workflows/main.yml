@@ -34,7 +34,7 @@ jobs:
       # pre-existing style in files only incidentally touched. Gating on added
       # files holds all new code to the standard and keeps the baseline green.
       # Adopt the standard repo-wide via a dedicated `chore: format` PR later.
-      - name: Determine added Python files
+      - name: Determine changed Python files
         id: changed
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -46,19 +46,22 @@ jobs:
               BASE="HEAD~1"
             fi
           fi
-          FILES=$(git diff --name-only --diff-filter=A "$BASE"...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ' || true)
-          echo "files=$FILES" >> "$GITHUB_OUTPUT"
-          echo "Added Python files: ${FILES:-<none>}"
+          ADDED=$(git diff --name-only --diff-filter=A "$BASE"...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ' || true)
+          MODIFIED=$(git diff --name-only --diff-filter=ACMR "$BASE"...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ' || true)
+          echo "files=$ADDED" >> "$GITHUB_OUTPUT"
+          echo "modified=$MODIFIED" >> "$GITHUB_OUTPUT"
+          echo "Added Python files: ${ADDED:-<none>}"
+          echo "Changed Python files: ${MODIFIED:-<none>}"
 
       - name: Ruff (lint changed files)
-        if: steps.changed.outputs.files != ''
-        run: ruff check ${{ steps.changed.outputs.files }}
+        if: steps.changed.outputs.modified != ''
+        run: ruff check ${{ steps.changed.outputs.modified }}
 
-      - name: Ruff (format check changed files)
+      - name: Ruff (format check added files)
         if: steps.changed.outputs.files != ''
         run: ruff format --check ${{ steps.changed.outputs.files }}
 
-      - name: Black (format check changed files)
+      - name: Black (format check added files)
         if: steps.changed.outputs.files != ''
         run: black --check ${{ steps.changed.outputs.files }}
 

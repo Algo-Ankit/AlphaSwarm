@@ -113,7 +113,7 @@
 ## 7. Local Dev & Verification Commands
 
 ```bash
-# Fast local test run with uv (verified 131/131 tests pass in ~5s)
+# Fast local test run with uv (verified 135/135 tests pass)
 & "$HOME\.local\bin\uv.exe" run pytest -q
 
 # Run specific suite
@@ -141,3 +141,4 @@ cd frontend && npm install && npm run lint && npx tsc --noEmit && npm run build
 | 2026-11-22 | Indian Brokers | Upstox token reconciliation, multi-broker NSE/BSE routing, `.NS`/`.BO` strip, Angel One `symboltoken` + SmartAPI key | [ADR-015](DECISIONS.md) | `app/domain/broker_routing.py`, `app/services/execution.py`, `app/worker/tasks.py`, `app/api/brokers.py` |
 | 2026-11-22 | Billing & UI | Swarm Tax USD/INR FX conversion (`convert_amount`); `₹`/`$` currency display in `/runs` | [ADR-009](DECISIONS.md) | `app/worker/billing_tasks.py`, `frontend/src/app/runs/page.tsx` |
 | 2026-11-22 | CI/CD & Docs | Frontend CI (`lint`/`build`/`tsc`, Node 24/26.x), `frontend/Dockerfile` (`node:24-alpine`), `frontend/vercel.json`, `deploy-vercel` CD job, Vercel Git link (`prj_jwOUbjex68jkcwwbGzwMZEnZFgOP`), Niyam 3-file doc parity | [ADR-012](DECISIONS.md), [ADR-016](DECISIONS.md) | `.github/workflows/main.yml`, `.github/workflows/deploy.yml`, `frontend/Dockerfile`, `frontend/package.json`, `frontend/vercel.json`, `CLAUDE.md`, `AGENTS.md`, `docs/DECISIONS.md`, `docs/HANDOVER.md` |
+| 2026-11-24 | Senior Review Hardening | Fixed BYOK `llm_config_id` IDOR + SSRF, Alembic `0015` schema drift, `is_broker_connection_ready()` OAuth shadowing, `tasks.py` `asyncio.run`, `approved_at` + `deleteStrategy` `reqVoid`, `reconcile_positions` UTC/suffixes, Swarm Tax `CHECK` guard, Vercel Node `24.x` + untracked `.env.local` | [ADR-009](DECISIONS.md), [ADR-012](DECISIONS.md), [ADR-013](DECISIONS.md), [ADR-014](DECISIONS.md), [ADR-015](DECISIONS.md) | `alembic/versions/0015_reconcile_schema_drift.py`, `app/services/strategy_compiler.py`, `app/api/llm_configs.py`, `app/api/notifications.py`, `app/domain/broker_routing.py`, `app/services/execution.py`, `app/worker/tasks.py`, `app/worker/beat_tasks.py`, `app/worker/billing_tasks.py`, `frontend/package.json`, `frontend/src/lib/api.ts` |

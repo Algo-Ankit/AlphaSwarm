@@ -4,6 +4,8 @@ Users bring their own LLM API keys for NL strategy generation.
 Keys are encrypted at rest with the same Fernet key used for broker keys.
 """
 
+import ipaddress
+from urllib.parse import urlparse
 from uuid import UUID
 
 import asyncpg
@@ -48,6 +50,33 @@ class LLMConfigResponse(BaseModel):
     created_at: str
 
 
+def _validate_llm_base_url(url: str) -> None:
+    """Reject non-HTTPS URLs (except localhost/127.0.0.1 for local Ollama) and private/link-local IPs."""
+    parsed = urlparse((url or "").strip())
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme not in ("http", "https") or not parsed.netloc or not host:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid base_url: must be a valid http/https URL",
+        )
+    if parsed.scheme == "http" and host not in ("localhost", "127.0.0.1"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Non-local LLM endpoints must use https://",
+        )
+    try:
+        ip = ipaddress.ip_address(host)
+        if host != "127.0.0.1" and (
+            ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_loopback
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="LLM base_url cannot target private or link-local IP addresses",
+            )
+    except ValueError:
+        pass  # hostname, not an IP literal
+
+
 def _row_to_response(row: asyncpg.Record) -> LLMConfigResponse:
     try:
         plain = decrypt_key(row["key_encrypted"])
@@ -76,6 +105,7 @@ async def add_llm_config(
         base_url = _PROVIDER_BASE_URLS[body.provider]
     else:
         base_url = body.base_url
+    _validate_llm_base_url(base_url)
 
     repo = LLMConfigRepo(pool, current_user.tenant_id)
     row = await repo.create(

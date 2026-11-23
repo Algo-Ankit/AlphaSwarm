@@ -38,6 +38,7 @@ async def compile_strategy_prompt(
     request: StrategyCreateRequest,
     pool: "asyncpg.Pool | None" = None,
     user_email: str | None = None,
+    tenant_id: object | None = None,
 ) -> tuple[str, str]:
     """
     Generate Python strategy code + a plain-English explanation from an NL prompt.
@@ -62,11 +63,15 @@ async def compile_strategy_prompt(
 
         from app.services.broker_crypto import decrypt_key
 
-        # tenant_id not available here — repo fetch by id only; route already validated ownership
+        if tenant_id is None:
+            raise ValueError("tenant_id is required when resolving a BYOK llm_config_id.")
+        tid = tenant_id if isinstance(tenant_id, UUID) else UUID(str(tenant_id))
+
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM llm_configs WHERE id = $1 AND is_active = TRUE",
+                "SELECT * FROM llm_configs WHERE id = $1 AND tenant_id = $2 AND is_active = TRUE",
                 UUID(request.llm_config_id),
+                tid,
             )
         if row:
             try:
