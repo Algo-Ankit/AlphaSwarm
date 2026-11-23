@@ -9,8 +9,11 @@ name: CD
 #   docker pull ghcr.io/algo-ankit/alphaswarm-web:latest
 # Tag a release (v1.2.3) to also get immutable semver-tagged images.
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
+  push:
     tags: ["v*.*.*"]
   workflow_dispatch:      # allow manual "Run workflow" from the Actions tab
 
@@ -21,6 +24,7 @@ concurrency:
 jobs:
   build-push:
     name: Build & push ${{ matrix.image }}
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -85,7 +89,7 @@ jobs:
 
   deploy-vercel:
     name: Deploy Frontend to Vercel
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'))
     runs-on: ubuntu-latest
     defaults:
       run:
