@@ -7,6 +7,7 @@ Revision ID: 0015
 Revises: 0014
 Create Date: 2026-11-24
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -21,9 +22,7 @@ def upgrade() -> None:
     op.execute(
         "ALTER TABLE strategy_versions ADD COLUMN IF NOT EXISTS explanation TEXT NOT NULL DEFAULT ''"
     )
-    op.execute(
-        "ALTER TABLE backtest_results ADD COLUMN IF NOT EXISTS calmar_ratio NUMERIC(10, 4)"
-    )
+    op.execute("ALTER TABLE backtest_results ADD COLUMN IF NOT EXISTS calmar_ratio NUMERIC(10, 4)")
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS llm_configs (
@@ -44,9 +43,7 @@ def upgrade() -> None:
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_llm_configs_tenant ON llm_configs(tenant_id, is_active)"
     )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS idx_llm_configs_owner ON llm_configs(owner_user_id)"
-    )
+    op.execute("CREATE INDEX IF NOT EXISTS idx_llm_configs_owner ON llm_configs(owner_user_id)")
 
 
 def downgrade() -> None:
