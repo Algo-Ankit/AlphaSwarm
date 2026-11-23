@@ -23,8 +23,7 @@ def upgrade() -> None:
         "ALTER TABLE strategy_versions ADD COLUMN IF NOT EXISTS explanation TEXT NOT NULL DEFAULT ''"
     )
     op.execute("ALTER TABLE backtest_results ADD COLUMN IF NOT EXISTS calmar_ratio NUMERIC(10, 4)")
-    op.execute(
-        """
+    op.execute("""
         CREATE TABLE IF NOT EXISTS llm_configs (
             id            UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
             tenant_id     UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -38,8 +37,7 @@ def upgrade() -> None:
             created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
         )
-        """
-    )
+        """)
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_llm_configs_tenant ON llm_configs(tenant_id, is_active)"
     )
