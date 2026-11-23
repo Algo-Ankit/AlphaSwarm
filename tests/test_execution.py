@@ -40,6 +40,7 @@ def test_get_executor_returns_zerodha_and_angelone():
 
 def test_indian_executors_require_access_token():
     import pytest
+
     from app.services.execution import AngelOneExecutor, ZerodhaExecutor
 
     with pytest.raises(ValueError, match="requires an active session token"):
@@ -51,6 +52,7 @@ def test_indian_executors_require_access_token():
 
 def test_indian_executors_reject_paper_orders():
     import pytest
+
     from app.domain.models import OrderIntent, OrderSide, OrderType
     from app.services.execution import AngelOneExecutor, ZerodhaExecutor
 

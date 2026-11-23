@@ -13,7 +13,11 @@ import pandas as pd
 from app.core.celery_app import celery_app
 from app.core.config import get_settings
 from app.domain.base_strategy import BaseStrategy, ReadOnlyDataFrame, StrategyContext
-from app.domain.broker_routing import brokers_for_exchange, currency_symbol, is_broker_connection_ready
+from app.domain.broker_routing import (
+    brokers_for_exchange,
+    currency_symbol,
+    is_broker_connection_ready,
+)
 from app.domain.market_data import MarketState
 from app.domain.models import (
     OrderIntent,
