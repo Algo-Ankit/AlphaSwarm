@@ -110,6 +110,7 @@ async def create_strategy(
                 request,
                 pool=pool,
                 user_email=current_user.email,
+                tenant_id=current_user.tenant_id,
             )
         except ValueError as exc:
             raise HTTPException(
