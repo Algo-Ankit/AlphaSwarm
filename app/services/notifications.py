@@ -32,6 +32,7 @@ def _to_uuid(v: Any) -> UUID | None:
 
 
 def notification_to_dict(row: Any) -> dict:
+    approved_at = row.get("approved_at") if hasattr(row, "get") else getattr(row, "approved_at", None)
     return {
         "id": str(row["id"]),
         "type": row["type"],
@@ -40,6 +41,7 @@ def notification_to_dict(row: Any) -> dict:
         "entity_type": row["entity_type"],
         "entity_id": str(row["entity_id"]) if row["entity_id"] else None,
         "is_read": row["is_read"],
+        "approved_at": approved_at.isoformat() if approved_at else None,
         "created_at": row["created_at"].isoformat(),
     }
 

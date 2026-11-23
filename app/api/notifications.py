@@ -30,6 +30,7 @@ class NotificationResponse(BaseModel):
     entity_type: str | None
     entity_id: str | None
     is_read: bool
+    approved_at: str | None = None
     created_at: str
 
 
@@ -108,7 +109,9 @@ async def approve_notification(
     if notif.get("approved_at") is not None:
         return  # already approved — idempotent
 
-    await repo.approve(notif_id, current_user.user_id)
+    res = await repo.approve(notif_id, current_user.user_id)
+    if res.endswith("0"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found")
 
     if notif.get("entity_type") == "strategy" and notif.get("entity_id"):
         strat_repo = StrategyRepo(pool, current_user.tenant_id)
@@ -156,3 +159,7 @@ async def approve_notification(
                 await run_repo.mark_failed(run["id"], str(exc))
             except Exception:
                 pass
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Rebalance approved, but could not dispatch run to Celery",
+            ) from exc

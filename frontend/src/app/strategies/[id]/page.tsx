@@ -168,7 +168,7 @@ export default function StrategyDetailPage() {
     setDeleting(true)
     try {
       await api.deleteStrategy(strategy.id)
-      router.push('/strategies')
+      router.push('/')
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : 'Delete failed')
       setDeleting(false)

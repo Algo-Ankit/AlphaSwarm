@@ -88,10 +88,10 @@ celery_app.conf.update(
             "schedule": 30.0,  # every 30 seconds
             "options": {"queue": "beat_tasks"},
         },
-        # End-of-day position reconciliation — 5:10 PM New York (after NYSE close)
+        # End-of-day position reconciliation — 22:10 UTC (17:10 EST / 18:10 EDT, after NYSE close)
         "reconcile-positions": {
             "task": "app.worker.beat_tasks.reconcile_positions",
-            "schedule": crontab(hour=17, minute=10),
+            "schedule": crontab(hour=22, minute=10),
             "options": {"queue": "beat_tasks"},
         },
         # Purge long-expired refresh tokens — daily at 03:15 UTC
