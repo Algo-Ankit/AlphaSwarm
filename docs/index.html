@@ -203,13 +203,30 @@
   .script .body .quote{color:var(--text);border-left:2px solid var(--accent);padding-left:1rem;font-size:1.02rem;line-height:1.55}
 
   /* ── Footer ── */
-  footer{padding:3rem 0 4rem;color:var(--muted);font-size:.9rem}
-  .flinks{display:flex;flex-wrap:wrap;gap:.7rem;margin:1.2rem 0}
-  .flink{font-family:var(--mono);font-size:12.5px;text-decoration:none;color:var(--text);
-    border:1px solid var(--border);background:var(--surface);border-radius:9px;padding:.6rem .95rem;
-    display:inline-flex;gap:.5rem;align-items:center;transition:border-color .2s,color .2s}
+  footer{padding:3rem 0 4rem;color:var(--muted);font-size:.9rem;border-top:1px solid var(--border);margin-top:1rem}
+  .fgrid{display:grid;grid-template-columns:1fr;gap:1.5rem;margin-bottom:2rem}
+  @media (min-width:680px){.fgrid{grid-template-columns:1.35fr 1fr;align-items:start}}
+  .fbrand{font-weight:800;font-size:1.15rem;letter-spacing:-.02em;color:var(--text);margin:0 0 .5rem}
+  .fbrand span{color:var(--accent)}
+  .fnote{margin:0;max-width:48ch;color:var(--muted);font-size:.9rem;line-height:1.55}
+  .fpillars{display:flex;flex-wrap:wrap;gap:.45rem;margin-top:1rem;font-family:var(--mono);font-size:11px}
+  .fpillar{border:1px solid var(--border);background:var(--surface);border-radius:100px;
+    padding:.28rem .7rem;color:var(--muted)}
+  .fpillar b{color:var(--text);font-weight:600}
+  .flinks{display:flex;flex-wrap:wrap;gap:.6rem;margin:0}
+  .flink{font-family:var(--mono);font-size:12px;text-decoration:none;color:var(--text);
+    border:1px solid var(--border);background:var(--surface);border-radius:9px;padding:.55rem .85rem;
+    display:inline-flex;gap:.45rem;align-items:center;cursor:pointer;transition:border-color .2s,color .2s}
   .flink:hover{border-color:var(--accent-line);color:var(--accent)}
   .flink .ar{color:var(--accent)}
+  .fcolophon{display:flex;flex-wrap:wrap;justify-content:space-between;gap:.6rem 1.5rem;
+    padding-top:1.4rem;border-top:1px solid var(--border);font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+  .fcolophon p{margin:0;max-width:none}
+  @media print{
+    .ticker,.toggle,nav.toc,.flinks{display:none!important}
+    .layout{grid-template-columns:1fr!important}
+    body{background:#fff;color:#111}
+  }
 
   /* ── Theme toggle ── */
   .toggle{position:fixed;bottom:1.2rem;right:1.2rem;z-index:50;width:42px;height:42px;border-radius:50%;
@@ -478,13 +495,28 @@
       </section>
 
       <footer>
-        <p>This page is the presentation layer over the full engineering handbook — the source-traceable version, with per-subsystem file paths, the complete migration story, and the bug postmortems, lives in the repo.</p>
-        <div class="flinks">
-          <a class="flink" href="https://github.com/Algo-Ankit/AlphaSwarm" target="_blank" rel="noopener"><span class="ar">▸</span> github.com/Algo-Ankit/AlphaSwarm</a>
-          <a class="flink" href="https://github.com/Algo-Ankit/AlphaSwarm/blob/main/docs/AlphaSwarm_The_Definitive_Guide.md" target="_blank" rel="noopener"><span class="ar">▸</span> The Definitive Handbook</a>
-          <a class="flink" href="https://github.com/Algo-Ankit/AlphaSwarm/blob/main/README.md" target="_blank" rel="noopener"><span class="ar">▸</span> README</a>
+        <div class="fgrid">
+          <div>
+            <p class="fbrand">Alpha<span>Swarm</span> · Engineering Handbook</p>
+            <p class="fnote">Non-custodial AI quant infrastructure. Your broker holds your capital, your key powers the AI, and every order passes a single fail-closed risk gate.</p>
+            <div class="fpillars">
+              <span class="fpillar"><b>BYOB</b> · Zero Custody</span>
+              <span class="fpillar"><b>BYOK</b> · Zero Token Markup</span>
+              <span class="fpillar"><b>OOS</b> · Honest Scorecards</span>
+            </div>
+          </div>
+          <div class="flinks" aria-label="Handbook quick links">
+            <a class="flink" href="#"><span class="ar">↑</span> Back to top</a>
+            <a class="flink" href="#arch"><span class="ar">▸</span> Architecture</a>
+            <a class="flink" href="#security"><span class="ar">▸</span> Security</a>
+            <a class="flink" href="#glossary"><span class="ar">▸</span> Quant Glossary</a>
+            <button type="button" class="flink" onclick="window.print()"><span class="ar">▸</span> Save as PDF</button>
+          </div>
         </div>
-        <p style="font-family:var(--mono);font-size:12px;color:var(--faint)">Built by Ankit Anand Singh · migrations 0001 → 0014 · MIT</p>
+        <div class="fcolophon">
+          <p>Built by Ankit Anand Singh · AlphaSwarm</p>
+          <p>Software for systematic research &amp; order routing — not a broker-dealer or investment advisor.</p>
+        </div>
       </footer>
     </main>
   </div>
